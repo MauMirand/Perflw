@@ -1,0 +1,146 @@
+{
+  "about": "Reference key points for the Learning key point benchmark. Written by Claude Opus 5.5 (not Claude Sonnet) on 2026-11-20 as the target a strong model should reach. For each section: 'must' are the sentences a student is examined on; 'ok' are also worth keeping; 'noise' are filler, meta-talk or anecdotes that must never be chosen. 'ideas' are the document's key ideas for the AI overview, each with the terms that show it is covered.",
+  "files": {
+    "Supply and Demand.md": {
+      "sections": {
+        "1": {
+          "must": ["Demand is the quantity of a good that consumers are willing and able to buy at each possible price during a given period."],
+          "ok": ["Willingness alone is not enough; a buyer must also have the money to pay."],
+          "noise": ["In this part of the lecture we look at the buyer's side of the market.", "Many students mix up demand with the quantity demanded, so read this section twice."]
+        },
+        "1.1": {
+          "must": ["When the price of a good rises, the quantity demanded falls, other things equal.", "The demand curve therefore slopes downward from left to right."],
+          "ok": ["Economists explain this with the substitution effect and the income effect.", "A higher price makes other goods relatively cheaper, so buyers switch to them."],
+          "noise": []
+        },
+        "1.2": {
+          "must": ["A change in price moves buyers along the demand curve, but a change in any other factor shifts the whole curve.", "The main shifters are income, the prices of related goods, tastes, expectations and the number of buyers."],
+          "ok": ["For a normal good, higher income increases demand; for an inferior good, higher income decreases it.", "Substitutes, such as tea and coffee, move together: if coffee becomes more expensive, demand for tea rises."],
+          "noise": ["We will see many examples of this in the seminar."]
+        },
+        "2": {
+          "must": ["Supply is the quantity of a good that producers are willing and able to sell at each possible price."],
+          "ok": ["Producers respond to profit, and profit depends on price and cost."],
+          "noise": ["Let us now turn to sellers."]
+        },
+        "2.1": {
+          "must": ["As the price of a good rises, the quantity supplied rises, other things equal.", "Input prices, technology, taxes and the number of sellers shift the supply curve."],
+          "ok": ["A higher price covers the higher marginal cost of producing extra units.", "The supply curve slopes upward."],
+          "noise": []
+        },
+        "3": {
+          "must": ["The equilibrium price is the price at which the quantity demanded equals the quantity supplied."],
+          "ok": ["At this price the market clears and there is no pressure for the price to change."],
+          "noise": ["Markets bring buyers and sellers together.", "This idea goes back to Alfred Marshall, who drew the famous scissors diagram in 1890."]
+        },
+        "3.1": {
+          "must": ["Below the equilibrium price, the quantity demanded exceeds the quantity supplied, which creates a shortage.", "Above the equilibrium price a surplus appears, and sellers cut prices to get rid of unsold stock."],
+          "ok": ["Sellers then raise prices until the shortage disappears.", "Price ceilings set below equilibrium cause lasting shortages, as rent control often shows."],
+          "noise": []
+        },
+        "4": {
+          "must": ["The price elasticity of demand equals the percentage change in quantity demanded divided by the percentage change in price.", "Demand is elastic when this value is greater than 1 and inelastic when it is less than 1."],
+          "ok": ["Elasticity measures how strongly one variable responds to a change in another.", "Goods with few substitutes, like insulin, have inelastic demand."],
+          "noise": ["Remember to use absolute values in exam answers."]
+        }
+      },
+      "ideas": [
+        { "idea": "Demand falls as price rises (law of demand)", "terms": ["demand", "price", "falls|downward|decreases"] },
+        { "idea": "Supply rises as price rises (law of supply)", "terms": ["supplied|supply", "rises|upward"] },
+        { "idea": "Equilibrium where quantity demanded equals quantity supplied", "terms": ["equilibrium", "equal"] },
+        { "idea": "Shortage below and surplus above equilibrium", "terms": ["shortage", "surplus"] },
+        { "idea": "Price changes move along a curve; other factors shift it", "terms": ["shift", "curve|income|tastes|factor"] },
+        { "idea": "Price elasticity of demand measures responsiveness to price", "terms": ["elastic"] }
+      ]
+    },
+    "The Industrial Revolution.md": {
+      "sections": {
+        "1": {
+          "must": ["The Industrial Revolution began in Britain around 1760 and spread to Europe and North America in the following century.", "It was the shift from hand production to machine production in factories."],
+          "ok": ["Britain had large coal and iron deposits, a stable banking system and access to raw materials from its colonies."],
+          "noise": ["Historians still debate which of these factors mattered most."]
+        },
+        "1.1": {
+          "must": ["The enclosure movement turned open fields into private farms.", "Workers who were no longer needed on farms moved to towns, which supplied labour for the new factories."],
+          "ok": ["Crop rotation and selective breeding raised food output.", "Before industry could grow, farming had to feed more people with fewer workers."],
+          "noise": ["My grandfather's village in Yorkshire lost half its families this way."]
+        },
+        "2": {
+          "must": ["In textiles, the spinning jenny of 1764 let one worker spin eight threads at once.", "These inventions made cotton the leading British industry by 1830."],
+          "ok": ["The water frame and the power loom moved cloth production into large mills.", "New machines raised output far beyond what skilled hands could achieve."],
+          "noise": []
+        },
+        "2.1": {
+          "must": ["James Watt improved the steam engine in 1769 by adding a separate condenser, which made it far more efficient.", "Steam engines freed factories from rivers, because they no longer needed water wheels for power."],
+          "ok": ["Steam also drove the first railways; the Liverpool and Manchester Railway opened in 1830.", "Railways cut transport costs and connected national markets."],
+          "noise": ["It is a fascinating story that deserves a whole course."]
+        },
+        "3": {
+          "must": ["A new working class emerged that sold its labour for wages.", "A growing middle class of factory owners, merchants and professionals gained wealth and political influence."],
+          "ok": ["Industrialization changed how and where people lived."],
+          "noise": []
+        },
+        "3.1": {
+          "must": ["Urbanization is the growth of the share of people living in towns and cities.", "Manchester grew from about 25,000 people in 1772 to over 300,000 by 1850."],
+          "ok": ["Housing was crowded and sanitation was poor, so diseases such as cholera spread easily.", "Cities grew very quickly as workers left the countryside."],
+          "noise": []
+        },
+        "3.2": {
+          "must": ["The Factory Act of 1833 banned work for children under nine in textile mills.", "Factory work meant long hours, often 12 to 14 hours a day, six days a week."],
+          "ok": ["Children worked in mills and mines because they were cheap and small enough to fit between machines.", "Trade unions formed to bargain for better pay and shorter hours."],
+          "noise": []
+        }
+      },
+      "ideas": [
+        { "idea": "Began in Britain around 1760: hand production to machine production", "terms": ["britain", "1760|machine"] },
+        { "idea": "Enclosure and farming changes freed workers for factories", "terms": ["enclosure|farm", "factor|town"] },
+        { "idea": "Textile inventions such as the spinning jenny", "terms": ["spinning jenny|textile|cotton"] },
+        { "idea": "Watt's steam engine and railways", "terms": ["steam", "watt|railway"] },
+        { "idea": "Rapid urbanization with poor living conditions", "terms": ["urban|cities|city", "crowded|sanitation|cholera|disease|poor living|living conditions"] },
+        { "idea": "Harsh working conditions, child labour and the Factory Act", "terms": ["child|factory act", "hours|work"] }
+      ]
+    },
+    "Chemical Bonding.md": {
+      "sections": {
+        "1": {
+          "must": ["Atoms bond to reach a more stable, lower-energy arrangement of electrons.", "Most atoms are most stable with eight electrons in their outer shell, which is called the octet rule."],
+          "ok": ["Hydrogen and helium are exceptions, being stable with two."],
+          "noise": ["You will need this rule for every topic that follows."]
+        },
+        "2": {
+          "must": ["Ionic bonding is the electrostatic attraction between oppositely charged ions.", "It forms when a metal transfers one or more electrons to a non-metal."],
+          "ok": ["Ionic compounds have high melting points and conduct electricity when molten or dissolved, but not as solids.", "Sodium chloride is the classic example: sodium gives one electron to chlorine, forming Na+ and Cl- ions.", "Their ions are held in a giant lattice."],
+          "noise": []
+        },
+        "3": {
+          "must": ["A covalent bond is a shared pair of electrons between two non-metal atoms.", "Simple covalent molecules such as water and carbon dioxide have low melting points, because only weak forces act between the molecules."],
+          "ok": ["Atoms can share one, two or three pairs, giving single, double and triple bonds.", "Triple bonds are shorter and stronger than single bonds."],
+          "noise": []
+        },
+        "3.1": {
+          "must": ["When two atoms with different electronegativities share electrons, the shared pair is pulled toward the more electronegative atom.", "Electronegativity increases across a period and decreases down a group."],
+          "ok": ["This creates a polar bond with a partial negative charge on one end and a partial positive charge on the other.", "A molecule with polar bonds can still be non-polar overall if its shape is symmetrical, as in carbon dioxide.", "Fluorine has the highest value, 4.0 on the Pauling scale."],
+          "noise": []
+        },
+        "4": {
+          "must": ["In a metal, the outer electrons leave their atoms and form a sea of delocalized electrons around a lattice of positive ions.", "This structure explains why metals conduct heat and electricity."],
+          "ok": ["Metals are malleable because layers of ions can slide over each other without breaking the bond."],
+          "noise": ["Copper is used for electrical wiring for exactly this reason."]
+        },
+        "5": {
+          "must": ["Intermolecular forces act between molecules and are much weaker than the bonds inside them.", "Hydrogen bonds form when hydrogen is bonded to nitrogen, oxygen or fluorine, and they give water its unusually high boiling point of 100 °C."],
+          "ok": ["London dispersion forces exist between all molecules and grow stronger with more electrons.", "Dipole-dipole forces act between polar molecules."],
+          "noise": ["Students often confuse these forces with covalent bonds, so check your notes carefully."]
+        }
+      },
+      "ideas": [
+        { "idea": "Atoms bond to become stable (octet rule)", "terms": ["stable|octet"] },
+        { "idea": "Ionic bonds: electron transfer, attraction between ions", "terms": ["ionic", "transfer|ions"] },
+        { "idea": "Covalent bonds: shared electron pairs", "terms": ["covalent", "shar"] },
+        { "idea": "Polarity from electronegativity differences", "terms": ["polar", "electronegativ"] },
+        { "idea": "Metallic bonds: delocalized electrons explain conductivity", "terms": ["metal", "delocalized|sea|conduct"] },
+        { "idea": "Intermolecular forces are weaker; hydrogen bonds raise boiling points", "terms": ["intermolecular|hydrogen bond", "weak|boiling"] }
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "perflw",
+  "productName": "Perflw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Perflw: an offline-first desktop planner with learning, chat and AI automation",
+  "license": "MIT",
+  "author": "2Pyrox",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/2Pyrox/Perflw.git"
+  },
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "test:electron": "node test/electron-smoke.js",
+    "test:automation": "node test/automation-smoke.js",
+    "test:learning": "node test/learning-study-smoke.js",
+    "build": "node scripts/build.js",
+    "setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
+    "test:pdf": "node test/pdf-viewer-smoke.js",
+    "bench:learning": "node test/learning-bench.js"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^38.3.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "5.4.296"
+  }
+}

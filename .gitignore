@@ -1,0 +1,23 @@
+# Dependencies and builds
+node_modules/
+dist/
+
+# Local results and scratch files
+test/fixtures/learning-bench/results/
+*.log
+*.tmp
+.img-live.js
+.ocr-try.js
+
+# Personal and machine files (never committed)
+.env
+.env.*
+desktop.ini
+Thumbs.db
+.DS_Store
+.claude/
+.vscode/
+.idea/
+
+# App data never lives in the project: accounts, uploaded files, notes and keys are stored in
+# %APPDATA%\Perflw and %LOCALAPPDATA%\Perflw Prototype on the computer that runs the app.
