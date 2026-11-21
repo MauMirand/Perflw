@@ -34,9 +34,10 @@ const NOT_FOUND_MESSAGE = 'Your question regarding the file is not included in t
 
 /* ocr(model, image, signal) → plain text: the local OCR model, called directly (no instructions: OCR models take a task
    prompt only). Injected by tests; the default talks to local Ollama. */
-function ollamaOcr() {
+function ollamaOcr({ threads = null } = {}) {
   const runtime = require('./automation/ollama').createOllamaRuntime();
-  return async (model, image, signal) => (await runtime.chat({ model, name: 'Learning Image Reader', messages: [{ role: 'user', content: 'Text Recognition:', images: [image.data] }], options: { num_ctx: 8192, temperature: 0 }, keepAlive: '45s', signal })).text;
+  const options = { num_ctx: 8192, temperature: 0, ...(threads ? { num_thread: threads } : {}) };
+  return async (model, image, signal) => (await runtime.chat({ model, name: 'Learning Image Reader', messages: [{ role: 'user', content: 'Text Recognition:', images: [image.data] }], options, keepAlive: '45s', signal })).text;
 }
 
 function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, ocr = ollamaOcr(), files = createFileReader() }) {
@@ -208,7 +209,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
           const prompt = `Picture from the study file "${file.name}" (${where}). Read it in the exact format of the Learning image reading skill.`;
           const reading = reader.ocr
             ? intel.ocrReading(await ocr(reader.model, picture, controller.signal))
-            : parseReading(await ecosystem.runAgent(userId, { agent: { id: reader.id, name: reader.name }, prompt, images: [picture], signal: controller.signal, workflow: null }));
+            : parseReading(await ecosystem.runAgent(userId, { agent: { id: reader.id, name: reader.name }, prompt, images: [picture], signal: controller.signal, workflow: null, temperature: 0 }));
           if (!reading.none && !reading.title && !reading.text) reading.none = true;
           write(imageCacheFile(userId, img.key), `${JSON.stringify({ ...reading, model: reader.model, at: new Date().toISOString() })}\n`);
           saved++;
@@ -273,8 +274,9 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
     setEnrich(userId, subjectId, docId, { enrichStatus: 'running', enrichError: '' }); notify('running');
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), ENRICH_TIMEOUT);
     try {
-      const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt: enrichPrompt(analysis), signal: controller.signal, workflow: null });
+      const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt: enrichPrompt(analysis), signal: controller.signal, workflow: null, temperature: 0.2 });
       const parsed = parseEnrichment(text);
+      parsed.keyPoints = coverSections(grounded(parsed.keyPoints, analysis), analysis);
       if (!parsed.overview) throw new Error('The analyzer did not return an overview.');
       const saved = setEnrich(userId, subjectId, docId, { enrichment: { ...parsed, model: agent.model, at: new Date().toISOString() }, enrichStatus: 'ready', enrichError: '' });
       if (saved) { writeDocMarkdown(userId, subjectId, saved.doc, analysis); rebuildSubject(userId, subjectId, saved.state); }
@@ -296,7 +298,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       const headings = [];
       for (const [i, window] of windows.entries()) {
         const prompt = `Task: find the heading lines of this study file. Follow the Learning document structure skill and its output format exactly; this request does not use the OVERVIEW / KEY POINTS format.\nStudy file: ${file.name}${windows.length > 1 ? ` (part ${i + 1} of ${windows.length})` : ''}\n\nSource lines:\n${window}\n\nReply with "<level> | <line number>" lines, or NONE.`;
-        const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal: controller.signal, workflow: null, skills: ['learning-document-structure'] });
+        const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal: controller.signal, workflow: null, temperature: 0, skills: ['learning-document-structure'] });
         headings.push(...intel.parseStructure(text, lines));
       }
       if (headings.filter(h => h.level === 1).length < 2 && headings.length < 3) { setEnrich(userId, subjectId, docId, { structureStatus: 'none' }); return null; }
@@ -330,6 +332,32 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
     const share = text => (total <= budget ? text : text.slice(0, Math.max(300, Math.floor(budget * text.length / total))));
     const parts = sections.map((s, i) => `[${s.number || '-'}] ${s.title}\n${share(bodies[i])}`);
     return `${head}${parts.join('\n\n')}\n\nWrite the OVERVIEW and KEY POINTS for this file in the exact format of the Learning key points skill. Cover every main section.`;
+  }
+  /* AI key points whose content words mostly do not occur in the file are dropped (a small model rewords and
+     sometimes invents, e.g. "late 18th century" for a file that says 1760); at least the four best grounded are kept. */
+  // Connecting words a summary adds without adding facts ("involves", "leads to", "achieve") do not count against it.
+  const CONNECTING = new Set(intel.terms('achieve achieves involve involves involving occur occurs lead leads led leading include includes including result results resulting mark marks depend depends describe described characterize characterized enable enables enabling increase increases increased significant significantly various due influence influenced affect affected help helps allow allows cause causes make makes making become becomes play plays role key main important crucial process overall several many often typically especially particularly within across through example examples such like also'));
+  function grounded(points, analysis) {
+    const source = new Set(intel.terms(analysis.chunks.map(c => `${c.heading} ${c.text}`).join(' ')));
+    const share = p => { const t = intel.terms(p.replace(/\[[^\]]*\]/g, '')).filter(x => !CONNECTING.has(x)); return t.length ? t.filter(x => source.has(x)).length / t.length : 0; };
+    const scored = points.map((p, i) => ({ p, i, s: share(p) }));
+    const kept = scored.filter(x => x.s >= 0.6);
+    const floor = scored.slice().sort((a, b) => b.s - a.s).slice(0, Math.min(4, scored.length));
+    return [...new Map([...kept, ...floor].sort((a, b) => a.i - b.i).map(x => [x.i, x.p])).values()];
+  }
+  /* Every main section reaches the key ideas: a section the AI did not cite gets its own best key point from the
+     file (in the file's words), so a small model that skips a part never leaves a gap. At most 8 points. */
+  function coverSections(points, analysis) {
+    const cited = new Set(points.flatMap(p => [...p.matchAll(/\[([\d.,\s]+)\]/g)].flatMap(m => m[1].split(',').map(x => x.trim().split('.')[0]))));
+    const add = [];
+    for (const s of analysis.sections.filter(x => x.level === 1 && x.number)) {
+      if (cited.has(s.number)) continue;
+      const point = s.keyPoints[0] || s.description; if (!point) continue;
+      add.push({ at: Number(s.number), text: `${point.replace(/…$/, '')} [${s.number}]` });
+    }
+    if (!add.length) return points;
+    const order = p => Number((p.match(/\[(\d+)/) || [])[1] || 99);
+    return [...points.map(text => ({ at: order(text), text })), ...add].sort((a, b) => a.at - b.at).map(x => x.text).slice(0, 8);
   }
   function parseEnrichment(text) {
     const body = String(text || '').replace(/\r/g, '');
@@ -427,18 +455,32 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
     }
     return [];
   }
-  function parseAnswer(text) {
+  function parseAnswer(text, question = '') {
     const body = String(text || '').replace(/\r/g, '').trim();
-    const answer = ((body.match(/ANSWER:\s*([\s\S]*?)(?:\n\s*NOTES?:|$)/i) || [])[1] || '').trim();
-    const notFound = /NOT_IN_FILE/.test(body) && answer.replace(/NOT_IN_FILE/g, '').trim().length < 40;
+    const labelled = /ANSWER:/i.test(body);
+    // A model that ignores the format still gives a usable answer; anything after NOTES: is never part of it.
+    const raw = labelled ? ((body.match(/ANSWER:\s*([\s\S]*?)(?:\n\s*NOTES?:|$)/i) || [])[1] || '') : body.replace(/(^|\n)\s*NOTES?:[\s\S]*$/i, '');
+    const answer = raw.replace(/(^|\n)\s*NOTES?:[\s\S]*$/i, '').replace(/\bNOT_IN_FILE\b/g, '').replace(/^\s*ANSWER:\s*/i, '').trim();
+    const plain = s => String(s).replace(/\[\d{1,2}\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
+    const meaning = plain(answer);
+    // Nothing but labels, citations or NOT_IN_FILE, or the question said back: no answer.
+    const notFound = (/NOT_IN_FILE/.test(body) && meaning.length < 40) || meaning.length < 2 || (question && meaning === plain(question));
     if (notFound) return { notFound: true };
-    const noteText = ((body.match(/\n\s*NOTES?:\s*([\s\S]*)$/i) || [])[1] || '');
+    const noteText = ((body.match(/(?:^|\n)\s*NOTES?:\s*([\s\S]*)$/i) || [])[1] || '');
     const notes = noteText.split('\n').map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(line => line.length > 8 && !/NOT_IN_FILE/.test(line)).slice(0, 3);
-    // A model that ignores the format still gives a usable answer; the labels it cites stay checkable.
-    return { notFound: false, answer: (answer || body.replace(/NOTES?:[\s\S]*$/i, '').trim()).slice(0, 6000), notes };
+    return { notFound: false, answer: answer.slice(0, 6000), notes };
   }
   /* Keeps only citations to labels that exist; returns the sources actually cited (or all, if none were). */
+  /* Small models copy excerpt headers ("[1] Cell Biology › 1.2 Transport …") or cite section numbers ("[1.1]") into
+     the answer; those are removed so only real labels remain. */
+  function tidyAnswer(answer) {
+    return String(answer)
+      .replace(/\[(\d{1,2})\]\s*[^\n.\[\]]{0,80}›[^\n\[\]]{0,120}?(?=[\n:]|$)/g, '[$1]')
+      .replace(/\[\d{1,2}(?:\.\d{1,2})+\]/g, '')
+      .replace(/[ \t]{2,}/g, ' ').replace(/\s+([.,;:])/g, '$1').trim();
+  }
   function sourcesOf(answer, hits) {
+    answer = tidyAnswer(answer);
     const cited = new Set([...String(answer).matchAll(/\[(\d{1,2})\]/g)].map(m => Number(m[1])).filter(n => n >= 1 && n <= hits.length));
     const list = (cited.size ? [...cited].sort((a, b) => a - b) : hits.map((_, i) => i + 1)).map(n => ({ label: n, ...pick(hits[n - 1]) }));
     return { clean: String(answer).replace(/\[(\d{1,3})\]/g, (all, n) => (Number(n) >= 1 && Number(n) <= hits.length ? all : '')), list };
@@ -448,6 +490,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   // ───────── what the student teaches: facts (saved as notes "From you") and answer preferences (per account)
   const USER_DOC = 'your-notes';
   const MAX_PREFERENCES = 12;
+  const ASKING = new Set(intel.terms('list things thing kinds kind types type ways way steps step start started begin began happen happened mean means meaning important example examples work works cause causes causing effect effects role purpose reason reasons'));
   const STYLE_NOTE = {
     simpler: 'Style: explain it more simply: plain words, short sentences, one idea at a time. Do not add facts that are not in the excerpts.',
     deeper: 'Style: explain it in more detail: the steps, the how and the why, as far as the excerpts allow. Do not add facts that are not in the excerpts.'
@@ -498,7 +541,9 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
     const lines = prior.map((turn, i) => `Q${i + 1}: ${turn.question}\nA${i + 1}: ${turn.answer}`);
     return `Earlier in this conversation (context only: use it to understand what the new question refers to; every fact must still come from the excerpts below):\n${lines.join('\n')}\n\n`;
   }
-  async function ask(userId, { subjectId, fileId = null, question, requestId, history = [] }, onEvent = () => {}) {
+  /* about = { quote, page }: the question is about an area the student marked on the open file (the comment tool).
+     The marked text is file text, so it is the first excerpt and the answer explains it. */
+  async function ask(userId, { subjectId, fileId = null, question, requestId, history = [], about = null }, onEvent = () => {}) {
     workspace.listTopics(userId, subjectId);
     const q = String(question || '').trim();
     if (!q) throw new Error('Write a question first.');
@@ -512,8 +557,10 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       const pendingFiles = Object.values(state.files).filter(f => f.status === 'pending').length;
       const current = fileId ? docs.find(d => d.doc.fileIds.includes(fileId)) || null : null;
 
+      const marked = about && typeof about.quote === 'string' && about.quote.trim()
+        ? { quote: about.quote.replace(/\s+/g, ' ').trim().slice(0, 1500), page: Number.isInteger(about.page) && about.page > 0 ? about.page : null } : null;
       // The student teaches instead of asking: a fact or a preference. Nothing is saved until they confirm the chip.
-      const teach = intel.learningIntent(q);
+      const teach = marked ? null : intel.learningIntent(q);
       if (teach) {
         const answer = teach.kind === 'preference'
           ? 'Got it. Save this as a preference and I will answer that way from now on, in every subject.'
@@ -529,25 +576,53 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       const style = intel.answerStyle(q);
 
       // Casual message: a normal, short reply. No lookup, no sources, no notes.
-      if (intel.isSmallTalk(q)) return await chat(userId, q, subjectId, files, stage, onEvent, controller.signal);
+      if (!marked && intel.isSmallTalk(q)) return await chat(userId, q, subjectId, files, stage, onEvent, controller.signal);
 
       // A follow-up ("what is it made of?", "and the second one?") is read together with the previous question.
       const prior = priorTurns(userId, subjectId, history);
       const previous = prior[prior.length - 1] || null;
       const followUp = Boolean(previous) && !intel.isOverviewQuestion(q) && intel.isFollowUp(q);
-      const query = followUp ? `${q} ${previous.question}` : q;
+      const query = marked ? `${q} ${marked.quote}` : followUp ? `${q} ${previous.question}` : q;
       const prefer = current ? current.id : followUp ? previous.docId : null;
 
       // Agent instruction input → File Data and Information Center
       stage('search', followUp ? 'Searching with your previous question' : 'Searching the information center');
       let hits; let runs = 1;
-      const pageRef = q.match(/\b(page|slide|pg|p)\.?\s*#?\s*(\d{1,4})\b/i);
-      if (pageRef) hits = pageHits(Number(pageRef[2]), current ? [current, ...files.filter(d => d !== current)] : files);
+      const pageRef = marked ? null : q.match(/\b(page|slide|pg|p)\.?\s*#?\s*(\d{1,4})\b/i);
+      let markedHit = null;
+      if (marked) {
+        let openName = ''; try { openName = fileId ? workspace.topicFile(userId, fileId).name : ''; } catch { openName = ''; }
+        markedHit = current
+          ? { docId: current.id, docTitle: current.title, fileName: current.sources[current.sources.length - 1], number: '', heading: 'Marked area', page: marked.page, text: marked.quote }
+          : { docId: null, docTitle: openName.replace(/\.[^.]+$/, '') || 'Open file', fileName: openName || 'file', number: '', heading: 'Marked area', page: marked.page, text: marked.quote };
+        // [1] the marked text itself, then what the file says around it (that page, then the closest matches).
+        const around = [...(marked.page && current ? pageHits(marked.page, [current]) : []), ...intel.search(query, docs, { mode: 'strict', preferDocId: current ? current.id : null }).hits];
+        const seen = new Set(); hits = [markedHit];
+        for (const h of around) { const key = `${h.docId}|${h.heading}|${h.text.slice(0, 40)}`; if (!seen.has(key) && hits.length < 7) { seen.add(key); hits.push(h); } }
+      } else if (pageRef) hits = pageHits(Number(pageRef[2]), current ? [current, ...files.filter(d => d !== current)] : files);
       // "What is page 7 about": that page's own sections and pictures are the excerpts.
       const pageNo = pageRef && hits && hits.length ? Number(pageRef[2]) : null;
       const pageWord = pageRef && pageRef[1].toLowerCase() === 'slide' ? 'slide' : 'page';
-      if (pageNo) { /* hits are the page */ }
-      else if (intel.isOverviewQuestion(q)) hits = overviewHits((current || files[0]).analysis, (current || files[0]).doc);
+      const main = current || files[0];
+      // "Explain page 1" on a file without pages (Markdown, text): the file's outline.
+      const pageless = Boolean(pageRef && !pageNo && main && !main.analysis.sections.some(s => s.page));
+      // "What does section 1.2 talk about?": that numbered section (and its subsections) of the open file.
+      const sectionRef = !marked && !pageRef ? q.match(/\b(?:section|sec\.?|part|chapter|unit|topic|number|no\.?)\s*#?\s*(\d{1,2}(?:\.\d{1,2}){0,2})\b/i) : null;
+      const sectionList = sectionRef && main ? main.analysis.chunks.filter(c => c.number && (c.number === sectionRef[1] || c.number.startsWith(`${sectionRef[1]}.`))).slice(0, 6)
+        .map(c => ({ docId: main.id, docTitle: main.title, fileName: main.sources[main.sources.length - 1], number: c.number, heading: c.heading, page: c.page, text: c.text })) : [];
+      const quiz = !marked && intel.isQuizRequest(q);
+      // "Simpler", "an example", "I don't get it" after an answer: the same excerpts, explained again.
+      const rephrase = Boolean(followUp && previous && (style || /\b(example|again|get it|understand|confus|lost|mean)\b/i.test(q)));
+      if (marked || pageNo) { /* hits are the marked area, or the page */ }
+      else if (pageless) hits = overviewHits(main.analysis, main.doc);
+      else if (sectionList.length) hits = sectionList;
+      else if (quiz) {
+        const topic = q.replace(/\b(quiz(zes)?|me|practice|questions?|test|problems?|exam|review|flash ?cards?|mock|reviewer|give|make|create|write|some|a few|\d+|about|on|for|of|this|the|file|lesson|please|can|you)\b/gi, ' ');
+        hits = intel.terms(topic).length ? intel.search(topic, docs, { mode: 'strict', preferDocId: prefer }).hits : [];
+        if (!hits.length && main) hits = overviewHits(main.analysis, main.doc);
+      }
+      else if (rephrase && previous.hits.length) hits = previous.hits.filter(hit => docs.some(d => d.id === hit.docId));
+      else if (intel.isOverviewQuestion(q)) hits = overviewHits(main.analysis, main.doc);
       else {
         hits = intel.search(query, docs, { mode: 'strict', preferDocId: prefer }).hits;
         if (!hits.length && followUp) hits = intel.search(q, docs, { mode: 'strict', preferDocId: prefer }).hits;
@@ -568,20 +643,38 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
           return { answer: picked.map(p => `${p.s} [${used.indexOf(p.hit) + 1}]`).join(' '), notes: picked.slice(0, 2).map(p => p.s), hits: used, extractive: true };
         }
         stage('answer', label);
-        const prompt = `${preferenceBlock(prefs)}${conversationBlock(prior)}Question: ${q}\n${style ? `${STYLE_NOTE[style]}\n` : ''}${current ? `The student is reading: ${current.title} (${current.sources[current.sources.length - 1]})\n` : ''}${pageNo ? `The question is about ${pageWord} ${pageNo}. The excerpts below are everything on that ${pageWord}: explain what it covers from them. Do not reply NOT_IN_FILE only because the excerpts do not repeat the number.\n` : ''}\nExcerpts from the File Data and Information Center:\n\n${excerptBlock(list)}\n\nAnswer in the exact format of the Learning grounded answers skill. If the excerpts do not contain the answer, reply with exactly NOT_IN_FILE.`;
+        const prompt = `${preferenceBlock(prefs)}${conversationBlock(prior)}Question: ${q}\n${style ? `${STYLE_NOTE[style]}\n` : ''}${current ? `The student is reading: ${current.title} (${current.sources[current.sources.length - 1]})\n` : ''}${marked ? `The student marked an area of the file${marked.page ? ` (${pageWord} ${marked.page})` : ''} and asks about it. Excerpt [1] is the exact text inside that area; the other excerpts are the file around it. Answer about excerpt [1]: a question like "what is this about" or "explain this" means explain what excerpt [1] says, using the other excerpts for context. Do not reply NOT_IN_FILE when excerpt [1] has text.\n` : ''}${quiz ? 'The student wants to practise. Write 3-5 numbered practice questions on these excerpts, each followed by "Answer:" with a short answer and the excerpt label. Do not reply NOT_IN_FILE.\n' : ''}${rephrase ? 'The student asks you to explain the previous answer again (see Earlier in this conversation). Explain the same facts from the excerpts in a new, clearer way. For an example: give one from the excerpts if they have one; otherwise a short everyday illustration of the excerpt\'s facts, starting with "For example". Do not reply NOT_IN_FILE.\n' : ''}${sectionList.length && !quiz ? `The question is about section ${sectionRef[1]}; the excerpts are that section. Explain what it covers. Do not reply NOT_IN_FILE.\n` : ''}${(pageless || (!marked && !pageNo && !sectionList.length && !quiz && !rephrase && intel.isOverviewQuestion(q))) ? 'The question is about the whole file: give its main points from the excerpts. Do not reply NOT_IN_FILE.\n' : ''}${pageNo ? `The question is about ${pageWord} ${pageNo}. The excerpts below are everything on that ${pageWord}: explain what it covers from them. Do not reply NOT_IN_FILE only because the excerpts do not repeat the number.\n` : ''}\nExcerpts from the File Data and Information Center:\n\n${excerptBlock(list)}\n\nAnswer in the exact format of the Learning grounded answers skill. If an excerpt is about what the question asks, answer from it, even briefly. Reply NOT_IN_FILE only when no excerpt is about the question at all.`;
         let raw = ''; let text;
-        try { text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal: controller.signal, workflow: null, onDelta: piece => { raw += piece; onEvent({ type: 'delta', text: raw }); } }); }
+        try { text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal: controller.signal, workflow: null, temperature: 0.1, onDelta: piece => { raw += piece; onEvent({ type: 'delta', text: raw }); } }); }
         catch (error) {
           if (controller.signal.aborted || error.name === 'AbortError') throw error;
           modelError = `${agent.name} could not reach its AI model (${String(error.message || 'error').split('\n')[0].slice(0, 160)}).`;
           onEvent({ type: 'delta', text: '' });
           return attempt(list, label);
         }
-        const parsed = parseAnswer(text);
+        const parsed = parseAnswer(text, q);
         return parsed.notFound ? { notFound: true } : { ...parsed, hits: list };
       };
 
       let result = await attempt(hits, 'Writing the answer');
+      // Excerpts chosen for the question (the outline, a page, a section, practice, a re-explanation) always give an
+      // answer: their own sentences, cited, when the model still finds nothing to say.
+      const chosen = !marked && (pageNo || pageless || sectionList.length || quiz || rephrase || intel.isOverviewQuestion(q));
+      if (result.notFound && chosen && hits.length) {
+        const used = hits.filter(h => !(quiz && h.heading === 'Main points and outline')).slice(0, 5);
+        const lines = used.map((h, i) => {
+          const first = intel.sentences(String(h.text).replace(/^- /gm, '')).slice(0, quiz ? 1 : 2).join(' ');
+          const title = String(h.heading).replace(/^\d+(\.\d+)*\s+/, '');
+          return first ? (quiz ? `${i + 1}. What is ${title}?\nAnswer: ${first} [${i + 1}]` : `${title}: ${first} [${i + 1}]`) : '';
+        }).filter(Boolean);
+        if (lines.length) result = { answer: lines.join(quiz ? '\n\n' : '\n'), notes: [], hits: used, extractive: true, floor: true };
+      }
+      // A marked area always has an answer: its own sentences, cited, when the model still finds nothing to say.
+      if (result.notFound && marked) {
+        const lines = intel.sentences(marked.quote).slice(0, 4);
+        if (lines.length) result = { answer: lines.map(s => `${s} [1]`).join(' '), notes: [], hits: [markedHit], extractive: true, markedOnly: true };
+      }
+      let wide = [];
       if (result.notFound) {
         // 2nd run: broad lookup across every file of the subject
         runs = 2;
@@ -589,7 +682,34 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
         const broad = intel.search(query, docs, { mode: 'broad', preferDocId: prefer }).hits.map(h => ({ ...h, fileId: fileOf.get(h.docId) || null }));
         const seen = new Set(hits.map(h => `${h.docId}|${h.heading}|${h.text.slice(0, 40)}`));
         const fresh = broad.filter(h => !seen.has(`${h.docId}|${h.heading}|${h.text.slice(0, 40)}`));
+        wide = broad;
         result = fresh.length ? await attempt(broad, 'Checking the wider results') : { notFound: true };
+      }
+      // The file does name what was asked about (every key word of the question is in one excerpt), yet the model found
+      // nothing to say: a small model being over-strict. The file's own matching sentences answer instead of a warning.
+      const pool = hits.length ? hits : wide;
+      if (result.notFound && pool.length) {
+        // Words that ask (list, things, start, kinds …) are not the subject; most of the rest must be in one excerpt.
+        const keys = intel.terms(q).filter(t => t.length > 2 && !ASKING.has(t));
+        const named = keys.length && pool.find(h => {
+          const has = new Set(intel.terms(`${h.heading} ${h.text}`));
+          const found = t => has.has(t) || (t.length >= 5 && [...has].some(x => intel.oneEdit(x, t))); // a typo still names it
+          return keys.filter(found).length >= Math.max(1, Math.ceil(keys.length * 0.7));
+        });
+        // A section whose title names the subject ("The Law of Supply") opens with its definition: its first sentences.
+        // Else the matching sentences; for a misspelt question (no exact word), the named excerpt's opening sentences.
+        const titled = named && pool.find(h => {
+          const head = new Set(intel.terms(String(h.heading).replace(/^\d+(\.\d+)*\s+/, '')));
+          const inHead = t => head.has(t) || [...head].some(x => x.length >= 4 && (x.startsWith(t.slice(0, 4)) || intel.oneEdit(x, t)));
+          return keys.filter(inHead).length >= Math.max(1, Math.ceil(keys.length * 0.6));
+        });
+        let picked = titled ? intel.sentences(titled.text).slice(0, 3).map(sentence => ({ s: sentence, hit: titled })) : named ? intel.extractiveAnswer(query, pool) : [];
+        if (named && !picked.length) picked = intel.sentences(named.text).slice(0, 2).map(sentence => ({ s: sentence, hit: named }));
+        if (picked.length) {
+          const used = [...new Set(picked.map(p => p.hit))];
+          // Slide bullets have no full stop; each picked line gets one so the answer reads as sentences.
+          result = { answer: picked.map(p => `${/[.!?]$/.test(p.s.trim()) ? p.s.trim() : `${p.s.trim()}.`} [${used.indexOf(p.hit) + 1}]`).join(' '), notes: [], hits: used, extractive: true, floor: true };
+        }
       }
       if (result.notFound) {
         stage('warn', NOT_FOUND_MESSAGE);
@@ -600,9 +720,12 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       const latest = loadState(userId, subjectId);
       const known = new Set(latest.notes.map(n => n.text.toLowerCase()));
       const added = [];
+      // A note is kept only when its words come from the excerpts: a small model adds outside facts to its notes.
+      const excerptTerms = new Set(intel.terms(result.hits.map(h => `${h.heading} ${h.text}`).join(' ')));
+      const fromExcerpts = plain => { const t = intel.terms(plain).filter(x => !CONNECTING.has(x)); return t.length > 0 && t.filter(x => excerptTerms.has(x)).length / t.length >= 0.7; };
       for (const text of result.notes || []) {
         const plain = text.replace(/\s*\[(\d{1,2})\]/g, '').trim();
-        if (!plain || known.has(plain.toLowerCase())) continue;
+        if (!plain || known.has(plain.toLowerCase()) || !fromExcerpts(plain)) continue;
         const labels = [...text.matchAll(/\[(\d{1,2})\]/g)].map(m => Number(m[1])).filter(n => n >= 1 && n <= result.hits.length);
         const from = (labels.length ? labels : [1]).map(n => result.hits[n - 1]).filter(Boolean);
         const note = { id: randomBytes(8).toString('hex'), text: plain.slice(0, 400), question: q.slice(0, 300), origin: 'answer', sources: [...new Set(from.map(h => (h.number ? `${h.docTitle} ${h.number}` : h.docTitle)))], docIds: [...new Set(from.map(h => h.docId))], numbers: [...new Set(from.map(h => h.number).filter(Boolean))], createdAt: new Date().toISOString() };
@@ -613,7 +736,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       if (requestId) remember(userId, subjectId, { id: requestId, question: q.slice(0, 500), answer: clean.replace(/\s*\[\d{1,2}\]/g, '').trim().slice(0, 600), hits: result.hits, docId: (result.hits[0] || {}).docId || null });
       return {
         status: 'answered', answer: clean, sources: list, notes: added, runs, question: q, followUp,
-        mode: result.extractive ? 'extractive' : 'agent', notice: result.extractive ? (agent.missing || modelError) : '', agent: result.extractive ? null : { name: agent.name, model: agent.model }
+        mode: result.extractive ? 'extractive' : 'agent', notice: result.markedOnly ? 'The assistant could not explain this area, so here is its text.' : result.floor ? 'The assistant was unsure, so here are the matching lines from your file.' : result.extractive ? (agent.missing || modelError) : '', agent: result.extractive ? null : { name: agent.name, model: agent.model }
       };
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') return { status: 'cancelled', warning: 'Stopped.' };
@@ -634,7 +757,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
     const prompt = `${preferenceBlock(preferences(userId).map(p => p.text))}This is a casual message from the student, not a question about the files: "${q}"\nSubject: ${name}. Files: ${files}.\nReply naturally and briefly (1-2 friendly sentences), like a helpful study partner. You may offer to explain these files. Do not teach content here and do not mention excerpts.\nFormat: ANSWER: followed by your reply.`;
     let raw = '';
     try {
-      const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal, workflow: null, onDelta: piece => { raw += piece; onEvent({ type: 'delta', text: raw }); } });
+      const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal, workflow: null, temperature: 0.5, onDelta: piece => { raw += piece; onEvent({ type: 'delta', text: raw }); } });
       const parsed = parseAnswer(text);
       const answer = !parsed.notFound && parsed.answer ? parsed.answer.replace(/\[(\d{1,2})\]/g, '').trim() : canned;
       return reply((answer || canned).slice(0, 1200), { name: agent.name, model: agent.model });
@@ -648,4 +771,4 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   return { close: () => files.close(), saveLearned, preferences, deletePreference, queueFile, fileAnalysis, reanalyze, notes, deleteNote, infoCenterPath, filesRemoved, subjectRemoved, ask, cancelAsk, ensureAgents: userId => agents.ensure(userId), idle: () => !busy && !queue.length && !enriching && !enrichQueue.length, parseAnswer, NOT_FOUND_MESSAGE };
 }
 
-module.exports = { createLearningWorkflow };
+module.exports = { createLearningWorkflow, ollamaOcr };

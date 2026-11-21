@@ -311,7 +311,11 @@ function createEcosystem({ root, workspace, secrets, fetchImpl = fetch, provider
     const skillMeta = skillIds.map(id => (skills.exists(userId, id) ? skills.meta(userId, id) : { id, missing: true }));
     const preselected = new Set(selectSkills(objective, skillMeta, config.context.maxSkills).filter(item => item.status === 'selected').map(item => item.id));
     const window = await contextWindowFor(userId, connection, model, apiKey);
-    const contextWindow = Math.min(window.tokens, config.context.maxContextTokens || Infinity);
+    // On Ollama the agent's own context budget is sent as num_ctx, so it is the window (Ollama's 4,096 default applies
+    // only when the agent sets none). Elsewhere the provider's window is the ceiling.
+    const contextWindow = connection.type === 'ollama' && config.context.maxContextTokens
+      ? config.context.maxContextTokens
+      : Math.min(window.tokens, config.context.maxContextTokens || Infinity);
     const responseReserve = config.context.responseReserveTokens || (connection.type === 'ollama' ? 1024 : 4096);
 
     // Delegation targets: configured, still existing, not this agent; never from inside a delegated task.
@@ -389,7 +393,9 @@ function createEcosystem({ root, workspace, secrets, fetchImpl = fetch, provider
       request: {
         connection, apiKey, model, system: assembled.system, cache, agentName: agent.name,
         maxTokens: connection.type === 'anthropic' || config.context.responseReserveTokens ? responseReserve : null,
-        numCtx: connection.type === 'ollama' && config.context.maxContextTokens ? contextWindow : null
+        numCtx: connection.type === 'ollama' && config.context.maxContextTokens ? contextWindow : null,
+        // Optional sampling temperature for this request (the Learning workflow asks for low values: facts, not flair).
+        temperature: typeof args.temperature === 'number' && args.temperature >= 0 && args.temperature <= 2 ? args.temperature : null
       },
       onTruncated: () => log(`${agent.name}’s reply reached the output limit and may be cut off. Raise “Reserved for reply” in the agent’s context budget.`),
       overflow: compaction => new ContextOverflowError(`The tool results for ${agent.name} no longer fit in the model’s context window (~${compaction.estimatedTokens.toLocaleString('en-US')} tokens, estimate). Ask for a narrower task or use a model with a larger window.`, diagnostics)

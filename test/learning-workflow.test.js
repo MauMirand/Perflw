@@ -203,13 +203,15 @@ test('questions: grounded answer with sources and saved notes; 2nd run; not in t
   assert.equal(refused.runs, 2);
 
   // Overview questions use the analysis itself.
-  replies.push('ANSWER:\nThe lecture covers the membrane, nucleus and mitochondria [1].\nNOTES:\n- Three parts of the cell [1]');
+  // A note with facts the excerpts do not state is not saved (small models add outside knowledge to notes).
+  replies.push('ANSWER:\nThe lecture covers the membrane, nucleus and mitochondria [1].\nNOTES:\n- Mitochondria were discovered by Albert Kolliker in 1857 [1]');
   const overview = await flow.ask(USER, { subjectId: subject.id, fileId, question: 'Summarize this file' });
   assert.equal(overview.status, 'answered');
   assert.match(calls[calls.length - 1].prompt, /Main points and outline/);
+  assert.equal(overview.notes.length, 0, 'an ungrounded note is dropped');
 
   flow.deleteNote(USER, subject.id, flow.notes(USER, subject.id)[0].id);
-  assert.equal(flow.notes(USER, subject.id).length, 2);
+  assert.equal(flow.notes(USER, subject.id).length, 1);
 });
 
 test('without any AI model the notes panel still works and answers come from the file text', async t => {
@@ -535,4 +537,101 @@ test('a Reader the app put on a general vision model moves to an OCR model once 
   ecosystem.updateAgentConfig(USER, ids.reader, { provider: { connectionId: 'ollama-local', model: 'qwen2.5vl:7b' } });
   const again = await (require('../src/learning-agents').createLearningAgents({ ecosystem, root })).ready(USER, 'reader');
   assert.equal(again.model, 'qwen2.5vl:7b');
+});
+
+test('picture structure: Title Case and capital headings, box labels, table rows, chart columns and one point per panel', () => {
+  // Title Case panels with step numbers and box labels (a real infographic layout)
+  const steps = intel.ocrReading('Delegation of Tasks\nDelegation assigns authority while the manager stays accountable.\n\nKey Points\n• The manager assigns the task.\n\n1\nSelect the Task\nIdentify the task that can be delegated.\n\n2\nChoose the Right Person\nSelect an employee with the skills to do the task.');
+  assert.equal(steps.title, 'Delegation of Tasks');
+  assert.match(steps.text, /^### Key Points$/m, 'a box label stays a label');
+  assert.match(steps.text, /^## Select the Task$/m); assert.match(steps.text, /^## Choose the Right Person$/m);
+  assert.doesNotMatch(steps.text, /^\d$/m, 'step numbers are dropped');
+  // Panels of one kind with no title above them are panels, not a title
+  assert.equal(intel.ocrReading('DEMAND\nBuyers want more when prices fall.\n\nSUPPLY\nSellers offer more when prices rise.\n\nEQUILIBRIUM\nThe market clears.').title, '');
+  // Capitals: real words are title-cased, acronyms kept
+  assert.equal(intel.ocrReading('THE BUDGETING PROCESS FOR HR\nFive steps.').title, 'The Budgeting Process for HR');
+  // Table captions, headers and rows are text, never headings
+  const table = intel.ocrReading('SALES\nProjected Needs\nPosition Current Required\nCSR (voice) 80 100\nTeam Leader 10');
+  assert.doesNotMatch(table.text, /^## /m);
+  // A chart read column by column is paired back
+  assert.match(intel.ocrReading('GROWTH\n42\n58\n\n2021\n2022').text, /2021: 42\n\n2022: 58/);
+  // On a slide, each panel gives one key point, labels are not panels
+  const reading = intel.ocrReading('PLAN\nIntro line here.\n\nSET GOALS\nExample:\nA sample company.\nDecide what to achieve next year.\n\nWATCH RESULTS\nCompare spending with the budget monthly.');
+  const blocks = intel.applyImages([{ kind: 'h', level: 1, text: 'Slide 3', page: 3 }], [{ key: 'k', at: 1, page: 3 }], new Map([['k', reading]]));
+  const a = intel.analyze({ blocks, pages: 3 }, { fileName: 'd.pptx', fileType: 'pptx' });
+  assert.equal(a.sections[0].title, 'Plan', 'the slide takes the picture title');
+  assert.deepEqual(a.sections[0].keyPoints.slice(0, 2), ['Set Goals: A sample company.', 'Watch Results: Compare spending with the budget monthly.']);
+});
+
+test('a question about a marked area of the page: the marked text is excerpt [1]; never "not in the file"', async t => {
+  const replies = [];
+  const { flow, subject, upload, calls } = setup(t, {
+    reply: (prompt, system) => {
+      if (/Learning key points/.test(system)) return 'OVERVIEW:\nA file.\nKEY POINTS:\n- point [1]';
+      return replies.shift() || 'NOT_IN_FILE';
+    }
+  });
+  const fileId = await upload('Cell Biology Lecture 1.pdf');
+  const quote = 'The sodium-potassium pump moves three sodium ions out of the cell and two potassium ions in.';
+
+  // "whats this about?" alone matches nothing and looks like small talk; with a marked area it is about that text.
+  replies.push('ANSWER:\nThis part explains how the pump moves ions across the membrane [1].\nNOTES:\n- The pump moves 3 Na+ out and 2 K+ in [1]');
+  const answered = await flow.ask(USER, { subjectId: subject.id, fileId, question: 'whats this about?', about: { quote, page: 1 } });
+  assert.equal(answered.status, 'answered');
+  assert.equal(answered.question, 'whats this about?', 'the question stays what the student typed');
+  const prompt = calls[calls.length - 1].prompt;
+  assert.match(prompt, /Question: whats this about\?\n/);
+  assert.match(prompt, /\[1\] Cell Biology › Marked area \(page 1\)\nThe sodium-potassium pump moves three sodium ions/);
+  assert.match(prompt, /Excerpt \[1\] is the exact text inside that area/);
+  assert.equal(answered.sources[0].heading, 'Marked area');
+
+  // The model still says NOT_IN_FILE: the marked text itself is the answer, cited, with a notice.
+  replies.push('NOT_IN_FILE');
+  const fallback = await flow.ask(USER, { subjectId: subject.id, fileId, question: 'explain this', about: { quote, page: 1 } });
+  assert.equal(fallback.status, 'answered');
+  assert.match(fallback.answer, /sodium-potassium pump moves three sodium ions/);
+  assert.match(fallback.notice, /could not explain this area/);
+});
+
+test('a model that refuses although an excerpt names what was asked: the file\'s matching lines answer instead', async t => {
+  const { flow, subject, upload } = setup(t, { reply: (prompt, system) => (/Learning key points/.test(system) ? 'OVERVIEW:\nA file.\nKEY POINTS:\n- point [1]' : 'NOT_IN_FILE') });
+  const fileId = await upload('Cell Biology Lecture 1.pdf');
+  const r = await flow.ask(USER, { subjectId: subject.id, fileId, question: 'What does the sodium-potassium pump do?' });
+  assert.equal(r.status, 'answered');
+  assert.match(r.answer, /3 Na\+ ions out/);
+  assert.match(r.notice, /matching lines from your file/);
+  // Still "not in the file" when the excerpts do not name the subject of the question.
+  const off = await flow.ask(USER, { subjectId: subject.id, fileId, question: 'Who painted the Mona Lisa?' });
+  assert.equal(off.status, 'not-found');
+});
+
+test('broken model replies count as no answer: notes only, NOT_IN_FILE inside, the question echoed', async t => {
+  const { flow } = setup(t);
+  assert.equal(flow.parseAnswer('NOTES:\n- [1] mentions shifts in demand.\n- [2] more.\nNOT_IN_FILE').notFound, true);
+  assert.equal(flow.parseAnswer('What is demand? [1]', 'What is demand?').notFound, true);
+  assert.equal(flow.parseAnswer('ANSWER:\nNOTES:\n- a note that is long enough').notFound, true);
+  const ok = flow.parseAnswer('Demand is what buyers are willing and able to buy [1].\nNOTES:\n- note one here', 'What is demand?');
+  assert.equal(ok.notFound, false); assert.doesNotMatch(ok.answer, /NOTES/);
+});
+
+test('question kinds: section, page of a file without pages, quiz, Filipino, typo, re-explain — never "not in the file"', async t => {
+  const { flow, subject, upload } = setup(t, { reply: (prompt, system) => (/Learning key points/.test(system) ? 'OVERVIEW:\nA file.\nKEY POINTS:\n- point [1]' : 'NOT_IN_FILE') });
+  const fileId = await upload('Cell Biology Lecture 1.pdf');
+  const ask = (question, extra = {}) => flow.ask(USER, { subjectId: subject.id, fileId, question, ...extra });
+  const section = await ask('what does section 1.2 talk about?');
+  assert.equal(section.status, 'answered'); assert.match(section.answer, /Transport|Na\+/);
+  const quiz = await ask('quiz me on this file');
+  assert.equal(quiz.status, 'answered'); assert.match(quiz.answer, /\?\nAnswer:/);
+  const tagalog = await ask('ano ang nucleolus?');
+  assert.equal(tagalog.status, 'answered'); assert.match(tagalog.answer, /nucleolus/i);
+  const typo = await ask('wat do the mitochondra do');
+  assert.equal(typo.status, 'answered', 'a one-letter typo still finds the section');
+  const first = await ask('What does the sodium-potassium pump do?', { requestId: 'p1', history: [] });
+  assert.equal(first.status, 'answered');
+  const again = await ask('explain that more simply', { requestId: 'p2', history: ['p1'] });
+  assert.equal(again.status, 'answered'); assert.match(again.answer, /Na\+|pump/);
+  assert.equal(intel.isOverviewQuestion('what is this file about?'), true);
+  assert.equal(intel.isOverviewQuestion('What are the main topics?'), true);
+  assert.equal(intel.isQuizRequest('give me 3 practice questions about demand'), true);
+  assert.equal(intel.oneEdit('demnd', 'demand'), true); assert.equal(intel.oneEdit('demand', 'remind'), false);
 });

@@ -197,7 +197,7 @@ test('Ollama adapter: streams a response, lists models, and reports clear errors
   const runtime = createOllamaRuntime({ base: `http://127.0.0.1:${server.address().port}` });
 
   const listed = await runtime.listModels();
-  assert.deepEqual(listed, { available: true, error: null, models: [{ name: 'a-model:cloud', size: '', cloud: true }, { name: 'b-model', size: '7B', cloud: false }] });
+  assert.deepEqual(listed, { available: true, error: null, models: [{ name: 'a-model:cloud', size: '', bytes: 0, cloud: true }, { name: 'b-model', size: '7B', bytes: 0, cloud: false }] });
 
   const deltas = [];
   const text = await runtime.runAgent({ agent: { name: 'A', model: 'ok' }, system: 'sys', prompt: 'hi', onDelta: piece => deltas.push(piece) });

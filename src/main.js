@@ -141,6 +141,22 @@ function topicPdfBytes(user, fileId) {
   if (!name || !/^[a-f0-9]{32}\.pdf$/.test(name)) return null;
   return fs.readFileSync(path.join(app.getPath('userData'), 'learning-files', user.id, name));
 }
+/* Study marks from the renderer: only known fields, numbers kept to 0–1 (or a sane range), text and counts capped. */
+function cleanAnnotations(data) {
+  const unit = v => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : 0);
+  const id = v => (typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v) ? v : Math.random().toString(36).slice(2, 12));
+  const page = v => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : 0);
+  const text = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const color = v => (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#F5C542');
+  const list = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
+  const d = data && typeof data === 'object' ? data : {};
+  return {
+    notes: list(d.notes, 500).map(n => ({ id: id(n && n.id), page: page(n && n.page), x: unit(n && n.x), y: unit(n && n.y), text: text(n && n.text, 4000), color: color(n && n.color) })),
+    strokes: list(d.strokes, 3000).map(st => ({ id: id(st && st.id), page: page(st && st.page), tool: st && st.tool === 'highlighter' ? 'highlighter' : 'pen', color: color(st && st.color),
+      points: list(st && st.points, 4000).filter(pt => Array.isArray(pt) && pt.length === 2).map(pt => [Math.round(unit(pt[0]) * 10000) / 10000, Math.round(unit(pt[1]) * 10000) / 10000]) })).filter(st => st.points.length > 1),
+    comments: list(d.comments, 500).map(c => ({ id: id(c && c.id), page: page(c && c.page), x: unit(c && c.x), y: unit(c && c.y), w: unit(c && c.w), h: unit(c && c.h), text: text(c && c.text, 4000), quote: text(c && c.quote, 4000), asked: Boolean(c && c.asked), at: text(c && c.at, 40) }))
+  };
+}
 function handle(channel, action) {
   ipcMain.handle(channel, async (event, ...args) => {
     assertSender(event);
@@ -307,7 +323,14 @@ app.whenReady().then(() => {
   // Uploaded topic files live under userData/learning-files/<account>/ with random names; the database keeps the original name.
   const learningFiles = user => path.join(root, 'learning-files', user.id);
   const removeLearningFiles = (user, names) => { for (const name of names || []) if (/^[a-f0-9]{32}\.[a-z]{2,4}$/.test(name)) fs.rm(path.join(learningFiles(user), name), { force: true }, () => {}); };
-  handle('learning:deleteSubject', id => { const user=requireUser(); removeLearningFiles(user, workspace.deleteSubject(user.id,id)); learningFlow.subjectRemoved(user.id, id); });
+  // Study marks on a file (sticky notes, pen and highlighter strokes, area comments): one JSON per file, removed with it.
+  const annotationFile = (user, fileId) => path.join(learningFiles(user), 'annotations', `${fileId}.json`);
+  const removeAnnotations = (user, fileIds) => { for (const id of fileIds || []) if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)) fs.rm(annotationFile(user, id), { force: true }, () => {}); };
+  handle('learning:deleteSubject', id => {
+    const user=requireUser();
+    let fileIds = []; try { fileIds = workspace.listTopics(user.id, id).files.map(f => f.id); } catch { /* subject already gone */ }
+    removeLearningFiles(user, workspace.deleteSubject(user.id,id)); removeAnnotations(user, fileIds); learningFlow.subjectRemoved(user.id, id);
+  });
   handle('learning:topics', subjectId => workspace.listTopics(requireUser().id, subjectId));
   handle('learning:addTopic', (subjectId, details) => workspace.addTopic(requireUser().id, subjectId, details));
   handle('learning:renameTopic', (topicId, title) => workspace.renameTopic(requireUser().id, topicId, title));
@@ -317,7 +340,8 @@ app.whenReady().then(() => {
     const result = workspace.deleteTopics(user.id, subjectId, ids);
     removeLearningFiles(user, result.removedFiles); delete result.removedFiles;
     const left = new Set(result.files.map(f => f.id));
-    learningFlow.filesRemoved(user.id, subjectId, before.filter(id => !left.has(id)));
+    const gone = before.filter(id => !left.has(id));
+    learningFlow.filesRemoved(user.id, subjectId, gone); removeAnnotations(user, gone);
     return result;
   });
   handle('learning:uploadTopics', async subjectId => {
@@ -441,6 +465,22 @@ if ($Kind -eq 'docx') {
     if (!bytes) throw new Error('This file has no PDF to show.');
     return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.length);
   });
+  /* Study marks (learning-annotate.js). Positions are fractions of the page (0–1), so they survive any zoom. */
+  handle('learning:annotations', fileId => {
+    const user = requireUser(); workspace.topicFile(user.id, fileId); // the file must belong to this account
+    try { return cleanAnnotations(JSON.parse(fs.readFileSync(annotationFile(user, fileId), 'utf8'))); }
+    catch { return { notes: [], strokes: [], comments: [] }; }
+  });
+  handle('learning:saveAnnotations', (fileId, data) => {
+    const user = requireUser(); workspace.topicFile(user.id, fileId);
+    const clean = cleanAnnotations(data);
+    const text = JSON.stringify(clean);
+    if (text.length > 4 * 1024 * 1024) throw new Error('This file has too many marks to save. Remove some drawings first.');
+    const file = annotationFile(user, fileId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(`${file}.tmp`, text); fs.renameSync(`${file}.tmp`, file);
+    return clean;
+  });
   /* Learning document workflow: notes panel data, saved notes, the information center files, and questions. */
   handle('learning:analysis', fileId => learningFlow.fileAnalysis(requireUser().id, fileId));
   handle('learning:reanalyze', fileId => { const user = requireUser(); workspace.topicFile(user.id, fileId); return learningFlow.reanalyze(user.id, fileId); });
@@ -453,12 +493,15 @@ if ($Kind -eq 'docx') {
     const problem = await shell.openPath(file); if (problem) throw new Error(problem);
     return file;
   });
-  handle('learning:ask', (subjectId, fileId, question, requestId, history) => {
+  handle('learning:ask', (subjectId, fileId, question, requestId, history, about) => {
     const user = requireUser();
     const id = typeof requestId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : null;
     // Ids of the answered turns the Ask panel still shows; the workflow uses only turns it answered itself.
     const shown = Array.isArray(history) ? history.filter(item => typeof item === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(item)).slice(-50) : [];
-    return learningFlow.ask(user.id, { subjectId, fileId: typeof fileId === 'string' ? fileId : null, question, requestId: id, history: shown },
+    // A question about an area marked on the page carries that area's text (and page) separately from the question.
+    const marked = about && typeof about === 'object' && typeof about.quote === 'string' && about.quote.trim()
+      ? { quote: about.quote.slice(0, 1500), page: Number.isInteger(about.page) && about.page > 0 && about.page < 100000 ? about.page : null } : null;
+    return learningFlow.ask(user.id, { subjectId, fileId: typeof fileId === 'string' ? fileId : null, question, requestId: id, history: shown, about: marked },
       event => { if (window && !window.isDestroyed()) window.webContents.send('learning:askEvent', { requestId: id, ...event }); });
   });
   handle('learning:cancelAsk', requestId => learningFlow.cancelAsk(String(requestId || '')));

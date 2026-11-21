@@ -138,6 +138,15 @@ async function run() {
   await fill('#register-email', 'smoke@example.com');
   await fill('#register-password', 'Sm0ke-test-pass');
   await fill('#register-confirmation', 'Sm0ke-test-pass');
+  assert.equal(await count('#register-form .pw-rules li.met'), 4, 'all four password rules met');
+  assert.ok(await evaluate("document.querySelector('#register-form [data-match]').classList.contains('matches')"), 'confirmation shows it matches');
+  assert.ok(await evaluate("document.querySelector('#login-email').offsetHeight >= 40 || document.getElementById('login-page').hidden"), 'fields keep their height');
+  assert.ok(await evaluate("document.querySelector('#register-email').offsetHeight >= 40"), 'email field keeps its height');
+  await click('#register-form .password-toggle');
+  assert.equal(await evaluate("document.querySelector('#register-password').type"), 'text', 'eye button shows the password');
+  await click('#register-form .password-toggle');
+  await sleep(400);
+  await screenshot('01b-register');
   await submit('#register-form');
   try { await waitFor("!document.getElementById('profile-page').hidden", 'profile page'); }
   catch (error) { console.error('Feedback:', await text('#register-page .form-feedback'), await evaluate("[...document.querySelectorAll('.toast')].map(t=>t.textContent)")); throw error; }
@@ -440,9 +449,7 @@ async function run() {
   await waitFor("document.querySelector('[data-ln-error]')?.textContent.includes('name')", 'name required');
   await fill('[data-ln-form] [name="name"]', 'Calculus');
   await click('[data-ln="type"][data-value="major"]');
-  await fill('[data-ln-form] [name="mastery"]', '42');
-  await fill('[data-ln-form] [name="hours"]', '3');
-  await fill('[data-ln-form] [name="minutes"]', '20');
+  assert.equal(await count('[data-ln-form] [name="mastery"], [data-ln-form] [name="hours"]'), 0, 'a new subject has no mastery or time fields');
   await fill('[data-ln-form] [name="description"]', 'Limits, derivatives and integrals.');
   await click('[data-ln="pick-image"]');
   await waitFor("document.querySelector('[data-ln-preview]')?.classList.contains('has-img')", 'subject image picked');
@@ -450,6 +457,16 @@ async function run() {
   await submit('[data-ln-form]');
   await waitFor("!document.querySelector('[data-ln-form]') && document.querySelectorAll('[data-ln-subject]').length === 1", 'subject pocket created');
   await waitFor("document.querySelector('.ln-panel .ln-name')?.textContent.trim() === 'Calculus'", 'new subject previewed');
+  assert.ok((await text('.ln-panel-body')).includes('0% mastery'), 'a new subject starts at 0% mastery');
+  // Mastery and time spent are set on the edit panel
+  await click('[data-ln="menu"]');
+  await click('.ln-menu [data-ln="edit"]');
+  await waitFor("document.querySelector('#ln-dialog-title')?.textContent === 'Edit Subject' && !!document.querySelector('[data-ln-form] [name=\"mastery\"]')", 'edit panel with mastery');
+  await fill('[data-ln-form] [name="mastery"]', '42');
+  await fill('[data-ln-form] [name="hours"]', '3');
+  await fill('[data-ln-form] [name="minutes"]', '20');
+  await submit('[data-ln-form]');
+  await waitFor("!document.querySelector('[data-ln-form]') && (document.querySelector('.ln-panel-body')?.textContent || '').includes('42% mastery')", 'subject edited');
   const meta = await text('.ln-panel-body');
   for (const part of ['Major', '42% mastery', '3h 20m spent', 'Limits, derivatives and integrals.', 'Topics', 'Mastery Statistics']) assert.ok(meta.includes(part), `Preview shows ${part}`);
   assert.ok(await evaluate("getComputedStyle(document.querySelector('.ln-panel .ln-cover-art')).backgroundImage.startsWith('url(\"data:image/png')"), 'Preview cover uses the subject image');
@@ -569,11 +586,102 @@ async function run() {
   assert.equal(await text('.ln-subject-chip'), 'Calculus');
   assert.equal(await evaluate("[...document.querySelectorAll('.ln-nav-ms')].map(e => e.textContent).join()"), 'Prelim', 'navigator shows the segments');
   assert.equal(await text('.ln-nav-topic.active'), '1.1Unit notes PDF');
-  assert.equal(await count('.ln-side-panel'), 2, 'notes and ask panels');
+  assert.equal(await count('.ln-side-panel'), 1, 'one AI side panel');
   assert.equal(await count('iframe.ln-pdf'), 0, 'no plugin frame');
   assert.equal(await evaluate("getComputedStyle(document.querySelector('.ls-doc-title')).color"), 'rgb(245, 139, 86)', 'title colour');
   await sleep(600);
   await screenshot('06j-learning-viewer-pdf');
+  // Side panel views: Chat shows the Notion-style start, Key points comes back; the composer stays at the foot
+  await click('[data-ls="tab"][data-tab="chat"]');
+  await waitFor("!document.querySelector('[data-ls-view=\"chat\"]').hidden && document.querySelector('[data-ls-view=\"notes\"]').hidden && !!document.querySelector('.ls-suggest')", 'chat view');
+  assert.ok(await evaluate("!!document.querySelector('[data-ls-input]').offsetParent"), 'composer visible in the chat view');
+  await sleep(300);
+  await screenshot('06j2-learning-side-chat');
+  await click('[data-ls="tab"][data-tab="points"]');
+  await waitFor("!document.querySelector('[data-ls-view=\"notes\"]').hidden && !!document.querySelector('.ls-doc-title')", 'key points view again');
+  // Collapse: one fixed button in the viewer bar hides and shows the panel; it does not move while doing so
+  assert.equal(await count('.ln-side [data-ln="side-toggle"]'), 0, 'no toggle inside the panel');
+  const toggleAt = await evaluate("JSON.stringify(document.querySelector('.ln-side-open').getBoundingClientRect())");
+  await click('.ln-side-open');
+  await waitFor("document.querySelector('.ln-viewer-body').classList.contains('side-off') && document.querySelector('.ln-side').inert", 'side panel collapsed');
+  await sleep(450);
+  assert.ok(await evaluate("document.querySelector('.ln-side').getBoundingClientRect().width < 2"), 'collapsed column takes no width');
+  assert.equal(await evaluate("JSON.stringify(document.querySelector('.ln-side-open').getBoundingClientRect())"), toggleAt, 'toggle stays in place');
+  await screenshot('06j3-learning-side-collapsed');
+  await click('.ln-side-open');
+  await waitFor("!document.querySelector('.ln-viewer-body').classList.contains('side-off') && !document.querySelector('.ln-side').inert", 'side panel open again');
+  await sleep(450);
+  assert.ok(await evaluate("document.querySelector('.ln-side').getBoundingClientRect().width > 200"), 'panel back at full width');
+  // Narrow window: the panel is a drawer over the file and the toggle still works
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 900, height: 760, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  assert.ok(await evaluate("(() => { const s = document.querySelector('.ln-side').getBoundingClientRect(); return s.width > 250 && getComputedStyle(document.querySelector('.ln-side')).position === 'absolute'; })()"), 'narrow: panel shown as a drawer');
+  assert.ok(await evaluate("document.querySelector('.ln-side-open').getBoundingClientRect().width > 0"), 'narrow: toggle visible');
+  await screenshot('06j5-learning-narrow-drawer');
+  await cdp('Emulation.clearDeviceMetricsOverride', {});
+  await sleep(400);
+  // Study marks on the PDF: pen stroke, a sticky note, an area comment; saved per file and drawn again after reopening
+  await waitFor("!!document.querySelector('.ann-bar:not(.off)') && !!document.querySelector('.ln-pdfv-page .ann-layer')", 'study toolbar ready');
+  const markDrag = (tool, from, to) => evaluate(`(async () => {
+    const layer = document.querySelector('.ln-pdfv-page[data-page="2"] .ann-layer') || document.querySelector('.ann-layer');
+    layer.closest('.ln-pdfv-page').scrollIntoView({ block: 'start' }); await new Promise(r => setTimeout(r, 120));
+    const r = layer.getBoundingClientRect();
+    const at = ([x, y]) => ({ clientX: r.left + r.width * x, clientY: r.top + r.height * y, bubbles: true, button: 0, pointerId: 1, isPrimary: true });
+    const hit = document.elementFromPoint(at(${JSON.stringify(from)}).clientX, at(${JSON.stringify(from)}).clientY);
+    hit.dispatchEvent(new PointerEvent('pointerdown', at(${JSON.stringify(from)})));
+    for (let i = 1; i <= 6; i++) { const t = i / 6; document.dispatchEvent(new PointerEvent('pointermove', at([${from[0]} + (${to[0]} - ${from[0]}) * t, ${from[1]} + (${to[1]} - ${from[1]}) * t]))); }
+    document.dispatchEvent(new PointerEvent('pointerup', at(${JSON.stringify(to)})));
+    hit.dispatchEvent(new MouseEvent('click', at(${JSON.stringify(to)})));
+    return hit.className && String(hit.className.baseVal ?? hit.className);
+  })()`);
+  await click('[data-ann-tool="pen"]');
+  await waitFor("document.querySelector('[data-ln-doc-wrap]').dataset.annMode === 'pen' && document.querySelector('.ann-pens').classList.contains('open')", 'pen tool with options');
+  await markDrag('pen', [0.2, 0.3], [0.6, 0.35]);
+  await waitFor("document.querySelectorAll('.ann-stroke.pen').length === 1", 'pen stroke drawn');
+  await click('[data-ann-pen="highlighter"]');
+  await markDrag('pen', [0.1, 0.1], [0.5, 0.1]);
+  await waitFor("document.querySelectorAll('.ann-stroke.highlighter').length === 1", 'highlighter stroke drawn');
+  assert.equal(await evaluate("document.querySelector('[data-ln-doc-wrap]').dataset.annMode"), 'pen', 'drawing keeps the pen tool');
+  // Eraser, then Ctrl+Z brings the erased stroke back
+  await click('[data-ann-pen="eraser"]');
+  await evaluate(`(() => { const p = document.querySelector('.ann-stroke.pen'); const b = p.getBoundingClientRect(); const pt = p.getPointAtLength(p.getTotalLength() / 2); const svg = p.ownerSVGElement.getBoundingClientRect(); const x = svg.left + pt.x * svg.width; const y = svg.top + pt.y * svg.height;
+    const at = { clientX: x, clientY: y, bubbles: true, button: 0, pointerId: 3 }; document.elementFromPoint(x, y).dispatchEvent(new PointerEvent('pointerdown', at)); document.dispatchEvent(new PointerEvent('pointerup', at)); return !!b; })()`);
+  await waitFor("document.querySelectorAll('.ann-stroke.pen').length === 0", 'pen stroke erased');
+  await evaluate("document.querySelector('[data-ln-doc-wrap]').dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })); true");
+  await waitFor("document.querySelectorAll('.ann-stroke.pen').length === 1", 'undo restores the erased stroke');
+  await click('[data-ann-tool="note"]');
+  await markDrag('note', [0.7, 0.55], [0.7, 0.55]);
+  await waitFor("!!document.querySelector('.ann-note.editing .ann-note-text')", 'note editor open on the note');
+  assert.equal(await count('.ann-pop'), 0, 'the note is written in place, not in a separate pop-over');
+  assert.ok(await evaluate("(() => { const n = document.querySelector('.ann-note.editing').getBoundingClientRect(); const p = document.querySelector('.ann-note.editing').closest('.ln-pdfv-page').getBoundingClientRect(); return n.left >= p.left && n.right <= p.right + 1 && n.top >= p.top; })()"), 'the open note stays on its page');
+  await evaluate("document.querySelector('.ann-note.editing .ann-note-text').value = 'Remember: Unit B is on the exam'; true");
+  await click('.ann-note.editing [data-ann="pop-close"]');
+  await waitFor("document.querySelector('.ann-note-body')?.textContent.includes('Unit B is on the exam')", 'note saved on the page');
+  // Drag the note by its grip
+  const noteBefore = await evaluate("window.PerflwAnnotate.data().notes[0].x");
+  await evaluate(`(() => {
+    const grip = document.querySelector('.ann-note-grip'); const r = grip.getBoundingClientRect();
+    const at = (dx, dy) => ({ clientX: r.left + r.width / 2 + dx, clientY: r.top + r.height / 2 + dy, bubbles: true, button: 0, pointerId: 2, isPrimary: true });
+    grip.dispatchEvent(new PointerEvent('pointerdown', at(0, 0)));
+    for (let i = 1; i <= 5; i++) document.dispatchEvent(new PointerEvent('pointermove', at(-24 * i, 10 * i)));
+    document.dispatchEvent(new PointerEvent('pointerup', at(-120, 50)));
+    return true;
+  })()`);
+  assert.ok(await evaluate(`window.PerflwAnnotate.data().notes[0].x < ${noteBefore} - 0.05`), 'note moved by its grip');
+  assert.equal(await count('.ann-note.dragging'), 0, 'drag ended');
+  await click('[data-ann-tool="comment"]');
+  await markDrag('comment', [0.05, 0.05], [0.95, 0.5]);
+  await waitFor("!!document.querySelector('.ann-pop-comment .ann-text')", 'comment composer open');
+  const quoted = await text('.ann-pop-comment .ann-quote');
+  assert.match(quoted, /Unit B/, 'the comment quotes the text inside the box');
+  await evaluate("document.querySelector('.ann-pop-comment .ann-text').value = 'Why is this unit separate?'; true");
+  await click('[data-ann="comment-save"]');
+  await waitFor("document.querySelectorAll('.ann-comment').length === 1 && document.querySelector('[data-ln-doc-wrap]').dataset.annMode === 'cursor'", 'comment kept, back to Select');
+  await sleep(500);
+  await screenshot('06j4-learning-marks');
+  const savedMarks = await evaluate("(async () => { const file = window.PerflwAnnotate.data(); await window.PerflwAnnotate.flush(); await new Promise(r => setTimeout(r, 300)); return file; })()");
+  assert.equal(savedMarks.strokes.length, 2); assert.equal(savedMarks.notes.length, 1); assert.equal(savedMarks.comments.length, 1);
+  assert.equal(savedMarks.comments[0].text, 'Why is this unit separate?');
   // Another topic from a Markdown file: drawn as a page
   await evaluate("[...document.querySelectorAll('.ln-nav-topic')].find(b => b.textContent === '2Week 1 notes').click(); true");
   await waitFor("!!document.querySelector('.ln-reader h2')", 'Markdown file drawn as a page');
@@ -708,6 +816,20 @@ async function run() {
   await evaluate("document.querySelector('[data-form=\"profile\"] [name=displayName]').value = 'Smoke Pilot'");
   await submit('[data-form="profile"]');
   await waitFor("document.querySelector('.profile-name')?.textContent === 'Smoke Pilot'", 'profile renamed');
+  // Today page: the four pillars, today's to-do added and ticked in place
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.today-main .t-pillar')].map(e => e.textContent.trim())"), ['Plan', 'Learn', 'Create', 'Automate'], 'four pillars on Today');
+  assert.equal(await count('.hm-day.today'), 1, 'month at a glance marks today');
+  const todos = await count('.today-side .t-todo');
+  await fill('#home-plan-input', 'Review chapter 3');
+  await submit('[data-form="home-plan"]');
+  await waitFor(`document.querySelectorAll('.today-side .t-todo').length === ${todos + 1}`, 'plan added from Today');
+  assert.equal(await evaluate("document.activeElement?.id"), 'home-plan-input', 'focus stays in the add field');
+  await evaluate("(() => { const row = [...document.querySelectorAll('.today-side .t-todo')].find(r => r.textContent.includes('Review chapter 3')); row.querySelector('input').click(); return true; })()");
+  await waitFor("[...document.querySelectorAll('.today-side .t-todo.done')].some(r => r.textContent.includes('Review chapter 3'))", 'plan ticked on Today');
+  // Leave the plan counts of the later restart check as they were
+  await evaluate("(async () => { const row = [...document.querySelectorAll('.today-side .t-todo')].find(r => r.textContent.includes('Review chapter 3')); await window.plannerData.remove(row.dataset.id); return true; })()");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.nav-expanded .nav-label')].slice(0, 4).map(e => e.textContent.trim())"), ['Plan', 'Learn', 'Create', 'Automate'], 'sidebar grouped by pillar');
+  await sleep(450);
   await screenshot('10-home');
 
   // Settings

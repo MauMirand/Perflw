@@ -29,7 +29,7 @@ function createOllamaRuntime({ fetchImpl = fetch, base = BASE } = {}) {
       const body = await response.json();
       const models = (Array.isArray(body.models) ? body.models : [])
         .filter(model => model && typeof model.name === 'string')
-        .map(model => ({ name: model.name, size: model.details?.parameter_size || '', cloud: isCloudModel(model) }))
+        .map(model => ({ name: model.name, size: model.details?.parameter_size || '', bytes: Number(model.size) || 0, cloud: isCloudModel(model) }))
         .sort((a, b) => a.name.localeCompare(b.name));
       return { available: true, models, error: null };
     } catch (error) {

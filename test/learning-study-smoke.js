@@ -245,5 +245,7 @@ async function run() {
   return report;
 }
 
-run().then(async report => { await stop(); console.log(report.map(line => `• ${line}`).join('\n')); fs.rmSync(root, { recursive: true, force: true }); console.log('Learning workflow smoke test passed.'); })
-  .catch(async error => { console.error(error); if (diagnostics) console.error(diagnostics.slice(0, 3000)); await stop(); fs.rmSync(root, { recursive: true, force: true }); process.exit(1); });
+// Office may still hold a temp file in the test folder for a moment after the PDF copy; cleanup retries and never fails the run.
+const cleanup = () => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 500 }); } catch (error) { console.warn(`Test folder left behind: ${error.message}`); } };
+run().then(async report => { await stop(); console.log(report.map(line => `• ${line}`).join('\n')); cleanup(); console.log('Learning workflow smoke test passed.'); })
+  .catch(async error => { console.error(error); if (diagnostics) console.error(diagnostics.slice(0, 3000)); await stop(); cleanup(); process.exit(1); });

@@ -13,7 +13,7 @@
 const { createHash } = require('node:crypto');
 const { readZip } = require('./learning-import');
 
-const LIMITS = Object.freeze({ perFile: 40, minSide: 160, maxBytes: 12 * 1024 * 1024, renderWidth: 1280, maxSide: 1280 });
+const LIMITS = Object.freeze({ perFile: 40, minSide: 160, maxBytes: 12 * 1024 * 1024, renderWidth: 1280, maxSide: 1280, pdfCover: 0.15, pdfFewChars: 100 });
 const sha = bytes => createHash('sha256').update(bytes).digest('hex').slice(0, 40);
 
 /* Format and size from the file header (PNG IHDR, JPEG SOF, WebP VP8/VP8L/VP8X). */
@@ -48,8 +48,11 @@ function collect(bytes, type, extracted) {
     return info ? [{ key: sha(bytes), at: 0, page: 1, whole: true, mime: info.mime, bytes }] : [];
   }
   if (type === 'pdf') {
+    // A page is read when its pictures carry content: they cover a good part of it, or the page has almost no text
+    // of its own (a scanned page, a slide saved as a picture). Logos, icons and bullets on a text page are skipped.
     const fileKey = sha(bytes);
-    return refs.slice(0, LIMITS.perFile).map(ref => ({ key: `${fileKey}-p${ref.page}`, at: ref.at, page: ref.page, pdfPage: ref.page }));
+    return refs.filter(ref => ref.cover == null || ref.cover >= LIMITS.pdfCover || (ref.cover >= 0.05 && (ref.textChars || 0) < LIMITS.pdfFewChars))
+      .slice(0, LIMITS.perFile).map(ref => ({ key: `${fileKey}-p${ref.page}`, at: ref.at, page: ref.page, pdfPage: ref.page }));
   }
   // Word / PowerPoint: media entries; a picture on most slides (a logo, a template background) is decoration.
   const zip = readZip(bytes);
@@ -70,14 +73,14 @@ function collect(bytes, type, extracted) {
 
 /* A picture larger than 1,280 px on its long side is scaled down for the vision model: small text stays readable
    and it costs far fewer image tokens. Smaller pictures are sent as they are. */
-async function shrink(entry) {
+async function shrink(entry, maxSide = LIMITS.maxSide) {
   const info = imageInfo(entry.bytes);
   const side = info ? Math.max(info.width, info.height) : 0;
-  if (!side || side <= LIMITS.maxSide) return { mime: entry.mime, data: Buffer.from(entry.bytes).toString('base64') };
+  if (!side || side <= maxSide) return { mime: entry.mime, data: Buffer.from(entry.bytes).toString('base64') };
   try {
     const { createCanvas, loadImage } = require('@napi-rs/canvas');
     const image = await loadImage(Buffer.from(entry.bytes));
-    const scale = LIMITS.maxSide / side;
+    const scale = maxSide / side;
     const canvas = createCanvas(Math.round(image.width * scale), Math.round(image.height * scale));
     const context = canvas.getContext('2d');
     context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height);
@@ -87,10 +90,10 @@ async function shrink(entry) {
 }
 
 /* Loader for one file's pictures; PDF pages are drawn with pdf.js on @napi-rs/canvas, one document per loader. */
-function loader(bytes, type) {
+function loader(bytes, type, { maxSide = LIMITS.maxSide } = {}) {
   let pdf = null;
   async function load(entry) {
-    if (entry.bytes) return shrink(entry);
+    if (entry.bytes) return shrink(entry, maxSide);
     if (type !== 'pdf') return null;
     if (!pdf) {
       const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');

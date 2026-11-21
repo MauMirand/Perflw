@@ -140,7 +140,7 @@ NONE
     file: `---
 name: Learning grounded answers
 description: Answer a student's question using only numbered excerpts from the subject's File Data and Information Center, cite them, pick notes worth keeping, or reply NOT_IN_FILE.
-version: 4
+version: 5
 enabled: true
 activation: always
 triggers: question, ask, explain, what is, why, how, define, compare
@@ -153,10 +153,10 @@ The excerpts are the only source of truth. They come from the student's own uplo
 
 ## Steps
 1. Read the question, then every excerpt. Each excerpt starts with its label, e.g. [2] Cell Biology › 1.1 Membrane Proteins.
-2. Decide: do the excerpts contain what is needed to answer? Partial support is enough for a partial answer; say what is missing.
-3. If they contain nothing relevant, reply with exactly NOT_IN_FILE and nothing else.
+2. Decide: is any excerpt about what the question asks? If an excerpt names the thing asked about and says something about it, answer from that, even when it is brief ("What does the pump do?" → say what the excerpt says the pump does). Partial support is enough for a partial answer; say what is missing.
+3. Only if no excerpt is about the question's subject at all, reply with exactly NOT_IN_FILE and nothing else.
 4. Otherwise answer clearly and briefly (2-6 sentences or a short list). Put the excerpt label after each fact: "… by facilitated diffusion [2]".
-5. Pick 1-3 NOTES: short, self-contained facts from the excerpts worth saving for revision.
+5. Pick 1-3 NOTES: short, self-contained facts copied closely from the excerpts, worth saving for revision. Never add facts the excerpts do not state.
 6. Never use outside knowledge, never invent page numbers, never cite a label that was not given.
 
 ## Notes from the student
@@ -233,7 +233,7 @@ const AGENTS = {
     instructions: `# How you work
 
 - Follow the "Learning grounded answers" skill and its output format exactly.
-- The excerpts are your only source. If they do not contain the answer, reply with exactly NOT_IN_FILE.
+- The excerpts are your only source. If an excerpt is about what the question asks, answer from it, even briefly. Reply with exactly NOT_IN_FILE only when no excerpt is about the question at all.
 - Cite every fact with the excerpt label in brackets, e.g. [1] or [3].
 - Answer in the language of the question. Keep it short and clear: 2-6 sentences or a short list.
 - After the answer, give 1-3 NOTES worth saving for revision, each one self-contained.
@@ -246,19 +246,31 @@ const AGENTS = {
   }
 };
 
-const READER_CONTEXT = 8192; // a picture is about 1,000–1,500 tokens; the reading can be long
+/* Context for every Learning agent: a picture is about 1,000–1,500 tokens and its reading can be long; an overview
+   request for a large file is about 3,000 tokens plus the agent's own files. Ollama's default (4,096) is too small. */
+const LEARNING_CONTEXT = 8192;
 /* Vision models by name: qwen2.5vl, llama3.2-vision, llava, gemma3, minicpm-v, moondream, granite-vision … */
 const VISION = /(vl\b|vl:|-vl|vision|llava|bakllava|gemma3|minicpm-v|moondream|pixtral|llama4|ocr)/i;
 /* OCR models read the text of pictures directly, small and fast (glm-ocr 0.9B, PaddleOCR-VL, LightOnOCR, DeepSeek-OCR). */
 const OCR = /ocr/i;
-/* Picks a chat model from a provider's list: the largest named size up to 14B ("qwen2.5:7b"), else the first.
-   vision: true picks only vision models (the Image Reader); otherwise vision models are left for it. */
-function pickModel(models, { vision = false } = {}) {
+/* Picks a chat model from a provider's list.
+   Text agents: the largest model up to 14B that fits entirely in the GPU's memory (vram, MB) with room for its
+   context, because a model that spills onto the CPU keeps several cores busy for every request (qwen2.5:7b on a
+   4 GB GPU: about 3 cores for a minute per overview; qwen2.5:3b: 5 seconds, all on the GPU). Without GPU
+   information: the largest up to 14B ("qwen2.5:7b"), else the first.
+   vision: true picks only vision models (the Image Reader), an OCR model first; otherwise they are left for it. */
+const GPU_SHARE = 0.75; // a model may use up to 75% of the GPU memory; the rest is its context and the desktop
+function pickModel(models, { vision = false, vram = null } = {}) {
   const ids = (models || []).map(m => (typeof m === 'string' ? m : m.id)).filter(id => id && !/embed|whisper|tts|vision-only|:cloud\b/i.test(id) && VISION.test(id) === vision);
   if (!ids.length) return null;
   const size = id => { const m = id.toLowerCase().match(/(\d+(?:\.\d+)?)b\b/); return m ? Number(m[1]) : null; };
   if (vision) { const ocr = ids.filter(id => OCR.test(id)); if (ocr.length) return ocr[0]; } // the light OCR model first
   const sized = ids.filter(id => size(id) !== null && size(id) <= 14).sort((a, b) => size(b) - size(a));
+  if (!vision && vram) {
+    const bytesOf = id => { const m = (models || []).find(x => (typeof x === 'string' ? x : x.id) === id); return m && typeof m === 'object' ? Number(m.bytes) || 0 : 0; };
+    const fits = sized.filter(id => bytesOf(id) && bytesOf(id) <= vram * 1024 * 1024 * GPU_SHARE);
+    if (fits.length) return fits[0];
+  }
   return sized[0] || ids[0];
 }
 
@@ -288,6 +300,18 @@ function createLearningAgents({ ecosystem, root }) {
     }
   }
 
+  // GPU memory (MB) from nvidia-smi, asked once; null when there is no NVIDIA GPU or the tool is missing.
+  let vramMb;
+  async function gpuMemory() {
+    if (vramMb !== undefined) return vramMb;
+    vramMb = await new Promise(resolve => {
+      try {
+        require('node:child_process').execFile('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits'], { timeout: 4000, windowsHide: true },
+          (error, out) => resolve(error ? null : Math.max(0, ...String(out).split('\n').map(Number).filter(Number.isFinite)) || null));
+      } catch { resolve(null); }
+    });
+    return vramMb;
+  }
   let modelCache = null;
   async function chooseModel(userId, vision = false) {
     if (!modelCache || Date.now() - modelCache.at > 60000) {
@@ -295,7 +319,7 @@ function createLearningAgents({ ecosystem, root }) {
       try { const listed = await ecosystem.listModels(userId, 'ollama-local'); if (listed.available) models = listed.models; } catch { models = null; }
       modelCache = { at: Date.now(), models };
     }
-    return modelCache.models ? pickModel(modelCache.models, { vision }) : null;
+    return modelCache.models ? pickModel(modelCache.models, { vision, vram: vision ? null : await gpuMemory() }) : null;
   }
 
   /* Returns { analyzer, assistant, reader } agent ids, creating whatever is missing. */
@@ -311,7 +335,7 @@ function createLearningAgents({ ecosystem, root }) {
       ecosystem.writeAgentFile(userId, agent.id, 'identity.md', def.identity);
       ecosystem.writeAgentFile(userId, agent.id, 'instructions.md', def.instructions);
       ecosystem.writeAgentFile(userId, agent.id, 'capabilities.md', def.capabilities);
-      ecosystem.updateAgentConfig(userId, agent.id, { skills: def.skills, context: { maxSkills: 2, ...(def.vision ? { maxContextTokens: READER_CONTEXT } : {}) } });
+      ecosystem.updateAgentConfig(userId, agent.id, { skills: def.skills, context: { maxSkills: 2, maxContextTokens: LEARNING_CONTEXT } });
       registry[role] = agent.id; changed = true;
     }
     if (changed) writeRegistry(userId, registry);
@@ -331,22 +355,23 @@ function createLearningAgents({ ecosystem, root }) {
       model = await chooseModel(userId, vision);
       if (!model) return { missing: vision ? `No vision model is available for ${agent.name}. Run "ollama pull qwen2.5vl:7b", or choose a provider that reads images on the Agents page.` : `No AI model is available for ${agent.name}. Start Ollama with a model, or choose a provider on the Agents page.`, id: agent.id, name: agent.name };
       ecosystem.updateAgentConfig(userId, agent.id, { provider: { connectionId: 'ollama-local', model } });
-      if (vision) { const registry = readRegistry(userId); writeRegistry(userId, { ...registry, models: { ...(registry.models || {}), reader: model } }); }
+      { const registry = readRegistry(userId); writeRegistry(userId, { ...registry, models: { ...(registry.models || {}), [role]: model } }); }
     }
-    if (vision && !agent.config.context.maxContextTokens) ecosystem.updateAgentConfig(userId, agent.id, { context: { ...agent.config.context, maxContextTokens: READER_CONTEXT } });
-    // A Reader on a general vision model the app chose itself moves to an OCR model once one is installed.
-    // A model the person picked on the Agents page is kept.
-    if (vision && model && model !== 'unset' && !OCR.test(model) && agent.config.provider.connectionId === 'ollama-local') {
+    if (!agent.config.context.maxContextTokens) ecosystem.updateAgentConfig(userId, agent.id, { context: { ...agent.config.context, maxContextTokens: LEARNING_CONTEXT } });
+    // A Learning agent on a model the app chose itself moves to a better fit when one is installed: the Reader to an
+    // OCR model, the text agents to the largest model that runs entirely on the GPU. A model the person picked on the
+    // Agents page is kept.
+    if (model && model !== 'unset' && agent.config.provider.connectionId === 'ollama-local' && !(vision && OCR.test(model))) {
       const registry = readRegistry(userId);
-      const auto = !registry.models || !registry.models.reader || registry.models.reader === model;
+      const auto = !registry.models || !registry.models[role] || registry.models[role] === model;
       if (auto) {
         modelCache = null;
-        const better = await chooseModel(userId, true);
-        if (better && OCR.test(better)) {
+        const better = await chooseModel(userId, vision);
+        if (better && better !== model && (!vision || OCR.test(better))) {
           ecosystem.updateAgentConfig(userId, agent.id, { provider: { connectionId: 'ollama-local', model: better } });
-          writeRegistry(userId, { ...registry, models: { ...(registry.models || {}), reader: better } });
+          writeRegistry(userId, { ...registry, models: { ...(registry.models || {}), [role]: better } });
           model = better;
-        }
+        } else if (!registry.models || !registry.models[role]) writeRegistry(userId, { ...registry, models: { ...(registry.models || {}), [role]: model } });
       }
     }
     const blocking = agent.problems.filter(p => /provider connection|no longer exists/i.test(p.message));

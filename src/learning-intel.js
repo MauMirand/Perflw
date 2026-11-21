@@ -36,7 +36,10 @@ const runs = (xml, name) => entities((xml.match(new RegExp(`<${name}(?:\\s[^>]*)
 const STOP = new Set(('a an and are as at be been being but by can could did do does doing for from had has have having he her here hers him his how i if in into is it its itself just me more most my no nor not of off on once only or other our out over own same she should so some such than that the their them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yours also may might must shall about above after again against all am any because before below between both down during each few further many much per via within without upon onto ' +
   'one two use used using get got make made like well even still yet thus therefore however etc eg ie vs ' +
   'explain describe define tell give list show discuss according file document lecture slide slides page pages topic topics question answer please ' +
-  'difference differences different differ compare comparison contrast versus vs between similarity similarities relationship relate related').split(' '));
+  'difference differences different differ compare comparison contrast versus vs between similarity similarities relationship relate related ' +
+  // chat spellings, and Filipino (Tagalog) question and function words: the topic words around them are what count
+  'wat wht whats wats pls plz u ur abt bout ' +
+  'ano ang ng sa mga ba si ni kay na at ay para paano bakit ito iyan yan yun yung kung saan kailan sino alin mo ko ka po naman lang din rin nang ano-ano ibig sabihin kahulugan').split(' '));
 /* Light suffix stripping so "proteins"/"protein" and "transported"/"transport" meet. */
 function stem(word) {
   let w = word;
@@ -46,6 +49,7 @@ function stem(word) {
   if (w.length > 6 && w.endsWith('ing')) w = w.slice(0, -3);
   else if (w.length > 5 && w.endsWith('ed')) w = w.slice(0, -2);
   else if (w.length > 6 && w.endsWith('ly')) w = w.slice(0, -2);
+  else if (w.length > 4 && w.endsWith('e')) w = w.slice(0, -1);
   return w;
 }
 function words(text) { return (String(text).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').match(/[a-z0-9][a-z0-9+'-]*/g) || []).map(w => w.replace(/'s$|'$/g, '')); }
@@ -226,7 +230,24 @@ async function pdfBlocks(buffer) {
     for (let n = 1; n <= pageCount; n++) {
       const page = await doc.getPage(n);
       const content = await page.getTextContent({ includeMarkedContent: false });
-      try { const ops = await page.getOperatorList(); if (ops.fnArray.some(fn => PICTURE_OPS.has(fn))) imagePages.push(n); } catch { /* no picture check */ }
+      // How much of the page its pictures cover (each picture is the unit square under the current transform), and
+      // how much real text the page has: a logo in a corner is not worth reading, a full-page slide picture is.
+      try {
+        const ops = await page.getOperatorList(); const O = pdfjs.OPS;
+        let ctm = [1, 0, 0, 1, 0, 0]; const stack = []; let area = 0;
+        const mul = (m, k) => [m[0] * k[0] + m[2] * k[1], m[1] * k[0] + m[3] * k[1], m[0] * k[2] + m[2] * k[3], m[1] * k[2] + m[3] * k[3], m[0] * k[4] + m[2] * k[5] + m[4], m[1] * k[4] + m[3] * k[5] + m[5]];
+        for (let i = 0; i < ops.fnArray.length; i++) {
+          const fn = ops.fnArray[i];
+          if (fn === O.save) stack.push(ctm); else if (fn === O.restore) ctm = stack.pop() || ctm;
+          else if (fn === O.transform) ctm = mul(ctm, ops.argsArray[i]);
+          else if (PICTURE_OPS.has(fn)) area += Math.abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]);
+        }
+        if (area > 0) {
+          const textChars = content.items.reduce((sum, it) => sum + (typeof it.str === 'string' ? it.str.trim().length : 0), 0);
+          const box = page.getViewport({ scale: 1 }); // the page size
+          imagePages.push({ page: n, cover: Math.min(1, area / Math.max(1, box.width * box.height)), textChars });
+        }
+      } catch { /* no picture check */ }
       const viewport = page.getViewport({ scale: 1 });
       let current = null;
       for (const item of content.items) {
@@ -315,7 +336,7 @@ async function pdfBlocks(buffer) {
     splitNumberedItems(blocks);
     for (const block of blocks) delete block._size;
     // A page's picture is read as a whole page and its text goes after that page's own text.
-    const images = imagePages.map(page => ({ page, at: blocks.reduce((n, b, i) => ((b.page || 0) <= page ? i + 1 : n), 0) }));
+    const images = imagePages.map(({ page, cover, textChars }) => ({ page, cover, textChars, at: blocks.reduce((n, b, i) => ((b.page || 0) <= page ? i + 1 : n), 0) }));
     return { blocks, pages: doc.numPages, images };
   } finally { await doc.destroy().catch(() => {}); }
 }
@@ -446,34 +467,95 @@ function imageBlocks(reading, { page = null, asHeadings = false } = {}) {
      a lone step number before a heading               → dropped (the app numbers sections itself)
      any other line                                    → its own line (sentences, table rows such as "CSR (voice) 80 100 +20")
    Markdown or HTML tables some OCR models write are turned into "cell | cell" rows. */
-const ACRONYM = /^[A-Z0-9&/().+-]{2,5}$/;
+/* An acronym in a line written in capitals: no vowel (CSR, HR, BPO), a digit (Q1), or a common one. "THE", "SET" and
+   "GAPS" are words, not acronyms. */
+const KNOWN_ACRONYMS = new Set(['AI', 'IT', 'UK', 'US', 'EU', 'UN', 'GDP', 'CEO', 'CFO', 'BPO', 'ATP', 'DNA', 'RNA', 'KPI', 'ROI', 'HR', 'CSR', 'USA', 'OK', 'IOT', 'API', 'SME', 'NGO']);
+const isAcronym = w => { const letters = w.replace(/[^A-Za-z]/g, ''); return letters.length > 0 && letters.length <= 5 && letters === letters.toUpperCase() && (KNOWN_ACRONYMS.has(letters) || /\d/.test(w) || !/[AEIOU]/.test(letters)); };
 function titleCase(text) {
-  return text.split(/\s+/).map((w, i) => (ACRONYM.test(w) && !/^[A-Z][a-z]/.test(w) && w.length <= 4 ? w : i && /^(AND|OR|OF|THE|TO|IN|ON|FOR|A|AN|AT|BY|WITH|VS\.?)$/.test(w) ? w.toLowerCase() : w.charAt(0) + w.slice(1).toLowerCase())).join(' ');
+  return text.split(/\s+/).map((w, i) => (isAcronym(w) ? w : i && /^(AND|OR|OF|THE|TO|IN|ON|FOR|A|AN|AT|BY|WITH|VS\.?|FROM|INTO)$/.test(w) ? w.toLowerCase() : w.charAt(0) + w.slice(1).toLowerCase())).join(' ');
 }
+/* OCR reads a chart column by column: "42 58 73 91" then "2021 2022 2023 2024". A run of value-only lines next to a
+   run of the same number of short labels is paired back into "label: value" lines. */
+function pairChartColumns(lines) {
+  const isValue = l => /^[+\-]?[\d.,]+%?$/.test(l);
+  const isLabel = l => l && !isValue(l) && l.split(' ').length <= 3 && l.length <= 24 && !/[.!?]$/.test(l) || /^(19|20)\d\d$/.test(l);
+  const runAt = (i, test) => { const out = []; let j = i; while (j < lines.length && lines[j] && test(lines[j])) out.push(j++); return out; };
+  const skipBlank = j => { while (j < lines.length && !lines[j]) j++; return j; };
+  const out = lines.slice(); const drop = new Set();
+  for (let i = 0; i < lines.length; i++) {
+    if (drop.has(i) || !lines[i] || !isValue(lines[i]) || /^(19|20)\d\d$/.test(lines[i])) continue;
+    const values = runAt(i, l => isValue(l) && !/^(19|20)\d\d$/.test(l)); if (values.length < 2) continue;
+    const after = skipBlank(values[values.length - 1] + 1); const labels = runAt(after, isLabel);
+    if (labels.length !== values.length) continue;
+    values.forEach((v, k) => { out[labels[k]] = `${lines[labels[k]]}: ${lines[v]}`; drop.add(v); });
+    i = labels[labels.length - 1];
+  }
+  return out.filter((_, i) => !drop.has(i));
+}
+/* Box labels inside a panel: kept as labels ("### Example"), never as panel headings. */
+const LABEL = /^(examples?|for example|e\.g\.|key (points?|findings|ideas|terms|takeaways?|business goals)|notes?|considerations|results?|summary|tips?|remember|reminder|definition|in this example|other gaps identified|in short|why it matters|did you know)\b/i;
 function ocrReading(raw) {
   let text = String(raw || '').replace(/\r/g, '');
   // HTML tables → rows
   text = text.replace(/<\/t[dh]>\s*<t[dh][^>]*>/gi, ' | ').replace(/<tr[^>]*>/gi, '\n').replace(/<[^>]+>/g, ' ');
-  const lines = text.split('\n').map(l => l.replace(/\s+/g, ' ').trim());
+  const lines = pairChartColumns(text.split('\n').map(l => l.replace(/^#+\s*/, '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim())
+    .filter(l => !/^\|?\s*:?-{3,}/.test(l))); // markdown table rules
+  const words = l => l.split(' ').filter(Boolean);
   const capsShare = l => { const letters = l.replace(/[^A-Za-z]/g, ''); return letters.length ? letters.replace(/[^A-Z]/g, '').length / letters.length : 0; };
-  const isHeading = l => l.length <= 70 && l.split(' ').length <= 9 && !/[.,;]$/.test(l) && capsShare(l) >= 0.75 && /[A-Z]{3}/.test(l);
-  const out = []; let title = '';
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].replace(/^#+\s*/, '').replace(/\*\*/g, '');
-    if (!line) continue;
-    if (/^\|?\s*:?-{3,}/.test(line)) continue; // markdown table rule
-    if (/^\d{1,2}[.)]?$/.test(line) && lines[i + 1] && isHeading(lines[i + 1])) continue;
-    if (line.startsWith('|')) { out.push(`- ${line.replace(/^\||\|$/g, '').split('|').map(c => c.trim()).filter(Boolean).join(' | ')}`); continue; }
-    const bullet = line.match(/^[•●▪◦■\-–*✓✔]\s*(.+)$/);
-    if (bullet) { out.push(`- ${bullet[1]}`); continue; }
-    if (isHeading(line)) {
-      const heading = titleCase(line.replace(/:$/, ''));
-      if (!title && !out.length) { title = heading; continue; }
-      out.push(`## ${heading}`); continue;
-    }
-    if (line.length <= 60 && /:$/.test(line) && line.split(' ').length <= 7) { out.push(`### ${line.replace(/:$/, '')}`); continue; }
-    out.push(line, '');
+  const isBullet = l => /^[•●▪◦■\-–*✓✔]\s*\S/.test(l);
+  const isStep = l => /^\d{1,2}[.)]?$/.test(l);
+  const isCaps = l => l.length <= 70 && words(l).length <= 9 && !/[.,;]$/.test(l) && capsShare(l) >= 0.75 && /[A-Z]{3}/.test(l);
+  // Title Case: short, no closing punctuation, and its long words start with a capital ("Choose the Right Person").
+  const isTitleCase = l => {
+    const w = words(l); if (!w.length || w.length > 7 || l.length > 60 || /[.,;!?]$/.test(l) || !/^[A-Z0-9]/.test(l) || !/[A-Za-z]{3}/.test(l)) return false;
+    const long = w.filter(x => x.replace(/[^A-Za-z]/g, '').length > 3);
+    return !long.length || long.filter(x => /^[A-Z0-9("']/.test(x)).length / long.length >= 0.75;
+  };
+  const numeric = l => { const w = words(l); return w.length ? w.filter(x => /^[+\-]?[\d.,]+%?$/.test(x)).length / w.length : 0; };
+  // A table row or chart labels: mostly numbers, two numbers or more, or a label ending in a bare number ("Team Leader 10").
+  const isRow = l => numeric(l) >= 0.25 || (l.match(/(^|\s)[+\-]?\d[\d.,]*%?(?=\s|$)/g) || []).length >= 2 || /\s[+\-]?\d[\d.,]*%?$/.test(l);
+  // A sentence has lowercase words ("Position Current Required Net Increase" is a table header, not one).
+  const isSentence = l => !isRow(l) && (/[.!?]$/.test(l) || (words(l).length >= 5 && words(l).some(x => /^[a-z]{3,}/.test(x))));
+  const next = i => { for (let j = i + 1; j < lines.length; j++) if (lines[j]) return { line: lines[j], at: j }; return null; };
+  const prev = i => { for (let j = i - 1; j >= 0; j--) if (lines[j]) return lines[j]; return ''; };
+  // What each line is: a panel heading, a box label, a bullet, a step number, or text.
+  const kind = lines.map((l, i) => {
+    if (!l) return 'blank';
+    if (isBullet(l)) return 'bullet';
+    if (isStep(l)) { const n = next(i); return n && (isCaps(n.line) || isTitleCase(n.line)) ? 'step' : 'text'; }
+    const bare = l.replace(/:$/, '');
+    if (LABEL.test(bare) && words(bare).length <= 5) return 'label';
+    if (/:$/.test(l) && l.length <= 60 && words(l).length <= 7) return 'label';
+    if (isRow(l) || !/[A-Za-z]{3}/.test(l)) return 'text';
+    if (isCaps(l)) return 'heading';
+    // A Title Case line is a heading when text or a list follows it and it does not continue a sentence.
+    const n = next(i); const before = prev(i);
+    if (isTitleCase(l) && n && !isRow(n.line) && (isSentence(n.line) || isBullet(n.line) || LABEL.test(n.line.replace(/:$/, ''))) && (!before || /[.!?:)"]$/.test(before) || isStep(before) || isCaps(before) || isTitleCase(before) || isBullet(before) || lines[i - 1] === '')) return 'heading';
+    return 'text';
+  });
+  // The first line is the picture's title, unless it is the first of several panels of the same kind
+  // ("DEMAND" / "SUPPLY" / "EQUILIBRIUM": each heading followed by one line, with no title above them).
+  let title = '';
+  const firstAt = kind.findIndex(k => k !== 'blank');
+  if (firstAt >= 0 && (kind[firstAt] === 'heading' || (kind[firstAt] === 'text' && isTitleCase(lines[firstAt])))) {
+    const heads = kind.map((k, i) => (k === 'heading' ? i : -1)).filter(i => i > firstAt);
+    const bodyBetween = (from, to) => kind.slice(from + 1, to).filter(k => k === 'text' || k === 'bullet').length;
+    const stepsUsed = kind.includes('step');
+    const panels = heads.length >= 2 && !stepsUsed && bodyBetween(firstAt, heads[0]) === 1 && bodyBetween(heads[0], heads[1]) === 1 && isCaps(lines[firstAt]) === isCaps(lines[heads[0]]);
+    if (!panels) { title = titleCase(lines[firstAt].replace(/:$/, '')); kind[firstAt] = 'title'; }
   }
+  const out = [];
+  lines.forEach((line, i) => {
+    switch (kind[i]) {
+      case 'blank': case 'step': case 'title': return;
+      case 'bullet': out.push(`- ${line.replace(/^[•●▪◦■\-–*✓✔]\s*/, '')}`); return;
+      case 'label': out.push(`### ${line.replace(/:$/, '')}`); return;
+      case 'heading': out.push(`## ${isCaps(line) ? titleCase(line.replace(/:$/, '')) : line.replace(/:$/, '')}`); return;
+      default:
+        if (line.startsWith('|')) { out.push(`- ${line.replace(/^\||\|$/g, '').split('|').map(c => c.trim()).filter(Boolean).join(' | ')}`); return; }
+        out.push(line, '');
+    }
+  });
   return { title, text: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), summary: '' };
 }
 
@@ -491,7 +573,12 @@ function applyImages(blocks, images, readings, { asHeadings = false } = {}) {
         if (b.kind === 'h') { if (/^slide \d+$/i.test(b.text)) { out[i] = { ...b, text: reading.title }; named = true; } break; }
       }
     }
-    out.splice(at, 0, ...imageBlocks(named ? { ...reading, title: '' } : reading, { page: img.page || null, asHeadings }));
+    let added = imageBlocks(named ? { ...reading, title: '' } : reading, { page: img.page || null, asHeadings });
+    if (img.page) {
+      const own = new Set(out.filter(b => b.page === img.page && !b.image).flatMap(b => (b.lines && b.lines.length ? b.lines : [b.text])).map(normKey).filter(k => k.length >= 12));
+      if (own.size) added = added.filter(b => b.kind === 'h' || b.kind === 'sub' || !own.has(normKey(b.text)));
+    }
+    out.splice(at, 0, ...added);
   }
   return out;
 }
@@ -652,6 +739,21 @@ function describe(section) {
   }
   return { text: '', from: null };
 }
+/* A picture with panels (steps, columns, boxes) inside one section: each panel gives one point, its heading with its
+   first statement ("Assign Tasks: Determine who will perform each task …"), in the picture's order. Box labels such as
+   "Example" are not panels. Returns [] when the section has fewer than two panels. */
+function panelPoints(section) {
+  const out = []; let panel = null;
+  // Panels are the picture's top heading level here; deeper ones are box labels inside a panel.
+  const top = Math.min(...section.body.filter(b => b.kind === 'sub' && b.image).map(b => b.depth || 2));
+  for (const b of section.body) {
+    if (b.kind === 'sub' && b.image && (b.depth || 2) === top) { panel = { title: b.text, text: '' }; out.push(panel); continue; }
+    if (b.kind === 'sub') continue;
+    if (panel && !panel.text && b.image && (b.kind === 'p' || b.kind === 'li')) panel.text = sentences(b.text)[0] || b.text;
+  }
+  const points = out.filter(x => x.text).map(x => { const t = `${x.title}: ${x.text}`; return t.length > 300 ? `${t.slice(0, 297).trimEnd()}…` : t; });
+  return points.length >= 2 ? points : [];
+}
 function keyPointsOf(section, max, ctx, skip) {
   const headingTerms = terms(section.title);
   for (const block of section.body) if (block.kind === 'sub') headingTerms.push(...terms(block.text));
@@ -701,7 +803,13 @@ function analyze({ blocks, pages }, { fileName, fileType }) {
       // Everything read from the section's pictures, in order: shown whole in the notes, not only the key points.
       picture: section.body.filter(b => b.image).map(b => (b.kind === 'sub' ? `${(b.depth || 2) >= 3 ? '###' : '##'} ${b.text}` : b.kind === 'li' ? `- ${b.text}` : b.text)).slice(0, 120),
       description: description.text,
-      keyPoints: keyPointsOf(section, max, ctx, description.from),
+      keyPoints: (() => {
+        const panels = panelPoints(section).slice(0, LIMITS.listPoints);
+        if (!panels.length) return keyPointsOf(section, max, ctx, description.from);
+        // Panels first, then the strongest other points while there is room (never repeating a panel's statement).
+        const rest = keyPointsOf(section, max, ctx, description.from).filter(p => !panels.some(x => x.includes(p.replace(/…$/, '').slice(0, 60))));
+        return [...panels, ...rest].slice(0, Math.max(max, panels.length));
+      })(),
       body: section.body.map(b => (b.kind === 'li' ? `- ${b.text}` : b.kind === 'sub' ? `${b.text}:` : b.text)).join('\n')
     };
   });
@@ -854,7 +962,7 @@ function search(question, docs, { mode = 'strict', preferDocId = null, limit } =
   for (const doc of docs) doc.chunks.forEach((chunk, index) => all.push({ doc, chunk, index, tokens: [...terms(chunk.heading), ...terms(chunk.heading), ...terms(chunk.context || ''), ...terms(chunk.text)] }));
   if (!all.length) return { hits: [], terms: qTerms };
   const avg = all.reduce((n, c) => n + c.tokens.length, 0) / all.length || 1;
-  const matches = (token, term) => token === term || (broad && term.length >= 4 && token.length >= 4 && (token.startsWith(term.slice(0, Math.max(4, term.length - 2))) || term.startsWith(token.slice(0, Math.max(4, token.length - 2)))));
+  const matches = (token, term) => token === term || (broad && term.length >= 4 && token.length >= 4 && (token.startsWith(term.slice(0, Math.max(4, term.length - 2))) || term.startsWith(token.slice(0, Math.max(4, token.length - 2))) || (term.length >= 5 && oneEdit(token, term))));
   const df = new Map();
   for (const term of qTerms) df.set(term, all.filter(c => c.tokens.some(t => matches(t, term))).length);
   const scored = all.map(c => {
@@ -886,8 +994,22 @@ function search(question, docs, { mode = 'strict', preferDocId = null, limit } =
   return { hits: picked.map(c => ({ docId: c.doc.id, docTitle: c.doc.title, fileName: c.doc.sources ? c.doc.sources[c.doc.sources.length - 1] : c.doc.fileName, number: c.chunk.number, heading: c.chunk.heading, page: c.chunk.page, text: c.chunk.text, score: Math.round(c.score * 100) / 100, coverage: Math.round(c.coverage * 100) / 100 })), terms: qTerms };
 }
 
+/* True when a and b differ by one inserted, deleted or changed letter (a typo). */
+function oneEdit(a, b) {
+  if (Math.abs(a.length - b.length) > 1 || a === b) return false;
+  let i = 0; let j = 0; let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+/* "Quiz me", "practice questions", "test me": practice questions written from the file. */
+const QUIZ_RE = /\b(quiz(zes)?( me)?|practice (questions?|test|quiz|problems?|exam)|test me|review questions?|exam questions?|flash ?cards?|mock (test|exam)|reviewer)\b/i;
+const isQuizRequest = question => QUIZ_RE.test(question);
 /* Questions about the whole file ("summarize", "main points") are answered from the analysis, not a term search. */
-const OVERVIEW_RE = /\b(summar(y|ise|ize)|overview|main (idea|point|topic)s?|key (point|idea|takeaway)s?|what('s| is) (this|the) (file|document|lecture|presentation|reading|chapter) about|outline|gist|tl;?dr)\b/i;
+const OVERVIEW_RE = /\b(summar(y|ies|ise|ize)|overview|main (idea|point|topic|part)s?|key (point|idea|takeaway|topic)s?|what('?s| is| are) (this|the|these) (file|document|lecture|presentation|reading|chapter|module|notes?|slides?)( all)? about|what (does|do) (this|the) (file|document|lecture|module|chapter) (cover|discuss|talk about)|what topics|outline|gist|tl;?dr)\b/i;
 const isOverviewQuestion = question => OVERVIEW_RE.test(question);
 
 /* Casual messages ("hi", "thanks!", "who are you?") get a normal reply instead of a file lookup. A greeting followed by
@@ -907,7 +1029,7 @@ function isSmallTalk(text) {
    (it, that, the second …) or a continuation opener (and, what about, why, explain more …). The words that only point
    back are not counted as subject words. */
 const REFERS = /\b(it|its|that|this|these|those|they|them|their|former|latter|first|second|third|fourth|last|previous|above|same|one|ones)\b/i;
-const CONTINUES = /^\s*(and|but|so|also|then|what about|how about|why|how come|more|simpler|elaborate|example|for example|give (me )?(an? )?(example|examples)|tell me more|in simpler terms|explain (it|that|this|more|again|further|simpler|simply)|(can|could) you (explain|simplify|elaborate|give))\b/i;
+const CONTINUES = /^\s*(and|but|so|also|then|what about|how about|why|how come|more|simpler|elaborate|example|for example|give (me )?(an? )?(another )?(example|examples)|tell me more|in simpler terms|explain (it|that|this|more|again|further|simpler|simply)|(can|could) you (explain|simplify|elaborate|give)|i (still )?(do ?n[o']?t|dont|did ?n[o']?t|didnt) (get|understand)|i'?m (confused|lost)|huh|what do you mean)\b/i;
 const POINTERS = new Set(['first', 'second', 'third', 'fourth', 'last', 'previous', 'above', 'same', 'former', 'latter', 'example', 'simpler', 'simply', 'elaborate', 'further', 'again', 'term', 'mean'].map(stem));
 function isFollowUp(question) {
   const q = String(question || '').trim();
@@ -970,4 +1092,4 @@ function extractiveAnswer(question, hits, max = 3) {
   return out;
 }
 
-module.exports = { ocrReading, imageBlocks, applyImages, learningIntent, answerStyle, needsStructure, structureWindows, parseStructure, applyStructure, STRUCTURE, isSmallTalk, isFollowUp, assignPages, extractBlocks, analyze, fileMarkdown, subjectMarkdown, similarDoc, baseName, search, isOverviewQuestion, extractiveAnswer, sentences, terms, LIMITS };
+module.exports = { isQuizRequest, oneEdit, ocrReading, imageBlocks, applyImages, learningIntent, answerStyle, needsStructure, structureWindows, parseStructure, applyStructure, STRUCTURE, isSmallTalk, isFollowUp, assignPages, extractBlocks, analyze, fileMarkdown, subjectMarkdown, similarDoc, baseName, search, isOverviewQuestion, extractiveAnswer, sentences, terms, LIMITS };

@@ -164,16 +164,38 @@
 
   // ───────────────────────── auth scenes
   const SCENES = ['loading-page', 'login-page', 'register-page', 'profile-page', 'main-page'];
+  let currentScene = 'loading-page';
   function showScene(id) {
+    // Between Sign in and Create account only the form moves (sideways, in reading order); the brand panel stays.
+    const swap = ['login-page', 'register-page'].includes(currentScene) && ['login-page', 'register-page'].includes(id) && currentScene !== id;
     SCENES.forEach(scene => { $(`#${scene}`).hidden = scene !== id; });
+    const el = $(`#${id}`);
+    el.classList.remove('auth-swap', 'from-left', 'from-right');
+    if (swap) { void el.offsetWidth; el.classList.add('auth-swap', id === 'register-page' ? 'from-right' : 'from-left'); }
+    currentScene = id;
     document.body.classList.toggle('is-auth', id !== 'main-page');
     const heading = $(`#${id} h1`);
-    if (heading) heading.focus();
+    if (heading) heading.focus({ preventScroll: true });
   }
   function feedback(form, message) {
     const box = $('.form-feedback', form);
     box.textContent = message || '';
     box.hidden = !message;
+    if (message) { box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake'); }
+  }
+  /* Submit buttons show a small spinner and stay disabled while the account call runs. */
+  function busy(form, on) {
+    form.classList.toggle('is-busy', on);
+    const submit = $('[type=submit]', form); if (submit) { submit.disabled = on; submit.setAttribute('aria-busy', String(on)); }
+  }
+  /* Create account: the four password rules tick as they are met; the confirmation shows when it matches. */
+  const PW_RULES = { length: v => v.length >= 12 && v.length <= 128, upper: v => /[A-Z]/.test(v), lower: v => /[a-z]/.test(v), number: v => /\d/.test(v) };
+  function paintPasswordRules() {
+    const form = $('#register-form'); if (!form) return;
+    const value = form.password.value;
+    $$('[data-rule]', form).forEach(li => { const met = PW_RULES[li.dataset.rule](value); li.classList.toggle('met', met); const state = $('.sr-only', li); if (state) state.textContent = met ? ', met' : ', not met'; });
+    const match = $('[data-match]', form);
+    if (match) match.classList.toggle('matches', !!form.confirmation.value && form.confirmation.value === value);
   }
   async function route(state) {
     S.user = state && state.user ? state.user : null;
@@ -198,30 +220,44 @@
       const input = button.previousElementSibling;
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
-      button.textContent = show ? 'Hide' : 'Show';
+      const label = show ? 'Hide password' : 'Show password';
       button.setAttribute('aria-pressed', String(show));
-      button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      button.setAttribute('aria-label', label); button.title = label;
+      input.focus({ preventScroll: true });
     }));
+    // Caps Lock note under a password field while it has focus.
+    $$('.auth-form input[type="password"]').forEach(input => {
+      const hint = $('.caps-hint', input.closest('.auth-field'));
+      const check = event => { if (hint && event.getModifierState) hint.hidden = !event.getModifierState('CapsLock'); };
+      input.addEventListener('keydown', check); input.addEventListener('keyup', check);
+      input.addEventListener('blur', () => { if (hint) hint.hidden = true; });
+    });
+    $('#register-form').addEventListener('input', paintPasswordRules);
+    $$('.auth-form').forEach(form => form.addEventListener('input', () => { const box = $('.form-feedback', form); if (!box.hidden) feedback(form, ''); }));
     $$('[data-auth]').forEach(button => button.addEventListener('click', () => {
       const target = button.dataset.auth === 'register' ? 'register-page' : 'login-page';
       $$('.auth-scene form').forEach(form => feedback(form, ''));
+      // The email typed on one form carries over to the other.
+      const from = target === 'register-page' ? $('#login-email') : $('#register-email');
+      const to = target === 'register-page' ? $('#register-email') : $('#login-email');
+      if (from.value && !to.value) to.value = from.value;
       showScene(target);
     }));
     $('#login-form').addEventListener('submit', async event => {
       event.preventDefault();
-      const form = event.currentTarget; const submit = $('[type=submit]', form);
-      feedback(form, ''); submit.disabled = true;
+      const form = event.currentTarget;
+      feedback(form, ''); busy(form, true);
       try { await route(await window.account.login(form.email.value, form.password.value)); form.reset(); }
       catch (error) { feedback(form, error.message); }
-      finally { submit.disabled = false; }
+      finally { busy(form, false); }
     });
     $('#register-form').addEventListener('submit', async event => {
       event.preventDefault();
-      const form = event.currentTarget; const submit = $('[type=submit]', form);
-      feedback(form, ''); submit.disabled = true;
-      try { await route(await window.account.register(form.email.value, form.password.value, form.confirmation.value)); form.reset(); }
+      const form = event.currentTarget;
+      feedback(form, ''); busy(form, true);
+      try { await route(await window.account.register(form.email.value, form.password.value, form.confirmation.value)); form.reset(); paintPasswordRules(); }
       catch (error) { feedback(form, error.message); }
-      finally { submit.disabled = false; }
+      finally { busy(form, false); }
     });
     $('#pick-image').addEventListener('click', async () => {
       const form = $('#profile-form');
@@ -244,6 +280,8 @@
   async function logout() {
     closeLayers();
     if (PJ && !(await PJ.settleAll())) return;
+    // Study marks still waiting to be saved are written while the account is still signed in.
+    if (window.PerflwAnnotate) await window.PerflwAnnotate.flush();
     try { await route(await window.account.logout()); }
     catch (error) { toast(error.message, { error: true }); }
     S.items = { plan: [], whim: [], routine: [], activity: [], learning: [] }; S.chats = []; S.archivedChats = []; S.messages = {}; S.activeChat = null;
@@ -396,10 +434,11 @@
         <button class="date-card mini" type="button" data-action="date-card" aria-label="Selected date ${esc(longDate(S.selected))}. Open calendar">
           <span class="dc-day">${sel.getDate()}</span><span class="dc-weekday">${DAYS[sel.getDay()].slice(0, 3)}</span><span class="dc-month">${MON3[sel.getMonth()]}</span>
         </button>
-        ${navIcon('whim', 'Projects', 'folder')}
-        <div class="nav-divider" aria-hidden="true"></div>
         ${navIcon('routine', 'Routine', 'routine')}
+        <div class="nav-divider" aria-hidden="true"></div>
         ${navIcon('learning', 'Learning', 'learning')}
+        <div class="nav-divider" aria-hidden="true"></div>
+        ${navIcon('whim', 'Projects', 'folder')}
         <div class="nav-divider" aria-hidden="true"></div>
         ${navIcon('automation', 'Workflows', 'flow')}
         ${navIcon('agents', 'Agents', 'agent')}
@@ -408,17 +447,18 @@
         ${navIcon('chat', 'Chat sessions', 'chat')}
       </div>` : `
       <div class="nav-expanded${swoop}">
-        <div class="nav-label">Planner</div>
+        <div class="nav-label">Plan</div>
         ${navItem('calendar', 'Calendar', 'calendar')}
         <button class="date-card" type="button" data-action="date-card" aria-label="Selected date ${esc(longDate(S.selected))}. Open calendar">
           <span class="dc-day">${sel.getDate()}</span>
           <span class="dc-meta"><span class="dc-weekday">${DAYS[sel.getDay()]}</span><span class="dc-month">${MON3[sel.getMonth()]} ${sel.getFullYear()}</span></span>
         </button>
-        ${navItem('whim', 'Projects', 'folder')}
-        <div class="nav-label">Stuff</div>
         ${navItem('routine', 'Routine', 'routine')}
+        <div class="nav-label">Learn</div>
         ${navItem('learning', 'Learning', 'learning', LN ? LN.profile() : '')}
-        <div class="nav-label">Automation</div>
+        <div class="nav-label">Create</div>
+        ${navItem('whim', 'Projects', 'folder')}
+        <div class="nav-label">Automate</div>
         ${navItem('automation', 'Workflows', 'flow')}
         ${navItem('agents', 'Agents', 'agent')}
         ${navItem('skills', 'Skills', 'skill')}
@@ -453,7 +493,7 @@
     activities: { title: 'Activities', subtitle: 'Log what you did and when.', render: () => renderList('activity') },
     analytics: { title: 'Analytics', subtitle: 'A quick look at how your days are going.', render: renderAnalytics },
     chat: { title: 'Chat', subtitle: 'Conversations with their own model, workflow and skills.', render: renderChat, mount: () => { if (CH) CH.mount(); } },
-    home: { title: 'Home', subtitle: 'Your day at a glance.', render: renderHome },
+    home: { title: 'Today', subtitle: 'Plan, learn, create and automate from one page.', render: renderHome },
     settings: { title: 'Settings', subtitle: 'Manage your preferences for this workspace.', render: renderSettings },
     ...(AF ? AF.views : {})
   };
@@ -761,46 +801,123 @@
   }
 
   // ───────────────────────── home
+  /* Home is the Today page: the four pillars on one screen, built only from data the app already has.
+     Plan: a month at a glance and today's agenda. Learn: subjects to continue. Create: recently edited projects.
+     Automate: workflows, agents and chat. The right column is today's to-do (plans) and routine, done in place. */
+  function greeting() { const h = new Date().getHours(); return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; }
+  function homeMonth(today) {
+    const t = parse(today);
+    const first = new Date(t.getFullYear(), t.getMonth(), 1);
+    const offset = (first.getDay() - prefs.weekStart + 7) % 7;
+    const weeks = Math.ceil((offset + new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate()) / 7);
+    const head = dowOrder().map(i => `<span class="hm-dow">${DAYS[i].slice(0, 1)}</span>`).join('');
+    const cells = [];
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = new Date(t.getFullYear(), t.getMonth(), 1 - offset + i);
+      const key = iso(d);
+      const busy = S.items.plan.some(x => x.day === key) || linkedFor(key).length > 0 || (SB ? SB.unlinkedCount(key) > 0 : false);
+      const cls = ['hm-day', d.getMonth() !== t.getMonth() ? 'outside' : '', key === today ? 'today' : '', busy ? 'busy' : ''].filter(Boolean).join(' ');
+      cells.push(`<button class="${cls}" type="button" data-action="home-day" data-day="${key}" aria-label="${esc(longDate(key))}${busy ? ', has plans' : ''}">${d.getDate()}</button>`);
+    }
+    return `<div class="hm" role="group" aria-label="${esc(MONTHS[t.getMonth()])} ${t.getFullYear()}">
+      <div class="hm-title">${esc(MONTHS[t.getMonth()])} <span>${t.getFullYear()}</span></div>
+      <div class="hm-grid">${head}${cells.join('')}</div>
+    </div>`;
+  }
+  function homeAgenda(today) {
+    const sched = SB ? SB.eventsFor(today) : [];
+    const linked = linkedFor(today);
+    const rows = [
+      ...sched.map(e => `<li><button class="ha-row" type="button" data-action="home-day" data-day="${today}" title="Open in the calendar"><span class="ha-bar sched" aria-hidden="true"></span><span class="ha-main"><strong>${esc(e.title)}</strong><small>${esc(e.when)}</small></span></button></li>`),
+      ...linked.map(e => `<li><button class="ha-row${e.done ? ' done' : ''}" type="button" data-action="open-project" data-id="${esc(e.projectId)}" title="Open ${esc(e.project)}"><span class="ha-bar proj" aria-hidden="true"></span><span class="ha-main"><strong>${esc(e.title)}</strong><small>${LINK_KIND[e.kind]}${e.time ? ` · ${esc(fmtTime(e.time))}` : ''} · ${esc(e.project)}</small></span></button></li>`)
+    ];
+    return `<div class="ha">
+      <div class="ha-head"><span>${esc(DAYS[parse(today).getDay()])}</span><button class="t-link" type="button" data-action="new" data-value="plan">${icon('plus')}Schedule</button></div>
+      ${rows.length ? `<ul class="ha-list">${rows.join('')}</ul>` : '<p class="t-empty">No schedules today. Your day is open.</p>'}
+    </div>`;
+  }
   function renderHome() {
     const u = S.user || {};
     const today = todayISO();
     const plans = plansFor(today); const pDone = plans.filter(p => p.doneOn).length;
     const routine = S.items.routine; const rDone = routine.filter(routineDone).length;
-    const latestProject = PJ ? PJ.list()[0] : null;
-    const acts = S.items.activity.filter(a => iso(new Date(a.createdAt)) === today).length;
     const profile = S.editingProfile ? `
       <form class="profile-edit" data-form="profile">
         <input class="field" name="displayName" maxlength="80" value="${esc(u.displayName)}" aria-label="Your name" data-autofocus required>
         <input class="field" name="bio" maxlength="500" value="${esc(u.bio)}" aria-label="Your bio" placeholder="Add a short bio about yourself">
         <div class="profile-edit-actions"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" data-action="cancel-profile">Cancel</button></div>
       </form>` : `
-      <div class="profile-name-row"><span class="profile-name">${esc(u.displayName)}</span><button class="icon-btn sm" type="button" data-action="edit-profile" aria-label="Edit profile">${icon('edit')}</button></div>
-      <p class="profile-bio">${esc(u.bio || 'Add a short bio about yourself')}</p>`;
-    const quick = [['calendar', 'Calendar', 'calendar'], ['whim', 'Projects', 'folder'], ['routine', 'Routine', 'routine'], ['learning', 'Learning', 'learning'], ['chat', 'Chat', 'chat']];
-    return `<div class="profile-card">
+      <p class="today-hello">${greeting()},</p>
+      <div class="profile-name-row"><span class="profile-name">${esc(u.displayName)}</span><button class="icon-btn sm" type="button" data-action="edit-profile" aria-label="Edit profile" title="Edit profile">${icon('edit')}</button></div>
+      <p class="profile-bio">${esc(longDate(today))}${u.bio ? ` · ${esc(u.bio)}` : ''}</p>`;
+
+    const subjects = LN ? LN.list().slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, 4) : [];
+    const learn = subjects.length ? `<ul class="t-list">${subjects.map(sub => `<li><button class="t-item" type="button" data-action="home-subject" data-id="${esc(sub.id)}">
+        <span class="t-art${sub.image ? '' : ' none'}" ${sub.image ? `data-img="${esc(sub.image)}"` : ''} aria-hidden="true">${sub.image ? '' : esc(String(sub.name || '?').trim().charAt(0).toUpperCase())}</span>
+        <span class="t-main"><strong>${esc(sub.name)}</strong><small>${sub.type === 'minor' ? 'Minor' : 'Major'} · ${sub.mastery}% mastery</small></span>
+        <span class="t-meter" aria-hidden="true"><span data-w="${Math.max(0, Math.min(100, sub.mastery))}%"></span></span>
+      </button></li>`).join('')}</ul>` : `<p class="t-empty">No subjects yet. Add one and upload your study files.</p>`;
+
+    const projects = PJ ? PJ.list().slice(0, 4) : [];
+    const create = projects.length ? `<ul class="t-list">${projects.map(pr => {
+      const open = Number(pr.open_tasks) || 0;
+      return `<li><button class="t-item" type="button" data-action="open-project" data-id="${esc(pr.id)}">
+        <span class="t-art proj" aria-hidden="true">${pr.icon ? esc(pr.icon) : icon('folder')}</span>
+        <span class="t-main"><strong>${esc(pr.name)}</strong><small>Edited ${esc(stamp(pr.updated_at || pr.created_at))}${open ? ` · ${open} open task${open === 1 ? '' : 's'}` : ''}</small></span>
+        ${icon('right', 'class="t-go"')}
+      </button></li>`;
+    }).join('')}</ul>` : `<p class="t-empty">No projects yet. Start one for an idea or a goal.</p>`;
+
+    const automate = [['automation', 'Workflows', 'flow', 'Run repeated steps'], ['agents', 'Agents', 'agent', 'Your AI helpers'], ['chat', 'Chat', 'chat', 'Talk it through']];
+    const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
+    const todo = plans.map((pl, idx) => `<li class="t-todo${pl.doneOn ? ' done' : ''}" data-id="${pl.id}">
+        <input type="checkbox" class="check" data-action="toggle-plan" data-id="${pl.id}" aria-label="Mark “${esc(pl.text)}” done" ${pl.doneOn ? 'checked' : ''}>
+        <span class="t-todo-text">${esc(pl.text)}</span>
+        ${pl.time ? `<span class="t-todo-time">${esc(fmtTime(pl.time))}</span>` : `<span class="t-todo-dot" data-dot="${PLAN_COLORS[idx % PLAN_COLORS.length]}" aria-hidden="true"></span>`}
+      </li>`).join('');
+    const routineRows = routine.map(r => `<li class="t-todo${routineDone(r) ? ' done' : ''}" data-id="${r.id}">
+        <input type="checkbox" class="check" data-action="toggle-routine" data-id="${r.id}" aria-label="Mark “${esc(r.text)}” done" ${routineDone(r) ? 'checked' : ''}>
+        <span class="t-todo-text">${esc(r.text)}</span>
+      </li>`).join('');
+    const card = (pillar, ic, title, action, body, cls = '') => `<section class="t-card ${cls}" aria-label="${esc(title)}">
+        <header class="t-card-head"><span class="t-pillar">${icon(ic)}${esc(pillar)}</span>${action}</header>${body}</section>`;
+
+    return `<div class="today">
+      <div class="profile-card today-head">
         <div class="cover${u.coverImage ? ' has-image' : ''}" data-theme="${esc(u.coverTheme || 'aurora')}" ${u.coverImage ? `data-img="${esc(u.coverImage)}" data-bgpos="${esc(u.coverPosition || 'center 52%')}"` : ''}></div>
         <div class="profile-body">
           <button class="profile-avatar" type="button" data-action="change-photo" aria-label="Change profile photo" data-img="${esc(u.image || '')}">${u.image ? '' : esc(initials(u.displayName))}</button>
           <div class="profile-info">${profile}</div>
+          <div class="today-stats" aria-label="Today">
+            <span><strong>${pDone}/${plans.length}</strong>plans</span><span><strong>${rDone}/${routine.length}</strong>routine</span>
+          </div>
         </div>
       </div>
-      <div class="home-grid">
-        <section class="home-card" aria-label="Today at a glance">
-          <h2 class="section-title">Today · ${esc(longDate(today))}</h2>
-          <div class="glance">
-            <div class="glance-row"><span>Plans done</span><strong>${pDone} / ${plans.length}</strong></div>
-            <div class="progress"><div class="progress-track"><div class="progress-fill" data-w="${plans.length ? Math.round(pDone / plans.length * 100) : 0}%"></div></div></div>
-            <div class="glance-row"><span>Routine</span><strong>${rDone} / ${routine.length}</strong></div>
-            <div class="progress"><div class="progress-track"><div class="progress-fill" data-w="${routine.length ? Math.round(rDone / routine.length * 100) : 0}%"></div></div></div>
-            <div class="glance-row"><span>Activities logged today</span><strong>${acts}</strong></div>
-            <div class="glance-row"><span>Latest project</span><strong>${esc(latestProject ? latestProject.name : '—')}</strong></div>
-          </div>
-        </section>
-        <section class="home-card" aria-label="Quick links">
-          <h2 class="section-title">Jump back in</h2>
-          <div class="quick-grid">${quick.map(([view, label, ic]) => `<button class="nav-item" type="button" data-go="${view}">${icon(ic)}<span>${label}</span></button>`).join('')}</div>
-        </section>
-      </div>`;
+      <div class="today-grid">
+        <div class="today-main">
+          ${card('Plan', 'calendar', 'Plan', `<button class="t-link" type="button" data-go="calendar">Calendar${icon('right')}</button>`, `<div class="t-plan">${homeMonth(today)}${homeAgenda(today)}</div>`, 't-wide')}
+          ${card('Learn', 'learning', 'Learn', `<button class="t-link" type="button" data-go="learning">All subjects${icon('right')}</button>`, learn)}
+          ${card('Create', 'folder', 'Create', `<button class="t-link" type="button" data-action="new" data-value="whim">${icon('plus')}New</button>`, create)}
+          ${card('Automate', 'flow', 'Automate', '', `<div class="t-auto">${automate.map(([v, label, ic, sub]) => `<button class="t-auto-btn" type="button" data-go="${v}"><span class="t-auto-ic">${icon(ic)}</span><span class="t-main"><strong>${label}</strong><small>${sub}</small></span></button>`).join('')}</div>`, 't-wide')}
+        </div>
+        <aside class="today-side" aria-label="Today's to-do">
+          <section class="t-card t-note">
+            <header class="t-card-head"><h2 class="t-note-title">Today’s to-do</h2><span class="t-count">${pDone}/${plans.length}</span></header>
+            <div class="progress" aria-hidden="true"><div class="progress-track"><div class="progress-fill" data-w="${pct(pDone, plans.length)}%"></div></div></div>
+            ${plans.length ? `<ul class="t-todos">${todo}</ul>` : '<p class="t-empty">Nothing planned yet. Add the first thing below.</p>'}
+            <form class="t-add" data-form="home-plan" aria-label="Add a plan for today">
+              <span class="t-add-ic" aria-hidden="true">${icon('plus')}</span>
+              <input class="t-add-input" id="home-plan-input" name="text" maxlength="500" placeholder="Add to today… (Enter)" autocomplete="off" aria-label="Add a plan for today">
+            </form>
+          </section>
+          <section class="t-card t-note">
+            <header class="t-card-head"><h2 class="t-note-title">Routine</h2><span class="t-count">${rDone}/${routine.length}</span></header>
+            <div class="progress" aria-hidden="true"><div class="progress-track"><div class="progress-fill" data-w="${pct(rDone, routine.length)}%"></div></div></div>
+            ${routine.length ? `<ul class="t-todos">${routineRows}</ul>` : `<p class="t-empty">No routine yet. <button class="link-btn" type="button" data-action="new" data-value="routine">Add a step</button></p>`}
+          </section>
+        </aside>
+      </div>
+    </div>`;
   }
 
   // ───────────────────────── settings
@@ -1064,6 +1181,8 @@
       case 'cancel-edit': S.editing = null; rerender(); break;
       case 'remove': await removeItem(id, button.dataset.label || 'Item').catch(() => {}); break;
       case 'open-project': if (PJ) PJ.open(id); break;
+      case 'home-day': selectDate(button.dataset.day); go('calendar'); break;
+      case 'home-subject': if (LN) { LN.open(id); go('learning'); } break;
       case 'edit-profile': S.editingProfile = true; rerender(); break;
       case 'cancel-profile': S.editingProfile = false; rerender(); break;
       case 'change-photo': await changePhoto(); break;
@@ -1128,6 +1247,9 @@
       if (!textValue) { form.querySelector('[name=text]').focus(); return; }
       const listKind = form.dataset.kind;
       await createItem({ kind: listKind, text: textValue }, { focus: 'list-input' }).catch(() => {});
+    } else if (kind === 'home-plan') {
+      if (!textValue) { form.querySelector('[name=text]').focus(); return; }
+      await createItem({ kind: 'plan', text: textValue, day: todayISO() }, { focus: 'home-plan-input' }).catch(() => {});
     } else if (kind === 'edit-plan') {
       if (!textValue) { form.querySelector('[name=text]').focus(); return; }
       S.editing = null;

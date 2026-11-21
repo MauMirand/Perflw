@@ -8,6 +8,7 @@
   const api = window.learningData;
   if (!api) return;
   const PROFILE_KEY = 'perflw.learning.profile';
+  const SIDE_KEY = 'perflw.learning.sidePanel'; // 'closed' when the AI side panel of the topic viewer is collapsed
   const PROFILES = { study: 'study', personal: 'personal' };
   const TYPES = [['major', 'Major'], ['minor', 'Minor']];
   let H = null;
@@ -21,6 +22,9 @@
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
   try { if (localStorage.getItem(PROFILE_KEY) === 'personal') L.profile = 'personal'; } catch { /* storage unavailable */ }
+  let sideOpen = true;
+  try { sideOpen = localStorage.getItem(SIDE_KEY) !== 'closed'; } catch { /* the panel simply starts open */ }
+  const PANEL_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2.5"/><path d="M12.5 4v12"/></svg>';
 
   const subject = id => L.subjects.find(s => s.id === id) || null;
   const typeLabel = type => (type === 'minor' ? 'Minor' : 'Major');
@@ -47,7 +51,7 @@
     if (L.page && !subject(L.page)) L.page = null;
   }
   function reset() {
-    closeMenu(); closeDialog(); T.clear();
+    closeMenu(); closeDialog({ instant: true }); T.clear(); if (window.PerflwAnnotate) window.PerflwAnnotate.reset();
     Object.assign(TS, { editing: null, uploading: false, fileOver: false, drag: null, anchor: null }); TS.fresh.clear(); TS.sel.clear();
     Object.assign(L, { status: 'idle', error: '', subjects: [], preview: null, panel: false, page: null, viewer: null }); FP.clear(); if (PDFV) PDFV.reset();
     if (window.PerflwLearningStudy) window.PerflwLearningStudy.reset();
@@ -62,7 +66,7 @@
   // ───────── rendering
   function pocket(s) {
     const selected = L.panel && L.preview === s.id;
-    return `<div class="ln-pocket ln-subject${selected ? ' selected' : ''}" role="button" tabindex="0" data-ln-subject="${esc(s.id)}"
+    return `<div class="ln-pocket ln-subject${selected ? ' selected' : ''}${L.fresh === s.id ? ' ln-pocket-new' : ''}" role="button" tabindex="0" data-ln-subject="${esc(s.id)}"
         aria-label="${esc(s.name)}. Click to preview, double-click to open" aria-pressed="${selected}" title="Click to preview · Double-click to open">
       ${art(s, 'ln-thumb')}
       <span class="ln-pocket-title">${esc(s.name)}</span>
@@ -245,13 +249,19 @@
     $$('[data-ln-img]', root).forEach(el => { el.style.backgroundImage = `url("${el.dataset.lnImg}")`; });
     $$('[data-ln-w]', root).forEach(el => { el.style.width = `${el.dataset.lnW}%`; });
     if (L.focus) { const el = $(L.focus, root); if (el) el.focus(); L.focus = null; }
-    if (L.viewer) { const box = $('[data-ln-doc]', root); if (box && PDFV) paintDoc(box); syncStudy(); }
+    if (L.viewer) { const box = $('[data-ln-doc]', root); if (box && PDFV) paintDoc(box); else annotate(); syncStudy(); }
   }
 
   // ───────── topic viewer: top bar (Learning · subject), topic navigator, the file itself, and two side panels
   /* PDFs (and the PDF copy Office makes of Word/PowerPoint files) open in Chromium's PDF viewer at the topic's page.
      Markdown/text files, and Word/PowerPoint files without a copy, are drawn here from their kept text. */
   const PDFV = window.PerflwPdfViewer || null; // in-app PDF viewer (learning-pdf.js)
+  const ANN = window.PerflwAnnotate || null;   // study marks on the open file (learning-annotate.js)
+  /* The study toolbar follows the file shown in the pane (none while a file is loading or has no page to mark). */
+  function annotate() {
+    const wrap = $('[data-ln-doc-wrap]'); if (!ANN || !wrap || !L.viewer) return;
+    const t = currentTopic(); ANN.show(wrap, t && t.fileId ? t.fileId : null);
+  }
   const FP = new Map(); // fileId → { url, text, preview, type, name } | { error } — what the main process said to show
   const norm = text => String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
   function viewerRows() { const d = topicsOf(L.viewer.subjectId); return d && d.rows ? d : null; }
@@ -324,13 +334,31 @@
       <div class="ln-viewer-bar">
         <button class="ln-crumb-btn" type="button" data-ln="viewer-learning">${H.icon('left')}Learning</button>
         <button class="ln-subject-chip" type="button" data-ln="viewer-subject" title="Back to the subject page">${art(s, 'ln-chip-art')}<span>${esc(s.name)}</span></button>
+        <button class="ln-side-open" type="button" data-ln="side-toggle" aria-label="${sideOpen ? 'Hide' : 'Show'} key points and chat" title="${sideOpen ? 'Hide' : 'Show'} key points and chat" aria-expanded="${sideOpen}">${PANEL_ICON}</button>
       </div>
-      <div class="ln-viewer-body">
+      <div class="ln-viewer-body${sideOpen ? '' : ' side-off'}">
         <nav class="ln-nav" aria-label="Topics">${navHtml()}</nav>
-        <div class="ln-doc" data-ln-doc>${docHtml()}</div>
-        <aside class="ln-side" aria-label="Study tools">${Study ? Study.html(studyContext()) : ''}</aside>
+        <div class="ln-doc-wrap" data-ln-doc-wrap><div class="ln-doc" data-ln-doc>${docHtml()}</div></div>
+        <aside class="ln-side" aria-label="Key points and chat"${sideOpen ? '' : ' inert'}>${Study ? Study.html(studyContext()) : ''}</aside>
       </div>
     </div>`;
+  }
+  /* The AI side panel collapses to the right from one fixed button at the end of the viewer bar, which never moves
+     while the panel is used. Only classes change, so the file, the thread and a streaming reply stay as they are. */
+  function toggleSide(force = null) {
+    const body = $('.ln-viewer-body'); if (!body) return;
+    const next = force === null ? !sideOpen : Boolean(force);
+    if (next === sideOpen) return;
+    sideOpen = next;
+    try { localStorage.setItem(SIDE_KEY, sideOpen ? 'open' : 'closed'); } catch { /* remembered for this session only */ }
+    const side = $('.ln-side', body); const button = $('.ln-side-open');
+    if (!sideOpen && side && side.contains(document.activeElement) && button) button.focus({ preventScroll: true });
+    body.classList.toggle('side-off', !sideOpen);
+    if (side) side.inert = !sideOpen;
+    if (button) {
+      const label = `${sideOpen ? 'Hide' : 'Show'} key points and chat`;
+      button.setAttribute('aria-expanded', String(sideOpen)); button.setAttribute('aria-label', label); button.title = label;
+    }
   }
   /* The notes and Ask panels (learning-study.js) follow the open topic. */
   const Study = window.PerflwLearningStudy || null;
@@ -408,10 +436,11 @@
       const j = L.viewer.jump; const jumped = j && j.fileId === t.fileId;
       // A notes/source click lands on its exact text; a topic click on the topic's heading on its page.
       PDFV.show(box, t.fileId, { page: shownPage(t), text: jumped && j.text ? j.text : t.title });
+      annotate();
       return;
     }
     if (PDFV) PDFV.release(box);
-    box.innerHTML = docHtml(); settleDoc();
+    box.innerHTML = docHtml(); settleDoc(); annotate();
   }
   async function loadFile(fileId, force = false) {
     if (!fileId || (!force && FP.has(fileId) && !FP.get(fileId).error)) return;
@@ -759,58 +788,92 @@
 
   // ───────── create / edit dialog
   let dialog = null;
-  function closeDialog() {
+  /* Closing plays the panel back toward where it came from; instant (a reset, a new dialog) removes it at once.
+     A timer, not animationend, removes it, so reduced motion (no animation at all) still cleans up. */
+  const DIALOG_OUT_MS = 170;
+  function closeDialog({ instant = false } = {}) {
     if (!dialog) return;
-    const { el, previous } = dialog; dialog = null; el.remove();
-    if (previous && previous.isConnected) previous.focus();
+    const { el, previous } = dialog; dialog = null;
+    if (instant || !el.isConnected) el.remove();
+    else {
+      // A closing panel is no longer the dialog: it drops its form hook and ids so a new panel never collides with it.
+      el.classList.add('closing');
+      el.querySelectorAll('[data-ln-form], [id]').forEach(node => { node.removeAttribute('data-ln-form'); node.removeAttribute('id'); });
+      el.querySelectorAll('[data-ln]').forEach(node => node.removeAttribute('data-ln'));
+      setTimeout(() => el.remove(), DIALOG_OUT_MS);
+    }
+    if (previous && previous.isConnected) previous.focus({ preventScroll: true });
   }
   function hoursOf(minutes) { return Math.floor((minutes || 0) / 60); }
   function openDialog(id = null) {
-    closeMenu(); closeDialog();
+    closeMenu(); closeDialog({ instant: true });
     const s = id ? subject(id) : null;
     const draft = { imageName: s ? s.imageName : null, image: s ? s.image : null, type: s ? s.type : 'major' };
     const el = document.createElement('div');
     el.className = 'overlay ln-overlay';
+    // New subject: image, name, type and description. Mastery and time spent start at 0 and are edited later.
     el.innerHTML = `<form class="confirm-box ln-dialog" role="dialog" aria-modal="true" aria-labelledby="ln-dialog-title" data-ln-form novalidate>
-      <h2 id="ln-dialog-title">${s ? 'Edit subject' : 'New subject'}</h2>
-      <div class="ln-image-row">
-        <span class="ln-image-preview" data-ln-preview></span>
-        <span class="ln-image-actions">
-          <button class="btn btn-sm btn-ghost" type="button" data-ln="pick-image">Choose image</button>
-          <button class="btn btn-sm btn-ghost" type="button" data-ln="clear-image">Remove</button>
-        </span>
-      </div>
-      <label class="ln-field"><span>Subject name</span><input class="field" name="name" maxlength="120" required autocomplete="off" value="${esc(s ? s.name : '')}"></label>
-      <div class="ln-field"><span id="ln-type-label">Subject type</span>
-        <div class="toggle-track" role="radiogroup" aria-labelledby="ln-type-label">${TYPES.map(([v, label]) => `<button class="toggle-pill" type="button" role="radio" data-ln="type" data-value="${v}">${label}</button>`).join('')}</div>
-      </div>
-      <div class="ln-field-row">
-        <label class="ln-field"><span>Mastery %</span><input class="field" name="mastery" type="number" min="0" max="100" step="1" inputmode="numeric" value="${s ? s.mastery : 0}"></label>
-        <div class="ln-field"><span id="ln-time-label">Time spent</span>
-          <span class="ln-time" role="group" aria-labelledby="ln-time-label">
-            <input class="field" name="hours" type="number" min="0" step="1" inputmode="numeric" aria-label="Hours" value="${s ? hoursOf(s.minutes) : 0}"><small>h</small>
-            <input class="field" name="minutes" type="number" min="0" max="59" step="1" inputmode="numeric" aria-label="Minutes" value="${s ? s.minutes % 60 : 0}"><small>m</small>
-          </span>
+      <h2 id="ln-dialog-title" class="ln-dialog-title">${s ? 'Edit Subject' : 'New Subject'}</h2>
+      <div class="ln-dialog-head">
+        <div class="ln-image-slot">
+          <button class="ln-image-pick" type="button" data-ln="pick-image" data-ln-preview aria-label="Choose image" title="Choose image"></button>
+          <button class="ln-image-clear" type="button" data-ln="clear-image" aria-label="Remove image" title="Remove image">${H.icon('x')}</button>
+        </div>
+        <div class="ln-dialog-fields">
+          <label class="ln-field"><span>Subject name</span><input class="field" name="name" maxlength="120" required autocomplete="off" value="${esc(s ? s.name : '')}"></label>
+          <div class="ln-field"><span id="ln-type-label">Subject type</span>
+            <div class="toggle-track ln-type-track" role="radiogroup" aria-labelledby="ln-type-label"><span class="ln-type-thumb" aria-hidden="true"></span>${TYPES.map(([v, label]) => `<button class="toggle-pill" type="button" role="radio" data-ln="type" data-value="${v}">${label}</button>`).join('')}</div>
+          </div>
         </div>
       </div>
-      <label class="ln-field"><span>Description</span><textarea class="field field-area" name="description" rows="3" maxlength="2000">${esc(s ? s.description : '')}</textarea></label>
+      ${s ? `<div class="ln-field-row">
+        <label class="ln-field"><span>Mastery %</span><input class="field" name="mastery" type="number" min="0" max="100" step="1" inputmode="numeric" value="${s.mastery}"></label>
+        <div class="ln-field"><span id="ln-time-label">Time spent</span>
+          <span class="ln-time" role="group" aria-labelledby="ln-time-label">
+            <input class="field" name="hours" type="number" min="0" step="1" inputmode="numeric" aria-label="Hours" value="${hoursOf(s.minutes)}"><small>h</small>
+            <input class="field" name="minutes" type="number" min="0" max="59" step="1" inputmode="numeric" aria-label="Minutes" value="${s.minutes % 60}"><small>m</small>
+          </span>
+        </div>
+      </div>` : ''}
+      <label class="ln-field"><span>Description</span><textarea class="field field-area" name="description" rows="4" maxlength="2000">${esc(s ? s.description : '')}</textarea></label>
       <p class="ln-error" role="alert" data-ln-error></p>
       <div class="confirm-actions"><button class="btn btn-ghost" type="button" data-ln="cancel">Cancel</button><button class="btn" type="submit">${s ? 'Save' : 'Create'}</button></div>
     </form>`;
+    const previous = document.activeElement;
     document.body.append(el);
-    dialog = { el, id, draft, previous: document.activeElement, busy: false };
+    const form = $('form', el);
+    // The panel grows out of what opened it (the + pocket, or the subject being edited) and returns there on close.
+    const from = (id ? $(`[data-ln-subject="${CSS.escape(id)}"]`) : $('[data-ln="create"]')) || previous;
+    if (from && from.isConnected && from !== document.body) {
+      const r = from.getBoundingClientRect();
+      form.style.transformOrigin = `${Math.round(r.left + r.width / 2 - form.offsetLeft)}px ${Math.round(r.top + r.height / 2 - form.offsetTop)}px`;
+    }
+    [...form.children].forEach((child, i) => child.style.setProperty('--i', i));
+    dialog = { el, id, draft, previous, busy: false };
     paintDraft();
-    $('input[name="name"]', el).focus();
+    requestAnimationFrame(() => { if (dialog && dialog.el === el) el.classList.add('ready'); }); // thumb slides only after the first paint
+    $('input[name="name"]', el).focus({ preventScroll: true });
   }
+  /* Restarts a one-shot CSS animation class on an element. */
+  function replay(node, cls) { if (!node) return; node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); }
   function paintDraft() {
     if (!dialog) return;
     const { el, draft } = dialog;
     const box = $('[data-ln-preview]', el);
-    box.className = 'ln-image-preview' + (draft.image ? ' has-img' : '');
+    box.classList.toggle('has-img', !!draft.image);
     box.style.backgroundImage = draft.image ? `url("${draft.image}")` : '';
-    box.innerHTML = draft.image ? '' : H.icon('plus');
+    box.innerHTML = `<span class="ln-image-icon">${H.icon(draft.image ? 'edit' : 'plus')}</span>`;
+    box.setAttribute('aria-label', draft.image ? 'Change image' : 'Choose image'); box.title = box.getAttribute('aria-label');
+    // A new or removed image pops in place; the first paint does not.
+    if ('shown' in dialog && dialog.shown !== (draft.image || null)) replay(box, 'swap');
+    dialog.shown = draft.image || null;
+    $('.ln-image-slot', el).classList.toggle('has-img', !!draft.image);
     $('[data-ln="clear-image"]', el).hidden = !draft.image;
-    $$('[data-ln="type"]', el).forEach(b => { const on = b.dataset.value === draft.type; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); b.tabIndex = on ? 0 : -1; });
+    let active = null;
+    $$('[data-ln="type"]', el).forEach(b => { const on = b.dataset.value === draft.type; if (on) active = b; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); b.tabIndex = on ? 0 : -1; });
+    // One thumb slides between Major and Minor instead of two backgrounds swapping.
+    const thumb = $('.ln-type-thumb', el);
+    if (thumb && active) { thumb.style.width = `${active.offsetWidth}px`; thumb.style.transform = `translateX(${active.offsetLeft - 3}px)`; }
   }
   function whole(value, label, max) {
     const text = String(value).trim();
@@ -825,21 +888,23 @@
     let payload;
     try {
       const name = form.name.value.trim();
-      if (!name) throw new Error('Give the subject a name.');
-      const minutes = whole(form.hours.value || '0', 'Hours', 16000) * 60 + whole(form.minutes.value || '0', 'Minutes', 59);
-      payload = { name, type: draft.type, mastery: whole(form.mastery.value || '0', 'Mastery', 100), minutes, description: form.description.value, imageName: draft.imageName };
-    } catch (problem) { error.textContent = problem.message; return; }
+      if (!name) { form.name.focus(); replay(form.name, 'invalid'); throw new Error('Give the subject a name.'); }
+      // Mastery and time spent are on the edit panel only; a new subject starts at 0.
+      const minutes = form.hours ? whole(form.hours.value || '0', 'Hours', 16000) * 60 + whole(form.minutes.value || '0', 'Minutes', 59) : 0;
+      payload = { name, type: draft.type, mastery: form.mastery ? whole(form.mastery.value || '0', 'Mastery', 100) : 0, minutes, description: form.description.value, imageName: draft.imageName };
+    } catch (problem) { error.textContent = problem.message; replay(error, 'shake'); return; }
     dialog.busy = true; error.textContent = '';
     const submit = $('button[type="submit"]', el); submit.disabled = true;
     try {
       const saved = id ? await api.updateSubject(id, payload) : await api.createSubject(L.profile, payload);
       if (id) L.subjects = L.subjects.map(s => (s.id === id ? saved : s)); else L.subjects.push(saved);
       closeDialog();
-      if (!id) { L.preview = saved.id; L.panel = true; L.focus = `[data-ln-subject="${CSS.escape(saved.id)}"]`; }
+      if (!id) { L.preview = saved.id; L.panel = true; L.fresh = saved.id; L.focus = `[data-ln-subject="${CSS.escape(saved.id)}"]`; }
       paint();
+      L.fresh = null; // the new pocket pops in once, not on every repaint
       H.toast(id ? 'Subject saved.' : 'Subject created.');
     } catch (problem) {
-      if (dialog) { dialog.busy = false; submit.disabled = false; error.textContent = problem.message || 'The subject could not be saved.'; }
+      if (dialog) { dialog.busy = false; submit.disabled = false; error.textContent = problem.message || 'The subject could not be saved.'; replay(error, 'shake'); }
     }
   }
   async function pickImage() {
@@ -895,6 +960,7 @@
         case 'learn': learn(id, control); return;
         case 'viewer-topic': L.viewer.jump = null; openViewer(L.viewer.subjectId, id); return;
         case 'viewer-learning': closeViewer('list'); return;
+        case 'side-toggle': toggleSide(); return;
         case 'viewer-subject': closeViewer('subject'); return;
         case 'viewer-reload': { const t = currentTopic(); if (t && t.fileId) { FP.delete(t.fileId); if (PDFV) PDFV.forget(t.fileId); paintViewer('doc'); loadFile(t.fileId, true); } return; }
         case 'viewer-retry': FP.set(id, { ...(FP.get(id) || {}), preview: 'pending', url: null }); paintViewer('doc'); api.retryPreview(id).catch(() => loadFile(id, true)); return;
@@ -993,7 +1059,7 @@
     }
   }
   function onInput(event) {
-    if (dialog && dialog.el.contains(event.target)) $('[data-ln-error]', dialog.el).textContent = '';
+    if (dialog && dialog.el.contains(event.target)) { $('[data-ln-error]', dialog.el).textContent = ''; event.target.classList.remove('invalid'); }
   }
   function onSubmit(event) {
     if (!event.target.matches('[data-ln-form]')) return;
@@ -1030,7 +1096,7 @@
   /* Sidebar / rail / search click on Learning: always the main page (subjects), never a subject page or topic
      left open. Already on Learning: repaint in place. From another view: the state is reset and go() renders it. */
   function home() {
-    closeMenu(); closeDialog();
+    closeMenu(); closeDialog({ instant: true });
     if (!L.page && !L.viewer) return;
     L.page = null; L.viewer = null; TS.editing = null;
     if (visible()) paint();
@@ -1041,6 +1107,8 @@
     profile: () => L.profile,
     list: () => L.subjects.slice(),
     open: id => { if (subject(id)) { L.page = id; L.preview = id; } },
+    openSide: () => toggleSide(true),
+    toast: (text, error = false) => H.toast(text, error ? { error: true } : undefined),
     create: () => openDialog()
   };
 })();

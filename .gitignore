@@ -21,3 +21,7 @@ Thumbs.db
 
 # App data never lives in the project: accounts, uploaded files, notes and keys are stored in
 # %APPDATA%\Perflw and %LOCALAPPDATA%\Perflw Prototype on the computer that runs the app.
+
+# Picture benchmark outputs
+test/fixtures/picture-bench/results/
+test/fixtures/picture-bench/real/

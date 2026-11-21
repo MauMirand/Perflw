@@ -94,6 +94,8 @@ contextBridge.exposeInMainWorld('learningData', Object.freeze({
   filePreview: fileId => call('learning:filePreview', fileId),
   retryPreview: fileId => call('learning:retryPreview', fileId),
   fileBytes: fileId => call('learning:fileBytes', fileId),
+  annotations: fileId => call('learning:annotations', fileId),
+  saveAnnotations: (fileId, data) => call('learning:saveAnnotations', fileId, data),
   onPreviewChanged: listener => {
     if (typeof listener !== 'function') return () => {};
     const wrapped = (_event, fileId) => listener(String(fileId));
@@ -106,7 +108,7 @@ contextBridge.exposeInMainWorld('learningData', Object.freeze({
   notes: subjectId => call('learning:notes', subjectId),
   deleteNote: (subjectId, noteId) => call('learning:deleteNote', subjectId, noteId),
   openNotesFile: (subjectId, docId) => call('learning:openNotesFile', subjectId, docId || null),
-  ask: (subjectId, fileId, question, requestId, history = []) => call('learning:ask', subjectId, fileId, question, requestId, history),
+  ask: (subjectId, fileId, question, requestId, history = [], about = null) => call('learning:ask', subjectId, fileId, question, requestId, history, about),
   cancelAsk: requestId => call('learning:cancelAsk', requestId),
   saveLearned: (subjectId, item) => call('learning:saveLearned', subjectId, item),
   preferences: () => call('learning:preferences'),

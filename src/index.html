@@ -20,6 +20,7 @@
   <script src="topic-model.js" defer></script>
   <script src="learning-pdf.js" defer></script>
   <script src="learning-study.js" defer></script>
+  <script src="learning-annotate.js" defer></script>
   <script src="learning.js" defer></script>
   <script src="renderer.js" defer></script>
 </head>
@@ -74,36 +75,80 @@
       </section>
 
       <section id="login-page" class="auth-scene" hidden>
-        <form class="auth-card" id="login-form" novalidate>
-          <img class="auth-logo" src="../assets/icon.png" alt="" width="44" height="44">
-          <h1 tabindex="-1">Welcome back</h1>
-          <p class="auth-intro">Sign in to pick up where you left off.</p>
-          <p class="form-feedback" role="alert" hidden></p>
-          <label for="login-email">Email address</label>
-          <input class="field" id="login-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" required>
-          <label for="login-password">Password</label>
-          <div class="password-field"><input class="field" id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">Show</button></div>
-          <button class="btn btn-block" type="submit">Sign in</button>
-          <p class="auth-switch">New here? <button class="link-btn" type="button" data-auth="register">Create an account</button></p>
-        </form>
+        <div class="auth-shell">
+          <aside class="auth-brand" aria-hidden="true">
+            <div class="auth-brand-mark"><img src="../assets/icon.png" alt="" width="28" height="28"><span>Perflw</span></div>
+            <div class="auth-brand-copy">
+              <h2>Plan, study and automate in one quiet place.</h2>
+              <ul class="auth-points">
+                <li><span class="auth-point-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="12" rx="2"/><path d="M3.5 8h13M7 3v3M13 3v3"/></svg></span><span>Calendar, projects and daily routine</span></li>
+                <li><span class="auth-point-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H16v12H5.5A1.5 1.5 0 0 0 4 16.5z"/><path d="M4 16.5A1.5 1.5 0 0 0 5.5 18H16"/></svg></span><span>Study files turned into key points and answers</span></li>
+                <li><span class="auth-point-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg></span><span>Offline-first: your data stays on this computer</span></li>
+              </ul>
+            </div>
+            <p class="auth-brand-foot">Local account · AI runs on your own Ollama by default</p>
+          </aside>
+          <form class="auth-card auth-form" id="login-form" novalidate>
+            <header class="auth-head">
+              <h1 tabindex="-1">Welcome back</h1>
+              <p class="auth-intro">Sign in to pick up where you left off.</p>
+            </header>
+            <p class="form-feedback" role="alert" hidden></p>
+            <div class="auth-field">
+              <label for="login-email">Email address</label>
+              <input class="field" id="login-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" required>
+            </div>
+            <div class="auth-field">
+              <label for="login-password">Password</label>
+              <div class="password-field"><input class="field" id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" title="Show password"><svg class="eye-on" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5z"/><circle cx="10" cy="10" r="2.3"/></svg><svg class="eye-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5c1.3 0 2.5.4 3.5 1M17.5 10s-2.8 5-7.5 5c-1.3 0-2.5-.4-3.5-1"/><path d="M3.5 3.5l13 13"/></svg></button></div>
+              <p class="caps-hint" role="status" aria-live="polite" hidden>Caps Lock is on</p>
+            </div>
+            <button class="btn btn-block auth-submit" type="submit"><span class="auth-submit-label">Sign in</span><span class="auth-submit-busy" aria-hidden="true"></span></button>
+            <p class="auth-switch">New here? <button class="link-btn" type="button" data-auth="register">Create an account</button></p>
+          </form>
+        </div>
       </section>
 
       <section id="register-page" class="auth-scene" hidden>
-        <form class="auth-card" id="register-form" novalidate>
-          <img class="auth-logo" src="../assets/icon.png" alt="" width="44" height="44">
-          <h1 tabindex="-1">Create your account</h1>
-          <p class="auth-intro">Everything stays on this computer.</p>
-          <p class="form-feedback" role="alert" hidden></p>
-          <label for="register-email">Email address</label>
-          <input class="field" id="register-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" required>
-          <label for="register-password">Password</label>
-          <div class="password-field"><input class="field" id="register-password" name="password" type="password" autocomplete="new-password" minlength="12" placeholder="At least 12 characters" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">Show</button></div>
-          <p class="hint">12+ characters with uppercase, lowercase and a number.</p>
-          <label for="register-confirmation">Confirm password</label>
-          <div class="password-field"><input class="field" id="register-confirmation" name="confirmation" type="password" autocomplete="new-password" placeholder="Enter password again" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">Show</button></div>
-          <button class="btn btn-block" type="submit">Create account</button>
-          <p class="auth-switch">Already have an account? <button class="link-btn" type="button" data-auth="login">Sign in</button></p>
-        </form>
+        <div class="auth-shell">
+          <aside class="auth-brand" aria-hidden="true">
+            <div class="auth-brand-mark"><img src="../assets/icon.png" alt="" width="28" height="28"><span>Perflw</span></div>
+            <div class="auth-brand-copy">
+              <h2>Plan, study and automate in one quiet place.</h2>
+              <ul class="auth-points">
+                <li><span class="auth-point-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="13" height="12" rx="2"/><path d="M3.5 8h13M7 3v3M13 3v3"/></svg></span><span>Calendar, projects and daily routine</span></li>
+                <li><span class="auth-point-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H16v12H5.5A1.5 1.5 0 0 0 4 16.5z"/><path d="M4 16.5A1.5 1.5 0 0 0 5.5 18H16"/></svg></span><span>Study files turned into key points and answers</span></li>
+                <li><span class="auth-point-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg></span><span>Offline-first: your data stays on this computer</span></li>
+              </ul>
+            </div>
+            <p class="auth-brand-foot">Local account · AI runs on your own Ollama by default</p>
+          </aside>
+          <form class="auth-card auth-form" id="register-form" novalidate>
+            <header class="auth-head">
+              <h1 tabindex="-1">Create your account</h1>
+              <p class="auth-intro">Everything stays on this computer.</p>
+            </header>
+            <p class="form-feedback" role="alert" hidden></p>
+            <div class="auth-field">
+              <label for="register-email">Email address</label>
+              <input class="field" id="register-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" required>
+            </div>
+            <div class="auth-field">
+              <label for="register-password">Password</label>
+              <div class="password-field"><input class="field" id="register-password" name="password" type="password" autocomplete="new-password" minlength="12" placeholder="At least 12 characters" aria-describedby="register-rules" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" title="Show password"><svg class="eye-on" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5z"/><circle cx="10" cy="10" r="2.3"/></svg><svg class="eye-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5c1.3 0 2.5.4 3.5 1M17.5 10s-2.8 5-7.5 5c-1.3 0-2.5-.4-3.5-1"/><path d="M3.5 3.5l13 13"/></svg></button></div>
+              <p class="caps-hint" role="status" aria-live="polite" hidden>Caps Lock is on</p>
+              <ul class="pw-rules" id="register-rules" aria-label="Password requirements">
+                <li data-rule="length">12+ characters<span class="sr-only">, not met</span></li><li data-rule="upper">Uppercase<span class="sr-only">, not met</span></li><li data-rule="lower">Lowercase<span class="sr-only">, not met</span></li><li data-rule="number">Number<span class="sr-only">, not met</span></li>
+              </ul>
+            </div>
+            <div class="auth-field">
+              <label for="register-confirmation">Confirm password</label>
+              <div class="password-field" data-match><input class="field" id="register-confirmation" name="confirmation" type="password" autocomplete="new-password" placeholder="Enter password again" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" title="Show password"><svg class="eye-on" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5z"/><circle cx="10" cy="10" r="2.3"/></svg><svg class="eye-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5c1.3 0 2.5.4 3.5 1M17.5 10s-2.8 5-7.5 5c-1.3 0-2.5-.4-3.5-1"/><path d="M3.5 3.5l13 13"/></svg></button></div>
+            </div>
+            <button class="btn btn-block auth-submit" type="submit"><span class="auth-submit-label">Create account</span><span class="auth-submit-busy" aria-hidden="true"></span></button>
+            <p class="auth-switch">Already have an account? <button class="link-btn" type="button" data-auth="login">Sign in</button></p>
+          </form>
+        </div>
       </section>
 
       <section id="profile-page" class="auth-scene" hidden>

@@ -136,9 +136,9 @@ function openAiAdapter(fetchImpl, { compatible }) {
     }
     return out;
   }
-  async function chat({ connection, apiKey, model, system, messages, tools, maxTokens, signal, onDelta = () => {} }) {
+  async function chat({ connection, apiKey, model, system, messages, tools, maxTokens, temperature = null, signal, onDelta = () => {} }) {
     const stream = !(tools && tools.length);
-    const body = { model, messages: wireMessages(system, messages), stream };
+    const body = { model, messages: wireMessages(system, messages), stream, ...(temperature != null ? { temperature } : {}) };
     if (!stream) body.tools = tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
     if (maxTokens) body[compatible ? 'max_tokens' : 'max_completion_tokens'] = maxTokens;
     if (stream && !compatible) body.stream_options = { include_usage: true };
@@ -194,9 +194,9 @@ function anthropicAdapter(fetchImpl) {
     }
     return out;
   }
-  async function chat({ connection, apiKey, model, system, messages, tools, maxTokens, cache, signal, onDelta = () => {} }) {
+  async function chat({ connection, apiKey, model, system, messages, tools, maxTokens, cache, temperature = null, signal, onDelta = () => {} }) {
     const stream = !(tools && tools.length);
-    const body = { model, max_tokens: maxTokens || 4096, messages: wireMessages(messages), stream };
+    const body = { model, max_tokens: maxTokens || 4096, messages: wireMessages(messages), stream, ...(temperature != null ? { temperature } : {}) };
     // Explicit prompt caching marks the stable system prefix; the API ignores prefixes below its minimum size.
     if (system) body.system = cache ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system;
     if (!stream) body.tools = tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters }));
@@ -265,9 +265,9 @@ function geminiAdapter(fetchImpl) {
     }
     return out;
   }
-  async function chat({ connection, apiKey, model, system, messages, tools, maxTokens, signal, onDelta = () => {} }) {
+  async function chat({ connection, apiKey, model, system, messages, tools, maxTokens, temperature = null, signal, onDelta = () => {} }) {
     const stream = !(tools && tools.length);
-    const body = { contents: wireContents(messages) };
+    const body = { contents: wireContents(messages), ...(temperature != null ? { generationConfig: { temperature } } : {}) };
     if (system) body.systemInstruction = { parts: [{ text: system }] };
     if (maxTokens) body.generationConfig = { maxOutputTokens: maxTokens };
     if (!stream) body.tools = [{ functionDeclarations: tools.map(tool => ({ name: tool.name, description: tool.description, ...(Object.keys(tool.parameters?.properties || {}).length ? { parameters: schema(tool.parameters) } : {}) })) }];
@@ -306,7 +306,7 @@ function ollamaAdapter(fetchImpl, base) {
   async function listModels() {
     const listed = await runtime.listModels();
     if (!listed.available) throw new ProviderError('network', listed.error || 'Ollama is not available.');
-    return listed.models.map(model => ({ id: model.name, contextWindow: null, size: model.size, cloud: model.cloud }));
+    return listed.models.map(model => ({ id: model.name, contextWindow: null, size: model.size, bytes: model.bytes, cloud: model.cloud }));
   }
   function wireMessages(system, messages) {
     const out = system ? [{ role: 'system', content: system }] : [];
@@ -317,12 +317,12 @@ function ollamaAdapter(fetchImpl, base) {
     }
     return out;
   }
-  async function chat({ model, system, messages, tools, numCtx, signal, onDelta, agentName }) {
+  async function chat({ model, system, messages, tools, numCtx, temperature = null, signal, onDelta, agentName }) {
     try {
       const result = await runtime.chat({
         model, name: agentName, messages: wireMessages(system, messages), signal, onDelta,
         tools: tools && tools.length ? tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) : null,
-        options: numCtx ? { num_ctx: numCtx } : null
+        options: numCtx || temperature != null ? { ...(numCtx ? { num_ctx: numCtx } : {}), ...(temperature != null ? { temperature } : {}) } : null
       });
       return { ...result, usage: result.usage ? { ...result.usage, cachedTokens: null } : null };
     } catch (error) {

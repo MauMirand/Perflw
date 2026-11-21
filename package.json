@@ -20,7 +20,9 @@
     "build": "node scripts/build.js",
     "setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
     "test:pdf": "node test/pdf-viewer-smoke.js",
-    "bench:learning": "node test/learning-bench.js"
+    "bench:learning": "node test/learning-bench.js",
+    "bench:pictures": "node test/picture-bench.js",
+    "diag:questions": "node test/learning-questions.js"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.6",

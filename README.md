@@ -103,4 +103,13 @@ The renderer is sandboxed with Node integration disabled and a strict Content-Se
 
 ## Checks
 
+**Benchmarks** for the Learning notes:
+- `npm run bench:learning` scores rule-based key points against a reference set; add `-- --ai` to include the AI overview.
+- `npm run bench:pictures` runs the Image Reader on generated infographics with exact answer keys: steps, a table, Title Case columns, small text, low contrast, a chart, plus three held-out scenes never used for tuning. It scores text, numbers, headings, table rows, key facts in the notes (as an upload and as a picture on a slide), lookup by questions, and time per picture.
+  - `-- --model <name>` tries another OCR model.
+  - `-- --rescore` re-scores the last run's OCR text without calling the model.
+  - `-- --real` adds a private set of your own pictures from `test/fixtures/picture-bench/real/` (`<name>.png` with a `<name>.json` answer key, ignored by git).
+
+Results are saved under each benchmark's `results/` folder (ignored by git).
+
 `npm test` covers accounts, sessions, workspace isolation, the planner/chat stores, the automation engine, store and Ollama adapter, and the agent ecosystem (`test/ecosystem.test.js`: package migration and editing, encrypted keys, provider wire formats and errors, progressive skill loading, permissions/approvals, context budgeting, workflow integration). `npm run test:automation` drives the real app through building, running, cancelling and reopening a workflow using a local Ollama model (it exits with code 2 if Ollama or a local model is unavailable). `npm run test:pdf` checks the PDF viewer (every key point lands on its own page and words, in the same view, quickly; rapid clicks end on the last one) and that a streamed Ask reply never redraws or re-animates the thread (it needs port 11434 free: it starts a stand-in Ollama). `npm run test:electron` drives the running app: register, profile setup, plans in all three calendar views, whims, routine, activities, analytics values, chat lifecycle, profile editing, settings, search, menus, sidebar collapse, restart persistence, and sign out/in. Set `PERFLW_SCREENSHOT_DIR` to an absolute folder to save screenshots.

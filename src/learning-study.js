@@ -1,10 +1,13 @@
 'use strict';
-/* Learning topic viewer — the two study panels on the right (renderer).
+/* Learning topic viewer — the AI side panel on the right (renderer).
 
-   Notes panel: the open file's title and its key points numbered 1, 1.1, 1.2 … from the Learning document
+   One panel with three views (Key points, Notes, Chat) and the Ask composer pinned at its foot, so a question can be
+   asked from any view; sending one shows the Chat view. The panel collapses with its own button (learning.js).
+
+   Key points: the open file's title and its key points numbered 1, 1.1, 1.2 … from the Learning document
    workflow's pre-analysis, the AI overview when the Learning Document Analyzer has written one, and a Notes tab with
    the notes saved from answers. The section of the open topic is highlighted.
-   Ask panel: questions to the Learning Subject Assistant. Answers come only from the subject's File Data and
+   Chat: questions to the Learning Subject Assistant. Answers come only from the subject's File Data and
    Information Center; each answer lists its sources, a second broader run happens automatically, and a question the
    files do not cover gets the warning instead of an invented answer.
 
@@ -24,7 +27,12 @@
     warn: '<path d="M10 3.5 17 16H3z"/><path d="M10 8.5v3.5M10 14.2v.1"/>',
     image: '<rect x="3.5" y="4.5" width="13" height="11" rx="2"/><circle cx="8" cy="8.5" r="1.3"/><path d="m4 14 4-3.5 3 2.5 2.5-2 3 3"/>',
     check: '<path d="m5 10.5 3.2 3.2L15 7"/>',
-    spark: '<path d="M10 3v3M10 14v3M3 10h3M14 10h3M5.2 5.2l2 2M12.8 12.8l2 2M5.2 14.8l2-2M12.8 7.2l2-2"/>'
+    spark: '<path d="M10 3v3M10 14v3M3 10h3M14 10h3M5.2 5.2l2 2M12.8 12.8l2 2M5.2 14.8l2-2M12.8 7.2l2-2"/>',
+    lines: '<path d="M4 5.5h12M4 9h12M4 12.5h8"/>',
+    bulb: '<path d="M7.5 14.5h5M8.5 17h3"/><path d="M10 3a4.5 4.5 0 0 0-2.6 8.2c.6.5 1 1.1 1.1 1.8h3c.1-.7.5-1.3 1.1-1.8A4.5 4.5 0 0 0 10 3z"/>',
+    tag: '<path d="M3.5 10.2V4.5a1 1 0 0 1 1-1h5.7l6.3 6.3-6.7 6.7z"/><circle cx="7" cy="7" r="1.1"/>',
+    book: '<path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H16v12H5.5A1.5 1.5 0 0 0 4 16.5z"/><path d="M4 16.5A1.5 1.5 0 0 0 5.5 18H16"/>',
+    panel: '<rect x="3" y="4" width="14" height="12" rx="2.5"/><path d="M12.5 4v12"/>'
   };
   const icon = name => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SVG[name]}</svg>`;
 
@@ -112,20 +120,44 @@
   function tabsHtml() {
     const count = S.ctx && N.get(S.ctx.subjectId) ? N.get(S.ctx.subjectId).length : 0;
     const a = S.ctx && S.ctx.fileId ? A.get(S.ctx.fileId) : null;
-    return `<div class="ls-tabs" role="tablist" aria-label="Notes panel">
-        <button class="ls-tab${S.tab === 'points' ? ' on' : ''}" type="button" role="tab" aria-selected="${S.tab === 'points'}" data-ls="tab" data-tab="points">Key points</button>
-        <button class="ls-tab${S.tab === 'notes' ? ' on' : ''}" type="button" role="tab" aria-selected="${S.tab === 'notes'}" data-ls="tab" data-tab="notes">Notes${count ? ` <span class="ls-count">${count}</span>` : ''}</button>
+    const tab = (id, label, extra = '') => `<button class="ls-tab${S.tab === id ? ' on' : ''}" type="button" role="tab" aria-selected="${S.tab === id}" data-ls="tab" data-tab="${id}">${label}${extra}</button>`;
+    const fileNotes = S.tab === 'points' && a && a.docId;
+    return `<div class="ls-tabs" role="tablist" aria-label="Side panel views">
+        ${tab('points', 'Key points')}${tab('notes', 'Notes', count ? ` <span class="ls-count">${count}</span>` : '')}${tab('chat', 'Chat', S.busy ? ' <span class="ls-busy-dot" aria-label="answering"></span>' : '')}
       </div>
-      <button class="ls-icon-btn" type="button" data-ls="open-md" data-doc="${esc(S.tab === 'points' && a && a.docId ? a.docId : '')}" title="${S.tab === 'points' && a && a.docId ? 'Open this file’s notes (.md)' : 'Open the subject information center (.md)'}" aria-label="Open notes file">${icon('file')}</button>`;
+      <div class="ls-tools">
+        <button class="ls-icon-btn" type="button" data-ls="open-md" data-doc="${esc(fileNotes ? a.docId : '')}" title="${fileNotes ? 'Open this file’s notes (.md)' : 'Open the subject information center (.md)'}" aria-label="Open notes file">${icon('file')}</button>
+      </div>`;
   }
   function paintTabs() { const bar = $('[data-ls-tabs]'); if (bar) bar.innerHTML = tabsHtml(); }
   function paintNotesBody() {
     const body = $('[data-ls-notes-body]'); if (!body || !S.ctx) return;
     const top = body.scrollTop;
-    body.innerHTML = S.tab === 'notes' ? notesListHtml() : S.ctx.fileId ? pointsHtml(A.get(S.ctx.fileId)) : '<p class="ls-empty">This topic has no file.</p>';
+    body.innerHTML = notesBodyHtml();
     body.scrollTop = top;
   }
-  function paintNotes() { paintTabs(); paintNotesBody(); revealCurrent(); }
+  /* The Key points / Notes view; the Chat view keeps its own thread box (never rebuilt by a tab switch). */
+  function notesBodyHtml() {
+    if (S.tab === 'notes') return notesListHtml();
+    return S.ctx && S.ctx.fileId ? pointsHtml(A.get(S.ctx.fileId)) : '<p class="ls-empty">This topic has no file.</p>';
+  }
+  function paintNotes() { paintTabs(); if (S.tab !== 'chat') paintNotesBody(); showView(); revealCurrent(); }
+  /* Shows the view of the current tab; the one that appears slides in, the thread scrolls to its latest turn. */
+  function showView() {
+    const chat = S.tab === 'chat';
+    const notes = $('[data-ls-view="notes"]'); const talk = $('[data-ls-view="chat"]'); if (!notes || !talk) return;
+    const shown = chat ? talk : notes;
+    const changed = shown.hidden;
+    notes.hidden = chat; talk.hidden = !chat;
+    if (changed) { shown.classList.remove('ls-view-in'); void shown.offsetWidth; shown.classList.add('ls-view-in'); }
+    if (chat && changed) { const box = $('[data-ls-thread]'); if (box) box.scrollTop = box.scrollHeight; }
+  }
+  function setTab(tab) {
+    S.tab = tab === 'notes' || tab === 'chat' ? tab : 'points';
+    if (S.ctx && S.tab === 'notes' && !N.has(S.ctx.subjectId)) loadNotes(S.ctx.subjectId);
+    if (S.tab === 'notes' && !S.prefs) loadPrefs();
+    paintNotes();
+  }
   function revealCurrent() {
     const body = $('[data-ls-notes-body]'); const row = body && $('.ls-sec.current', body);
     if (row) { const b = body.getBoundingClientRect(); const r = row.getBoundingClientRect(); if (r.top < b.top || r.top > b.bottom - 40) body.scrollTop += r.top - b.top - 8; }
@@ -149,7 +181,8 @@
       .replace(/\[(\d{1,2})\]/g, (all, n) => (labels.has(Number(n)) ? `<button class="ls-cite" type="button" data-ls="cite" data-n="${n}" title="Show source ${n}">${n}</button>` : ''));
   }
   function turnHtml(turn) {
-    const q = `<p class="ls-q">${esc(turn.question)}</p>`;
+    // A question asked from a comment on the page shows the marked text above it.
+    const q = `${turn.quote ? `<blockquote class="ls-q-quote">${esc(turn.quote.length > 220 ? `${turn.quote.slice(0, 220)}…` : turn.quote)}${turn.where ? `<small>${esc(turn.where)}</small>` : ''}</blockquote>` : ''}<p class="ls-q">${esc(turn.question)}</p>`;
     if (turn.fresh) { delete turn.fresh; return turnHtml(turn).replace('class="ls-turn"', 'class="ls-turn is-new"'); }
     if (turn.status === 'working') {
       const live = liveAnswer(turn.live);
@@ -169,12 +202,21 @@
     // Only the latest answer offers "Explain more" and "Simpler": they ask a follow-up about it.
     const latest = turn.kind !== 'chat' && turn.id === lastAnswered();
     const more = latest && !S.busy ? `<div class="ls-actions"><button class="ls-chip" type="button" data-ls="suggest" data-q="Explain that in more detail">Explain more</button><button class="ls-chip" type="button" data-ls="suggest" data-q="Explain that more simply">Simpler</button></div>` : '';
-    return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a">${turn.notice ? `<p class="ls-notice">${esc(turn.notice)} Showing the matching text from your files.</p>` : ''}<p>${cite(turn.answer, turn.sources)}</p>${sources ? `<ol class="ls-srcs" aria-label="Sources">${sources}</ol>` : ''}</div>${meta ? `<p class="ls-meta">${meta}</p>` : ''}${more}</li>`;
+    return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a">${turn.notice ? `<p class="ls-notice">${esc(turn.notice)}${/from your file/i.test(turn.notice) ? '' : ' Showing the matching text from your files.'}</p>` : ''}<p>${cite(turn.answer, turn.sources)}</p>${sources ? `<ol class="ls-srcs" aria-label="Sources">${sources}</ol>` : ''}</div>${meta ? `<p class="ls-meta">${meta}</p>` : ''}${more}</li>`;
   }
   function lastAnswered() { const list = convo().filter(t => t.status === 'answered' && t.kind !== 'chat' && t.kind !== 'learn'); return list.length ? list[list.length - 1].id : null; }
   function threadHtml() {
     const turns = convo();
-    if (!turns.length) return `<div class="ls-ask-empty"><p>Ask about this subject’s files. Answers use only what is in them.</p><div class="ls-actions center"><button class="ls-chip" type="button" data-ls="suggest" data-q="Summarize this file">Summarize this file</button>${S.ctx && S.ctx.topicTitle ? `<button class="ls-chip" type="button" data-ls="suggest" data-q="${esc(`Explain ${S.ctx.topicTitle} simply`)}">Explain this topic simply</button>` : ''}</div><p class="ls-hint">You can also tell me things that are not in the file, like “my prof said …” or “keep answers short”.</p></div>`;
+    if (!turns.length) {
+      const row = (name, q, label) => `<li><button class="ls-suggest" type="button" data-ls="suggest" data-q="${esc(q)}">${icon(name)}<span>${esc(label)}</span></button></li>`;
+      const topic = S.ctx && S.ctx.topicTitle;
+      return `<div class="ls-ask-empty">
+        <span class="ls-avatar" aria-hidden="true">${icon('spark')}</span>
+        <p class="ls-hello">How can I help with this file?</p>
+        <ul class="ls-suggests">${row('lines', 'Summarize this file', 'Summarize this file')}${topic ? row('bulb', `Explain ${topic} simply`, 'Explain this topic simply') : ''}${row('tag', 'List the key terms in this file', 'List the key terms')}</ul>
+        <p class="ls-hint">Answers use only your files. You can also tell me things like “my prof said …” or “keep answers short”.</p>
+      </div>`;
+    }
     return `<ol class="ls-thread">${turns.map(turnHtml).join('')}</ol>`;
   }
   function paintThread(scroll = true) {
@@ -191,12 +233,17 @@
     btn.classList.toggle('stop', working);
     btn.disabled = !working && !field.value.trim();
   }
-  function grow(field) { field.style.height = 'auto'; field.style.height = `${Math.min(field.scrollHeight, 96)}px`; }
+  function grow(field) { field.style.height = 'auto'; field.style.height = `${Math.min(field.scrollHeight, 120)}px`; }
 
-  async function ask(question) {
+  /* about = { quote, where } when the question comes from a comment on a marked area of the page: the marked text
+     goes with the question so the answer is about that part. */
+  async function ask(question, about = null) {
     const ctx = S.ctx; const q = String(question || '').trim();
-    if (!ctx || !q || S.busy) return;
-    const turn = { id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, question: q, status: 'working', stage: 'Searching the information center', live: '', fresh: true };
+    if (!ctx || !q || S.busy) return false;
+    const quote = about && about.quote ? String(about.quote).replace(/\s+/g, ' ').trim().slice(0, 1500) : '';
+    const turn = { id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, question: q, quote, where: about && about.where ? String(about.where) : '', status: 'working', stage: quote ? 'Reading the marked area' : 'Searching the information center', live: '', fresh: true };
+    // The marked text goes separately from the question: it is the first excerpt of the answer, not search words.
+    const mark = quote ? { quote, page: about && Number.isInteger(about.page) ? about.page : null } : null;
     // The answered turns on screen are what the assistant may remember for a follow-up question.
     const history = (C.get(ctx.subjectId) || []).filter(t => t.status === 'answered' && t.kind !== 'chat').map(t => t.id);
     if (!C.has(ctx.subjectId)) C.set(ctx.subjectId, []);
@@ -204,12 +251,13 @@
     S.busy = { requestId: turn.id, subjectId: ctx.subjectId };
     S.draft.set(ctx.subjectId, '');
     const field = $('[data-ls-input]'); if (field) { field.value = ''; grow(field); }
+    if (S.tab !== 'chat') setTab('chat'); else paintTabs();
     const list = $('[data-ls-thread] .ls-thread');
     if (list) { list.insertAdjacentHTML('beforeend', turnHtml(turn)); const box = $('[data-ls-thread]'); box.scrollTop = box.scrollHeight; } else paintThread();
     paintComposer();
     try {
-      const result = await api.ask(ctx.subjectId, ctx.fileId || null, q, turn.id, history);
-      Object.assign(turn, result, { live: '' });
+      const result = await api.ask(ctx.subjectId, ctx.fileId || null, q, turn.id, history, mark);
+      Object.assign(turn, result, { live: '', question: q }); // the bubble keeps what the student typed
       if (result.status === 'answered' && result.notes && result.notes.length) {
         const list = N.get(ctx.subjectId) || [];
         N.set(ctx.subjectId, [...result.notes, ...list]);
@@ -219,7 +267,8 @@
       Object.assign(turn, { status: 'error', error: error.message || 'The question could not be answered.' });
     } finally {
       S.busy = null;
-      if (S.ctx && S.ctx.subjectId === ctx.subjectId) { if (!replaceTurn(turn)) paintThread(false); paintComposer(); const f = $('[data-ls-input]'); if (f && document.activeElement === document.body) f.focus(); }
+      if (typeof S.onAnswered === 'function') S.onAnswered(turn);
+      if (S.ctx && S.ctx.subjectId === ctx.subjectId) { if (!replaceTurn(turn)) paintThread(false); paintComposer(); paintTabs(); const f = $('[data-ls-input]'); if (f && document.activeElement === document.body) f.focus(); }
     }
   }
   function flashTab() {
@@ -229,7 +278,7 @@
   function stop() { if (S.busy) api.cancelAsk(S.busy.requestId).catch(() => {}); }
   function openSource(source) {
     if (!S.ctx || !source || typeof S.ctx.openTopic !== 'function') return;
-    if (source.docId === 'your-notes') { S.tab = 'notes'; if (!N.has(S.ctx.subjectId)) loadNotes(S.ctx.subjectId); paintNotes(); return; }
+    if (source.docId === 'your-notes') { setTab('notes'); return; }
     S.ctx.openTopic({ title: String(source.heading || '').replace(/^\d+(\.\d+)*\s+/, ''), page: source.page || null, fileId: source.fileId || null, text: String(source.text || '').replace(/^- /, '').split('\n')[0] });
   }
 
@@ -239,7 +288,7 @@
     if (!control || !control.closest('.ln-side')) return;
     const ctx = S.ctx; if (!ctx) return;
     switch (control.dataset.ls) {
-      case 'tab': S.tab = control.dataset.tab === 'notes' ? 'notes' : 'points'; if (S.tab === 'notes' && !N.has(ctx.subjectId)) loadNotes(ctx.subjectId); if (S.tab === 'notes' && !S.prefs) loadPrefs(); paintNotes(); return;
+      case 'tab': setTab(control.dataset.tab); return;
       case 'reanalyze': if (ctx.fileId) { A.set(ctx.fileId, { status: 'pending' }); paintNotes(); api.reanalyze(ctx.fileId).catch(error => { A.set(ctx.fileId, { status: 'error', error: error.message }); paintNotes(); }); } return;
       case 'open-md': api.openNotesFile(ctx.subjectId, control.dataset.doc || null).catch(error => ctx.toast && ctx.toast(error.message || 'The notes file could not be opened.', { error: true })); return;
       case 'section': case 'point': if (typeof ctx.openTopic === 'function') ctx.openTopic({ title: control.dataset.title, page: Number(control.dataset.page) || null, fileId: ctx.fileId, text: control.dataset.text }); return;
@@ -333,15 +382,19 @@
   function html(ctx) {
     S.ctx = ctx;
     const draft = S.draft.get(ctx.subjectId) || '';
-    return `<section class="ln-side-panel ln-side-notes" aria-label="Notes">
+    const chat = S.tab === 'chat';
+    return `<section class="ln-side-panel ls-panel" aria-label="Key points and chat">
         <div class="ls-bar" data-ls-tabs>${tabsHtml()}</div>
-        <div class="ls-body" data-ls-notes-body>${S.tab === 'notes' ? notesListHtml() : ctx.fileId ? pointsHtml(A.get(ctx.fileId)) : '<p class="ls-empty">This topic has no file.</p>'}</div>
-      </section>
-      <section class="ln-side-panel ln-side-ask" aria-label="Ask">
-        <div class="ls-thread-box" data-ls-thread aria-live="polite">${threadHtml()}</div>
+        <div class="ls-views">
+          <div class="ls-view" data-ls-view="notes"${chat ? ' hidden' : ''}><div class="ls-body" data-ls-notes-body>${chat ? '' : notesBodyHtml()}</div></div>
+          <div class="ls-view" data-ls-view="chat"${chat ? '' : ' hidden'}><div class="ls-thread-box" data-ls-thread aria-live="polite">${threadHtml()}</div></div>
+        </div>
         <div class="ls-compose">
-          <textarea class="ls-input" data-ls-input rows="1" maxlength="2000" placeholder="Ask about this subject’s files" aria-label="Ask a question about this subject’s files">${esc(draft)}</textarea>
-          <button class="ls-send${S.busy ? ' stop' : ''}" type="button" data-ls="send" aria-label="${S.busy ? 'Stop' : 'Ask'}" title="${S.busy ? 'Stop' : 'Ask (Enter)'}"${!S.busy && !draft.trim() ? ' disabled' : ''}>${icon(S.busy ? 'stop' : 'send')}</button>
+          <textarea class="ls-input" data-ls-input rows="1" maxlength="2000" placeholder="Ask about this file…" aria-label="Ask a question about this subject’s files">${esc(draft)}</textarea>
+          <div class="ls-compose-foot">
+            <span class="ls-scope" title="Answers come only from this subject’s files">${icon('book')}This subject’s files</span>
+            <button class="ls-send${S.busy ? ' stop' : ''}" type="button" data-ls="send" aria-label="${S.busy ? 'Stop' : 'Ask'}" title="${S.busy ? 'Stop' : 'Ask (Enter)'}"${!S.busy && !draft.trim() ? ' disabled' : ''}>${icon(S.busy ? 'stop' : 'send')}</button>
+          </div>
         </div>
       </section>`;
   }
@@ -349,7 +402,7 @@
   function sync(ctx) {
     const subjectChanged = !S.ctx || S.ctx.subjectId !== ctx.subjectId;
     S.ctx = ctx;
-    if (!$('.ln-side-notes')) return;
+    if (!$('.ls-panel')) return;
     if (subjectChanged) paintThread();
     if (ctx.fileId) loadAnalysis(ctx.fileId);
     if (!N.has(ctx.subjectId)) loadNotes(ctx.subjectId);
@@ -365,5 +418,8 @@
   document.addEventListener('input', onInput);
   if (api.onIntelEvent) api.onIntelEvent(onIntel);
   if (api.onAskEvent) api.onAskEvent(onAsk);
-  window.PerflwLearningStudy = { html, sync, reset, forget, fileChanged: fileId => { A.delete(fileId); } };
+  window.PerflwLearningStudy = { html, sync, reset, forget, fileChanged: fileId => { A.delete(fileId); },
+    /* From the page's comment tool: shows Chat and asks about the marked area. false while another answer runs. */
+    askAbout: (question, about) => { if (S.busy || !S.ctx) return false; ask(question, about); return true; },
+    busy: () => Boolean(S.busy) };
 })();
