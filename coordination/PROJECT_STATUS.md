@@ -47,13 +47,13 @@ prototype stage. In the code, package, README, data folder and GitHub repo it is
 | UI/UX system | Implemented | Frameless window, icon rail, collapsible sidebar, 9 core views plus Automation views; about 527 `aria-*` attributes, 62 `:focus-visible` rules, `prefers-reduced-motion` honored (code) |
 | Planner / Calendar | Implemented | Days, Weeks and Months views; plans; time-block schedules with drag; project tasks appear on the calendar (code, smoke test) |
 | Task management | Implemented | Projects block editor, tasks, milestones, goals (backend only), Routine (resets daily), Activities (code) |
-| Learning | **Built:** document workflow, Ask, notes. **Not built:** assessment, weakness analysis, mastery, journey, final exam | Built (code; `test:learning` smoke PASS on `main` 2026-11-23): subjects, topics, file import (PDF/DOCX/PPTX/MD/TXT), in-app PDF viewer, annotations, document analysis pipeline, image reading through Ollama, grounded Ask (Q&A), saved notes. Not built: pre-test/quizzes, mistake and weakness analysis, computed mastery, journeys, study sessions, final exam: placeholders (`learning.js:5,156-160`). Mastery is **only a manual %** the student types (`learning.js:830`). PF-007 (safe file I/O for learning state) APPROVED, not yet merged. Spec: `docs/LEARNING_SYSTEM_SPEC.md` (ADR-004/005/008 accepted; owner diagram questions open, HO-011) |
+| Learning | **Built:** document workflow, Ask, notes. **Not built:** assessment, weakness analysis, mastery, journey, final exam | Built (code; `test:learning` smoke PASS on `main` 2026-11-23): subjects, topics, file import (PDF/DOCX/PPTX/MD/TXT), in-app PDF viewer, annotations, document analysis pipeline, image reading through Ollama, grounded Ask (Q&A), saved notes. Not built: pre-test/quizzes, mistake and weakness analysis, computed mastery, journeys, study sessions, final exam: placeholders (`learning.js:5,156-160`). Mastery is **only a manual %** the student types (`learning.js:830`). PF-007 (safe file I/O for learning state) integrated (`5664f56`). Spec: `docs/LEARNING_SYSTEM_SPEC.md` (ADR-004/005/008 accepted; owner diagram questions open, HO-011) |
 | Focus timer | Implemented | Start and stop from the schedule panel; `focus_entries` and `active_timers` (code) |
 | Chat and AI automation | Implemented | Chat sessions, agents, skills, workflows; Ollama by default, optional OpenAI/Anthropic/Gemini (code) |
 | Analytics | Basic | One view of routine and plan counts for the month (code) |
 | Expense tracking | **Not implemented (schema only)** | `finance_*` and `ledger_entries` tables exist, with zero reads or writes, no IPC and no UI (code) |
 | Data persistence | Implemented, has risks | SQLite (`node:sqlite`) in two DBs plus files under `%APPDATA%\Perflw`; ad hoc migrations (code) |
-| Testing | Partial: E2E passing, **flaky** | `main` `dfd1fbd`: `npm test` 126 pass + 2 todo, `test:electron` PASS. PF-007 `b545f18`: `npm test` 141/141, `test:electron` 3/3 PASS (HO-010); 7 of 9 runs pass across HO-008/010 (fixed waits, PF-020) (test) |
+| Testing | Partial: E2E passing, **flaky** | `main` `5664f56`: `npm test` 141/141 (orchestrator session); tree identical to `b545f18`, where Claude A measured: `npm test` 141/141, `test:electron` 3/3 PASS (HO-010); 7 of 9 runs pass across HO-008/010 (fixed waits, PF-020) (test) |
 | Documentation | Good for users, mixed for devs | Detailed README; 6 design and concept docs in `docs/`, some concept-only (code) |
 | Multi-agent workflow | In progress | Coordination files committed in `e9cc8ae`; Claude B's identity not yet confirmed |
 
@@ -121,8 +121,8 @@ Objectives:
 |---|---|---|---|
 | PF-001–003 | Baseline audit (architecture, features, risks) | Claude A | REVIEW (by owner) |
 | PF-004 | Fix the failing E2E smoke test | Claude B | INTEGRATED (`dfd1fbd`) |
-| PF-007 | Safe user-data file I/O (P0) | Claude B | APPROVED (HO-010) — awaiting owner merge into `main` |
-| PF-006 | Versioned migrations (gate G1) | Claude B (next) | Assignment HO-009 written, HELD until PF-007 is merged |
+| PF-007 | Safe user-data file I/O (P0) | Claude B | INTEGRATED (`5664f56`, approved HO-010) |
+| PF-006 | Versioned migrations (gate G1) | Claude B | ASSIGNED (HO-009 released 2026-11-23); branch `refactor/PF-006-migrations` from `5664f56` |
 | LS-001 | Learning System spec | Claude A | DONE: D1–D5 approved; ADR-004/005/008 ACCEPTED (2026-11-23); diagram questions open (HO-011) |
 
 Update this section whenever a task becomes active.
@@ -214,7 +214,7 @@ large libraries, packaging and installer, the behavior of the Office PDF-convers
 4. Automate verification (PF-008).
 5. Owner product decisions: name, expense tracking, core student workflows (PF-009, PF-013, PF-015).
 6. Learning System: spec approved in principle (D1–D5, 2026-11-23). Order, one task at a time: PF-004 ✔ (review) →
-   PF-007 ✔ (approved, HO-010; merge pending) → PF-006 → LS-002 → … (critical path in `TASK_QUEUE.md`). Learning tables wait for PF-006 (gate G1). ADR-004/005/008
+   PF-007 ✔ (integrated, `5664f56`) → PF-006 (assigned) → LS-002 → … (critical path in `TASK_QUEUE.md`). Learning tables wait for PF-006 (gate G1). ADR-004/005/008
    accepted 2026-11-23.
 
 ---

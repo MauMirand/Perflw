@@ -55,8 +55,8 @@ refer to `PROJECT_STATUS.md` §6.
 |---|---|---|---|---|---|
 | PF-004 | Fix the failing Electron E2E smoke test (Learning PDF stage) | P0 | **INTEGRATED** (`dfd1fbd`, 2026-11-23) | — | R2. Commits `3b8f738`, `f2006fa` on `fix/PF-004-smoke-pdf`. Independently re-verified: `npm test` 126 pass/0 fail/2 todo; smoke 3/3. Follow-ups: PF-007, PF-020. |
 | PF-005 | Upgrade Electron off EOL 38.x to a supported major | P0 | BACKLOG | PF-004; ADR-001 approval | R1, R5 |
-| PF-006 | Versioned, transactional schema migrations with a backup | P1 | READY — assignment written and HELD (HO-009) until PF-007 is merged (PF-007 APPROVED, HO-010) | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
-| PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **APPROVED** (HO-010, 2026-11-23): `8475dcb` + revision `b545f18`; awaiting owner merge (not INTEGRATED) | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
+| PF-006 | Versioned, transactional schema migrations with a backup | P1 | **ASSIGNED** to Claude B (HO-009 released 2026-11-23); branch `refactor/PF-006-migrations` from `main` `5664f56` | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
+| PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **INTEGRATED** (`5664f56`, 2026-11-23; `--no-ff`, not pushed): `8475dcb` + `b545f18`, APPROVED in HO-010 | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
 | PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | BACKLOG | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
 | PF-008 | `npm run verify` and Windows CI (GitHub Actions) | P1 | BACKLOG | PF-004; owner OK for Actions | R6 |
 | PF-009 | Owner decision: build expense tracking or remove the unused finance and ledger tables | P1 | BACKLOG | owner | R9; needs a decision, not code |
@@ -75,7 +75,7 @@ Parallel-safe now: PF-004 alone (Claude B). After that, PF-007 and PF-010 do not
 
 ### TASK: PF-007 — Safe user-data file I/O on Windows
 
-**Status:** APPROVED (HO-010, 2026-11-23); awaiting owner merge  
+**Status:** INTEGRATED (`5664f56`, 2026-11-23); APPROVED in HO-010  
 **Priority:** P0  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -125,13 +125,14 @@ PF-004 APPROVED; ADR-003 approval.
 
 #### Review
 **Reviewed By:** Claude A  
-**Decision:** APPROVED WITH MINOR CHANGES (HO-008) → revision **APPROVED** (HO-010, 2026-11-23). Not integrated.
+**Decision:** APPROVED WITH MINOR CHANGES (HO-008) → revision **APPROVED** (HO-010, 2026-11-23). Integrated in
+`main` as `5664f56` (merge tree identical to `b545f18`; `npm test` on `main` 141/141 per the orchestrator session).
 
 ---
 
 ### TASK: PF-006 — Versioned, transactional schema migrations with a backup
 
-**Status:** READY (PF-007 reviewed and APPROVED, HO-010; assign after PF-007 is merged into `main`)  
+**Status:** ASSIGNED (HO-009 released 2026-11-23; PF-007 integrated as `5664f56`)  
 **Priority:** P1 (gate G1 for the Learning System)  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
