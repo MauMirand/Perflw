@@ -42,9 +42,12 @@
   // ───────── data
   async function load(fileId) {
     const token = S.loading = uid();
-    let data;
-    try { data = await api.annotations(fileId); } catch { data = null; }
+    let data; let failed = null;
+    try { data = await api.annotations(fileId); } catch (error) { data = null; failed = error; }
     if (S.loading !== token || S.fileId !== fileId) return;
+    // Marks that could not be read are not replaced by an empty set: saving stays off until the file is opened again.
+    S.unreadable = failed ? fileId : null;
+    if (failed) toast(`${failed.message || 'Your marks could not be loaded.'} New marks are not saved until you open the file again.`, true);
     S.data = data || { notes: [], strokes: [], comments: [] };
     paintAll();
   }
@@ -59,7 +62,7 @@
   }
   function save() {
     clearTimeout(S.saveTimer);
-    const fileId = S.fileId; const data = S.data; if (!fileId || !data) return;
+    const fileId = S.fileId; const data = S.data; if (!fileId || !data || S.unreadable === fileId) return;
     S.saveTimer = setTimeout(() => { S.saveTimer = 0; send(fileId, data); }, 350);
   }
   /* Writes now (sign-out, another file, closing the window): an open note or comment keeps what was typed first. */

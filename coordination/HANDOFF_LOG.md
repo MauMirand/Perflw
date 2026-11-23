@@ -149,6 +149,176 @@ Claude B must review the project instructions and prepare for implementation ass
 
 ---
 
+### HO-007 — PF-007: Safe user-data file I/O on Windows
+
+**Date:** 2026-11-23  
+**Task ID:** PF-007  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED — awaiting review
+
+> Approval: in chat on 2026-11-23 the project owner told Claude B to "merge the fix into main and stop notes from
+> vanishing". Claude B took that as approval of PF-004 integration and of ADR-003 (amended) / PF-007. Claude A
+> should confirm the ADR-003 status change in `ARCHITECTURE_DECISIONS.md`. Numbering: HO-005/HO-006 are Claude A's
+> uncommitted entries, so this entry is HO-007.
+
+#### 1. Summary
+
+Before this change, a user-data file briefly held by another program (antivirus, search indexer, backup) could:
+- leave a file stuck on "Analyzing this file…";
+- make the app read a subject's `state.json` as empty and overwrite it on the next save, losing document entries and saved notes;
+- do the same to learning preferences and the agent registry.
+
+Now:
+- writes are retried;
+- a read that still fails throws, and is never taken as "empty";
+- an unsaved analysis status is kept in memory.
+
+Spec followed: PF-007 and ADR-003 amendment items 1–4, as drafted in Claude A's `perflow-manager` worktree (uncommitted there).
+
+#### 2. Integration done before this task
+
+`fix/PF-004-smoke-pdf` was merged into `main` in the main checkout:
+- Command: `git merge --no-ff`, giving merge commit `dfd1fbd`.
+- Instruction: the owner's, in chat. Nothing was pushed.
+- Check: `npm test` on `main` after the merge exited 0 (128 tests, 126 pass, 2 todo).
+
+#### 3. Work Completed
+
+- **New `src/safe-file.js`:**
+  - `writeFileAtomic(file, data, { mode = 0o600, dirMode = 0o700 })`:
+    - writes a temp file in the same folder (`wx`, random name), then `renameSync`;
+    - retries on `EPERM`/`EBUSY`/`EACCES` with delays 10/20/40/80/150/200 ms (500 ms in total), waiting synchronously with `Atomics.wait`;
+    - when the retries run out, deletes the temp file and throws a plain-language error that keeps `error.code`;
+    - throws other errors at once.
+  - `readJsonFile(file, fallback)`:
+    - `ENOENT` returns `fallback`;
+    - a held file gets the same retry, then the function throws (never `fallback`);
+    - invalid JSON is moved aside to `<file>.corrupt-<ms>` and `fallback` is returned.
+- **`src/learning-workflow.js`:**
+  - `write`/`readJson` now delegate to the helpers.
+  - New in-memory `unsaved` map (fileId → status): set when the pending or failed status can't be written, cleared after a successful save. `fileAnalysis` answers from it first (ADR item 4).
+  - Read-modify-write callers now stop when the read throws (item 3): `loadState`, `preferences`/`saveLearned`/`deletePreference`, and the notes paths. They needed no other change.
+- **`src/learning-agents.js`:** the registry (`agents.json`) is read with `readJsonFile` (busy → throws, so no duplicate agents and no lost ids). It is written with `writeFileAtomic`, where before it was written in place. `fs` is no longer required.
+- **`src/automation/packages.js`:** `writeAtomic` now delegates to `writeFileAtomic`, so it gains the retry. On POSIX, new folders get `0o700`; on Windows nothing changes.
+- **`src/main.js`:**
+  - Annotations are written with `writeFileAtomic`. Before, a fixed `.tmp` name and no file mode.
+  - The session token (`persistToken`) is written with `writeFileAtomic`. This was a trivial swap: same temp-and-rename, `0o600`, plus the retry.
+  - `learning:annotations` now reads with `readJsonFile`: a held file throws instead of returning "no marks".
+- **`src/learning-annotate.js`:**
+  - If marks can't be loaded, saving is switched off for that file (`S.unreadable`) and a toast says so. An empty set never overwrites the saved marks.
+  - Why this is in scope: the main-process throw alone was not enough, because the renderer turned any load error into empty data and saved over it 350 ms after the next mark. It is the same defect class as `state.json`, in a file PF-007 already touches.
+- **Tests:**
+  - New `test/safe-file.test.js`, 9 tests: write, mode, retry then success, retries exhausted (throws, keeps the old file, no `.tmp`, bounded time), other errors not retried, `ENOENT` fallback, short busy read retried, busy read throws for all three codes, invalid JSON moved aside.
+  - `test/learning-state-io.test.js`: `todo` removed from both PF-004 reproducers. New tests: preferences (a busy read throws and the file is unchanged) and agent registry (a busy read rejects, the file is unchanged, and the same agent ids come back afterwards).
+
+#### 4. Architecture decisions followed
+
+- ADR-003 (amended), items 1–4.
+- PF-007 restrictions: no schema change, no new dependency, no file format or location change, `workspace.js`/`auth.js` untouched.
+
+#### 5. Modified Files
+
+- `src/safe-file.js` (new)
+- `src/learning-workflow.js`
+- `src/learning-agents.js`
+- `src/automation/packages.js`
+- `src/main.js` (I/O lines only)
+- `src/learning-annotate.js` (load and save guard only)
+- `test/safe-file.test.js` (new)
+- `test/learning-state-io.test.js`
+- `coordination/HANDOFF_LOG.md` (this entry)
+
+#### 6. Git Information
+
+**Branch:** `fix/PF-007-safe-file-io` (from `main` at `dfd1fbd`)  
+**Commit:** the commit that adds this entry  
+**Base Branch:** `main`
+
+#### 7. Testing
+
+All runs were captured as `cmd > log 2>&1; echo EXIT=$?`. Logs are in `pf007-evidence/` (git-ignored, local).
+
+| Run | Result |
+|---|---|
+| `node --test test/safe-file.test.js` | 9/9 pass |
+| `node --test test/learning-state-io.test.js` | 4/4 pass, 0 todo |
+| Same 4 tests against the pre-fix `src/` from `main` (`git archive`) | 4/4 **fail**, so they really guard the fix |
+| `npm ci` (clean) | 01:56:17Z EXIT=0 |
+| `npm run test:electron`, run until 3 passes in a row (cap 6) | run1 EXIT=0 (67 s), run2 EXIT=0 (68 s), run3 EXIT=0 (64 s) |
+| `npm test` | 02:01:18Z EXIT=0: 139 tests, 139 pass, 0 fail, 0 cancelled, 0 todo |
+
+Not tested end to end: a real external program holding a file during the app run. That is covered only by the `fs` stubs and the PF-004 OS probe. The annotation load guard is checked by reading the code and by the smoke run's annotation steps passing; there is no unit test for it, because the renderer modules have no unit harness.
+
+#### 8. Known limitations and remaining risks
+
+1. **Main-thread pause.** A held file can block the main process for up to ~0.5 s per write or read, by design (ADR-003 trade-off). A file held longer still fails, now visibly.
+2. **Status kept only in memory.** The status in `unsaved` is lost on restart. Afterwards the file shows its last saved status.
+   - *Corrected after HO-008.* The first version said a stored `pending` "is re-queued when opened (existing behavior)". That was wrong: `fileAnalysis` returned it unchanged, so the file stayed on "Analyzing…" forever.
+   - Fixed in the revision (section 11): a stored `pending` with no job behind it is now queued again when the panel asks for it.
+   - A stored `failed` is still shown as failed until the student re-analyzes it.
+3. **A failed read now raises an error in places that used to return empty data.** The notes panel, Ask, preferences and annotations now show "…another program is using it. Try again in a moment." for a file still held after 0.5 s. That is intended, but it is a visible change.
+4. **Damaged JSON files are moved aside and kept** as `*.corrupt-*`. Nothing cleans them up yet.
+5. **Readers not switched to the helpers (out of scope):** the image cache, doc JSON and preview reads use the workflow's `readJson`, so they are covered. Other `readFileSync` + `JSON.parse` sites in `src/automation/` (package config, skills) were not audited here. Suggest a follow-up grep in PF-014.
+6. **Smoke flakes outside this task** (`:620`, `:1031`, PF-020) did not occur in this batch, but they are not fixed.
+
+#### 9. Required Next Action
+
+Claude A:
+- review `fix/PF-007-safe-file-io`;
+- record ADR-003 as ACCEPTED (owner approval in chat);
+- commit Claude A's pending coordination and docs work on top of `main` (now `dfd1fbd`);
+- assign the next task (planned: PF-006).
+
+#### 10. Review Result
+
+**Reviewer:** Claude A  
+**Decision:** APPROVED WITH MINOR CHANGES (HO-008). Revision below, awaiting delta review.
+
+#### 11. Revision for HO-008 (same branch, new commit, no rebase)
+
+**Change 1: a stored `pending` is re-queued** (`src/learning-workflow.js`)
+- New `analyzing`: the file id that `run()` is reading right now. It is set after the job leaves the queue and cleared after the result is emitted, and in `finally`.
+- New `idleFile(id)`: true when the file is neither queued nor being read now.
+- `fileAnalysis` now calls `queueFile` when:
+  - the stored status is `pending` and `idleFile` is true (new);
+  - there is no entry (existing behavior, now guarded by `idleFile`);
+  - the doc or analysis is missing (existing behavior, now guarded by `idleFile`);
+  - the analysis version is old (this check now also skips the file being read).
+- `queueFile` itself is unchanged. Explicit re-queues still run for the file being read: Re-analyze, and the Office preview's page refresh. Those carry new content.
+
+**Tests** (`test/learning-state-io.test.js`, 2 new):
+- A `pending` left in `state.json` with a fresh workflow instance, as after a restart: the panel shows `pending`, then the file ends `ready`.
+- A file being analyzed while the panel asks 5 times: one finished analysis event, then `ready`.
+
+Each test was checked against the bug it targets:
+- Test 5 fails on `8475dcb`'s `learning-workflow.js` and passes now.
+- Test 6 fails when the `analyzing` check is removed from `idleFile` and passes now.
+
+**Change 2:** section 8 item 2 above is corrected.
+
+**Checks after the revision** (logs in `pf007-evidence/rev1-*`): see the table added below.
+
+| Run | Result |
+|---|---|
+| `node --test test/learning-state-io.test.js` | 6/6 pass, 0 todo |
+| `npm test` (02:37:45Z) | EXIT=0: 141 tests, 141 pass, 0 fail, 0 todo |
+| `npm run test:electron`, 1st run (02:34:21Z) | **Failed** at `:949` "Plan group hides Calendar, the date card and Routine only" (sidebar group measured after `sleep(250)`). This is the fixed-wait flake Claude A also saw (PF-020). The revision does not touch the sidebar. |
+| `npm run test:electron`, 2nd run (02:35:51Z) | EXIT=0, "Electron smoke test passed." |
+
+**Correction to earlier recorded exit codes.**
+- *What went wrong.* Some of Claude B's single-command records used `echo "… $(date …) EXIT=$?"`. The `$(date)` runs first and resets `$?` to 0, so the printed exit code was always 0. That is how the 1st smoke run above was first logged as EXIT=0 despite failing.
+- *Records affected:*
+  - HO-004's acceptance `npm test` line (01:33:24Z);
+  - HO-007's `npm ci` (01:56:17Z) and `npm test` (02:01:18Z) lines.
+- *Records not affected.* Every smoke batch saved `e=$?` before `echo`, so those exit codes are real.
+- *Evidence for the affected records.* Their logs show the real outcomes:
+  - the two `npm test` logs say `# fail 0` (126 and 139 pass), and `node --test` exits non-zero on any failure;
+  - the `npm ci` log has 0 `ERR!` lines and ends "added 176 packages".
+- *Re-measured.* `npm test` was re-run with `e=$?` captured first (row above). Its exit code is measured, not inferred.
+
+---
+
 ### HO-004 — PF-004: Electron smoke test failure in the Learning PDF stage
 
 **Date:** 2026-11-23  

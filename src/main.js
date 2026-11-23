@@ -12,6 +12,7 @@ const { createOllamaRuntime } = require('./automation/ollama');
 const { createEcosystem } = require('./automation/ecosystem');
 const { createChatEngine } = require('./automation/chat');
 const { createLearningWorkflow } = require('./learning-workflow');
+const { writeFileAtomic, readJsonFile } = require('./safe-file');
 
 // Local Ollama model listing for the Agents page; agent execution goes through the ecosystem's provider layer.
 const agentRuntime = createOllamaRuntime();
@@ -100,9 +101,7 @@ function persistToken() {
     return;
   }
   if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure session storage is unavailable.');
-  const temp = `${sessionFile}.${randomBytes(6).toString('hex')}.tmp`;
-  fs.writeFileSync(temp, safeStorage.encryptString(token), { mode: 0o600, flag: 'wx' });
-  fs.renameSync(temp, sessionFile);
+  writeFileAtomic(sessionFile, safeStorage.encryptString(token)); // temp + rename, 0o600, retried while held
 }
 function restoreToken() {
   try {
@@ -468,8 +467,9 @@ if ($Kind -eq 'docx') {
   /* Study marks (learning-annotate.js). Positions are fractions of the page (0–1), so they survive any zoom. */
   handle('learning:annotations', fileId => {
     const user = requireUser(); workspace.topicFile(user.id, fileId); // the file must belong to this account
-    try { return cleanAnnotations(JSON.parse(fs.readFileSync(annotationFile(user, fileId), 'utf8'))); }
-    catch { return { notes: [], strokes: [], comments: [] }; }
+    // Missing or damaged: no marks yet. Held by another program: an error, never "no marks" (the next save would erase them).
+    try { return cleanAnnotations(readJsonFile(annotationFile(user, fileId), {})); }
+    catch (error) { if (error.code && /^(EPERM|EBUSY|EACCES)$/.test(error.code)) throw error; return { notes: [], strokes: [], comments: [] }; }
   });
   handle('learning:saveAnnotations', (fileId, data) => {
     const user = requireUser(); workspace.topicFile(user.id, fileId);
@@ -477,8 +477,7 @@ if ($Kind -eq 'docx') {
     const text = JSON.stringify(clean);
     if (text.length > 4 * 1024 * 1024) throw new Error('This file has too many marks to save. Remove some drawings first.');
     const file = annotationFile(user, fileId);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(`${file}.tmp`, text); fs.renameSync(`${file}.tmp`, file);
+    writeFileAtomic(file, text); // own temp name, file mode 0o600, retried while the file is held
     return clean;
   });
   /* Learning document workflow: notes panel data, saved notes, the information center files, and questions. */

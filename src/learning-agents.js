@@ -8,8 +8,8 @@
                                    excerpts only, or says NOT_IN_FILE (skill: learning-grounded-answers).
 
    If a person deletes one, it is created again the next time the workflow needs it. Edits to their files are kept. */
-const fs = require('node:fs');
 const path = require('node:path');
+const { writeFileAtomic, readJsonFile } = require('./safe-file');
 
 const SKILLS = {
   'learning-key-points': {
@@ -276,12 +276,9 @@ function pickModel(models, { vision = false, vram = null } = {}) {
 
 function createLearningAgents({ ecosystem, root }) {
   const registryFile = userId => path.join(root, 'learning-files', userId, 'intel', 'agents.json');
-  function readRegistry(userId) { try { return JSON.parse(fs.readFileSync(registryFile(userId), 'utf8')); } catch { return {}; } }
-  function writeRegistry(userId, value) {
-    const file = registryFile(userId);
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  }
+  // A held registry throws (it is never read as empty, so the agent ids in it are not overwritten).
+  function readRegistry(userId) { const value = readJsonFile(registryFile(userId), {}); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
+  function writeRegistry(userId, value) { writeFileAtomic(registryFile(userId), `${JSON.stringify(value, null, 2)}\n`); }
 
   function ensureSkills(userId) {
     const existing = new Set(ecosystem.listSkills(userId).map(s => s.id));

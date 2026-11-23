@@ -21,6 +21,7 @@ const { randomBytes, createHash } = require('node:crypto');
 const intel = require('./learning-intel');
 const { createLearningAgents } = require('./learning-agents');
 const { createFileReader } = require('./learning-files');
+const { writeFileAtomic, readJsonFile } = require('./safe-file');
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const DOC_ID = /^[a-z0-9-]{1,60}$/;
@@ -50,13 +51,9 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   const docFile = (userId, subjectId, docId, ext) => { if (!DOC_ID.test(docId)) throw new Error('Document not found.'); return path.join(subjectDir(userId, subjectId), 'docs', `${docId}.${ext}`); };
   const subjectMdPath = (userId, subjectId) => path.join(subjectDir(userId, subjectId), 'SUBJECT.md');
 
-  function write(file, content) {
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, content, { mode: 0o600 });
-    fs.renameSync(temp, file);
-  }
-  function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
+  // Held files are retried; a read that still fails throws instead of returning "empty" (src/safe-file.js).
+  const write = (file, content) => writeFileAtomic(file, content);
+  const readJson = (file, fallback) => readJsonFile(file, fallback);
   // state.json is read, changed and written with no await in between, so queued work never interleaves a write.
   const loadState = (userId, subjectId) => {
     const state = readJson(path.join(subjectDir(userId, subjectId), 'state.json'), null) || {};
@@ -104,12 +101,19 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   const enrichQueue = []; let enriching = false;
   const structuring = new Set(); // docIds whose headings the Analyzer is reading now (shown in the notes panel)
   const imaging = new Map();     // docId → { done, total } while the Image Reader reads its pictures
+  // fileId → { status, error } that could not be written to state.json (the file was held by another program).
+  // fileAnalysis answers from here first, so the notes panel never waits on a status that only exists on disk.
+  const unsaved = new Map();
+  let analyzing = null; // fileId that run() is reading now
   function queueFile(userId, fileId) {
     let file; try { file = workspace.topicFile(userId, fileId); } catch { return; }
-    const state = loadState(userId, file.subjectId);
     if (!queue.some(job => job.fileId === fileId)) {
-      state.files[fileId] = { ...(state.files[fileId] || {}), status: 'pending', error: '', name: file.name };
-      saveState(userId, file.subjectId, state);
+      try {
+        const state = loadState(userId, file.subjectId);
+        state.files[fileId] = { ...(state.files[fileId] || {}), status: 'pending', error: '', name: file.name };
+        saveState(userId, file.subjectId, state);
+        unsaved.delete(fileId);
+      } catch { unsaved.set(fileId, { status: 'pending', error: '' }); } // still analyzed; its result is saved then
       queue.push({ userId, fileId });
       emit({ type: 'analysis', subjectId: file.subjectId, fileId, status: 'pending' });
     }
@@ -122,16 +126,21 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       while (queue.length) {
         const { userId, fileId } = queue.shift();
         let file; try { file = workspace.topicFile(userId, fileId); } catch { continue; } // deleted meanwhile
+        analyzing = fileId;
         let status = 'ready'; let error = '';
-        try { await analyzeFile(userId, file); }
+        try { await analyzeFile(userId, file); unsaved.delete(fileId); }
         catch (failure) {
           status = 'failed'; error = `The file could not be analyzed (${failure.message}).`;
-          try { const state = loadState(userId, file.subjectId); state.files[fileId] = { ...(state.files[fileId] || {}), status, error }; saveState(userId, file.subjectId, state); } catch { /* subject removed */ }
+          try { const state = loadState(userId, file.subjectId); state.files[fileId] = { ...(state.files[fileId] || {}), status, error }; saveState(userId, file.subjectId, state); unsaved.delete(fileId); }
+          catch { unsaved.set(fileId, { status, error }); } // state.json held or subject removed: keep the status here
         }
+        analyzing = null;
         emit({ type: 'analysis', subjectId: file.subjectId, fileId, status, error });
       }
-    } finally { busy = false; }
+    } finally { busy = false; analyzing = null; }
   }
+  // Neither waiting in the queue nor being read right now (run() has already taken the active job off the queue).
+  const idleFile = fileId => analyzing !== fileId && !queue.some(job => job.fileId === fileId);
   // ───────── pictures: readings cached per picture (content hash), shared by every file and version
   const imageCacheFile = (userId, key) => path.join(base(userId), 'intel', 'image-cache', `${key}.json`);
   const cachedReading = (userId, key) => readJson(imageCacheFile(userId, key), null);
@@ -370,14 +379,19 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   // ───────── reads for the notes panel
   function fileAnalysis(userId, fileId) {
     const file = workspace.topicFile(userId, fileId);
+    const kept = unsaved.get(file.id);
+    if (kept) return { status: kept.status, error: kept.error, fileId: file.id };
     const state = loadState(userId, file.subjectId);
     const entry = state.files[file.id];
-    if (!entry) { queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }   // uploaded before this workflow existed
+    if (!entry) { if (idleFile(file.id)) queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }   // uploaded before this workflow existed
+    // A stored "pending" with no job behind it (the app quit mid-analysis, or the result could not be saved and the
+    // app restarted): read it again, so the panel never stays on "Analyzing this file…".
+    if (entry.status === 'pending' && idleFile(file.id)) queueFile(userId, file.id);
     if (entry.status !== 'ready') return { status: entry.status, error: entry.error || '', fileId: file.id };
     const doc = state.docs.find(d => d.id === entry.docId);
     const analysis = doc && loadDoc(userId, file.subjectId, doc.id);
-    if (!doc || !analysis) { queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }
-    if ((entry.version || 1) < ANALYSIS_VERSION && !queue.some(job => job.fileId === file.id)) queueFile(userId, file.id); // shown now, refreshed when read again
+    if (!doc || !analysis) { if (idleFile(file.id)) queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }
+    if ((entry.version || 1) < ANALYSIS_VERSION && idleFile(file.id)) queueFile(userId, file.id); // shown now, refreshed when read again
     return {
       status: 'ready', fileId: file.id, docId: doc.id, title: analysis.title, fileType: analysis.fileType, pages: analysis.pages, empty: analysis.empty,
       sources: doc.sources, latest: doc.latestFileId === file.id, action: entry.action,
