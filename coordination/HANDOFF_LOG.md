@@ -1386,6 +1386,92 @@ LS-006 (store) may be released once LS-002 and LS-005 are merged; its brief is i
 
 ---
 
+### HO-017 — LS-004: Learning insight (pure module)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-004  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED  
+**Branch:** `feature/LS-004-learning-insight`, base `main` at `70f0af1`  
+**Commits:** `eb49dbf` (module + tests); this entry in a docs commit on top.
+
+#### 1. Understanding (stated before coding)
+A pure, dependency-free `src/learning-insight.js` (no I/O, DOM, Electron, SQL or AI; no `require` at all) with the
+same dual-load wrapper as `assessment-model.js` (`window.PerflwLearningInsight` in the renderer). It assigns the §5.2
+mistake categories by code, ranks weak topics per §5.3, schedules Leitner reviews and builds the deterministic
+targeted note. It does not import `mastery-model.js` (LS-003 runs in parallel): topic levels are inputs. Not added to
+`index.html`.
+
+#### 2. Files
+- New: `src/learning-insight.js` (259 lines), `test/learning-insight.test.js`. No other file changed except this
+  entry.
+
+#### 3. API
+- Constants: `CATEGORIES` (§5.2 table order), `CATEGORY_LABELS` (plain-language labels used in notes),
+  `WEAK_LEVELS` (`not_assessed`, `emerging`, `developing`), `REVIEW_OFFSETS` `[1, 3, 7, 14, 30]`.
+- `categorize(answer, context = {}) → category | null`. `answer = { question, response, result }` (validated question,
+  normalized response, `grade()` result or the final score of an open answer). `context = { kind, answers, siblings,
+  earlier }`. Returns `null` for a pending result or a correct non-guess answer. Precedence = §5.2 table order:
+  `not_known` (dontKnow, blank, or grade's `not_known`/`not_answered`) › correct: `guess` if confidence 1 ›
+  `misconception` (score 0 and confidence 3) › `confusion` (choice: a wrong pick whose text equals the correct option
+  text of another choice question in `siblings` with the same topic; matching: two left items swapped) › `partial`
+  (essay/explain/matching/true-false-with-justification, 0 < score < max) › `recognition_only` (recall/understanding
+  item wrong while another answer in `answers`, same topic, is a correct recognition item) › `forgotten`
+  (`kind === 'retention'` and an `earlier` entry `{ questionId?, topicId, kind: 'final'|'practice', correct: true }`
+  matches; with a `questionId` it matches that question only, without one the whole topic) › `incorrect`.
+  Throws `TypeError` without `question`/`result` objects.
+- `rankWeakTopics({ topics: [{ id, position?, level? }], answers: [{ topicId, category, pending? }] }) → rows[]`.
+  Weak = level in `WEAK_LEVELS` (labels normalized: `'Not assessed'`, `'not-assessed'` → `not_assessed`; missing =
+  not assessed) or ≥ 1 misconception. Score = (misconceptions × 2 + wrong + not_known) / items, rounded to 4 places;
+  wrong = every other mistake category (`guess` and `null` are correct); 0 items → 0. Pending rows and rows for
+  unknown topics are ignored. Sorted by score desc, then `position` (default: array index), then id. Row:
+  `{ topicId, position, level, items, misconceptions, wrong, notKnown, score, reasons: ['level'?, 'misconception'?] }`.
+- `nextReview(box, correct, today)` or `nextReview({ box, correct, today }) → { box, dueOn, days }`. Correct (only
+  `true`) moves up one box, box 5 stays 5; anything else → box 1. Due offset of the new box: 1/3/7/14/30 days.
+  `today`: `"YYYY-MM-DD"` or a Date (its local calendar date); arithmetic in UTC days, so DST never shifts the date.
+  Missing box = 1 (matches `question_review.box DEFAULT 1`), out of range clamped. Invalid date → `TypeError`.
+- `targetedNote({ topic, analysisSection, missed }) → Markdown string` (deterministic, ends with one newline).
+  Sections: title, "What this topic covers" (section title, description paragraphs, key points; a placeholder if
+  none), "Your mistakes" (per missed question: prompt, "You answered", correct answer, mistake label, why, and each
+  cited source as a quote with section/page; a placeholder if none). The caller turns choice ids into text.
+- `escapeMarkdown(text)`: collapses whitespace (newlines included) to single spaces, backslash-escapes
+  `` \ ` * _ [ ] < > | ~ & # `` everywhere and `> + = -` / `1.` `1)` at the start. All user and analysis text goes
+  through it.
+
+#### 4. Tests (`test/learning-insight.test.js`, 18)
+Dual-load (require + vm browser global, no `require(` in the source); one test per category (`not_known`,
+`misconception`, `guess`, `confusion` choice and matching, `partial`, `recognition_only`, `forgotten`, `incorrect` +
+pending + TypeError), with answers built through `assessment-model.js` `validateQuestion`/`grade`; precedence test
+(dontKnow › misconception, dontKnow › forgotten, misconception › confusion, confusion › partial, partial ›
+recognition_only, confident partial stays partial, recognition_only › forgotten); weak-topic formula, reasons, guess
+counted correct, pending/unknown ignored; tie-break by array index and by explicit `position`; Leitner 1→5 offsets,
+box 5 cap, wrong → 1 from every box, year/leap-year rollover, object form, clamping, local Date across a DST change,
+invalid dates; targeted note full-string snapshot; escaping of headings, emphasis, code fences, links, HTML, pipes,
+quotes and list markers; empty note.
+
+#### 5. Results
+- `node --test test/learning-insight.test.js` → `# pass 18`, `# fail 0`.
+- `npm test > log 2>&1; echo EXIT=$?` → `EXIT=0`, `# tests 207`, `# pass 207`, `# fail 0` (base `70f0af1`: 189).
+- `npm run test:electron`: not run (no renderer change; brief: no smoke run needed).
+
+#### 6. Spec ambiguities and limitations (reported, not decided)
+1. Blank answers: §4.3 gives `not_answered`, §5.2 says blank → `not_known`. `categorize` returns `not_known` for both
+   (§5.2 governs this module); the stored `grade` category is unchanged.
+2. `misconception` needs a score of 0. A partly right answer given with confidence 3 is `partial`, not
+   `misconception` (§5.2 says "wrong"; reading partial credit as wrong seemed too harsh).
+3. `partial` covers only the types §5.2 names (open, matching) plus true/false with justification. A multiple-choice
+   answer with partial credit falls through to `recognition_only`/`forgotten`/`incorrect`.
+4. `confusion` compares option **text** (normalized case/whitespace), because option ids are local to a question.
+5. `forgotten` is topic-level unless the caller gives `questionId` in `earlier`: retention items are usually not the
+   same questions as the final (§4.1). The caller passes only results earlier than the retention check.
+6. §5.3 lists resurfacing after 1, 3 and 7 days; the LS-004 brief's 5 boxes (1/3/7/14/30) were implemented.
+7. S3 (one object argument): `categorize(answer, context)` keeps the brief's two-argument form (like LS-003's
+   `(evidence, config)`); `nextReview` accepts both the brief's positional form and one object.
+8. `rankWeakTopics` treats a missing level as Not assessed (weak). A caller that forgets levels gets every topic.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
