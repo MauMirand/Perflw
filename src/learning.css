@@ -646,3 +646,6 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz kbd { font: inherit; font-size: 11px; padding: 0 6px; border-radius: 4px; background: #2A2929; color: var(--text-2); }
 .qz-table td, .qz-table th { vertical-align: top; }
 @media (prefers-reduced-motion: reduce) { .qz-bar i { transition: none; } }
+/* Narrow widths: wide tables scroll inside the block instead of being cut off. */
+.ln-block.qz { min-width: 0; }
+.qz-table { display: block; max-width: 100%; overflow-x: auto; }

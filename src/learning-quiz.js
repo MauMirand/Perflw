@@ -42,7 +42,9 @@
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
     host.innerHTML = `<section class="ln-block qz" aria-labelledby="qz-title"><h3 class="ln-block-title" id="qz-title">Quizzes and exams</h3>${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
-    const focus = host.querySelector('[data-qz-focus]'); if (focus) focus.focus();
+    // Bring the block into view when the screen changes (it sits below the topics), without smooth scrolling under reduced motion.
+    if (S.shown !== S.mode) { S.shown = S.mode; if (S.mode !== 'home') host.scrollIntoView({ block: 'start' }); }
+    const focus = host.querySelector('[data-qz-focus]'); if (focus) focus.focus({ preventScroll: true });
   }
   const btn = (action, label, extra = '', cls = 'btn btn-sm') => `<button class="${cls}" type="button" data-qz="${action}" ${extra}>${label}</button>`;
   const ghost = (action, label, extra = '') => btn(action, label, extra, 'btn btn-sm btn-ghost');
