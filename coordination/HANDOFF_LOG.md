@@ -1386,6 +1386,92 @@ LS-006 (store) may be released once LS-002 and LS-005 are merged; its brief is i
 
 ---
 
+### HO-016 — LS-003: Mastery model (pure module)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-003  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED  
+**Branch:** `claude/determined-ishizaka-801785` (session-generated worktree branch), base `main` at `70f0af1`  
+**Commits:** `3b3ebd6` (module + tests); this entry in a docs commit on top.
+
+#### 1. Understanding (stated before coding)
+A pure, dependency-free `src/mastery-model.js` (no I/O, DOM, Electron, SQL, AI or clock) with the same dual-load
+wrapper as `topic-model.js`/`assessment-model.js` (`window.PerflwMasteryModel`). It implements spec §5.4 over the
+answers of **one topic in one cycle** as passed by the caller (D11: the module never filters by journey, subject or
+topic). All weights and thresholds live in a frozen, versioned `DEFAULT_MASTERY_CONFIG` (D4); every result records
+`configVersion`. It does not import `assessment-model.js` or `learning-insight.js`. Not added to `index.html`.
+
+#### 2. Files
+- New: `src/mastery-model.js` (317 lines), `test/mastery-model.test.js` (283 lines). No other file changed.
+
+#### 3. API
+- Evidence item (one answer, shaped like an `assessment_answers` row joined with its item and assessment, §6.2):
+  `{ dimension, kind, score, max, gradeStatus, grader, aiConfidence?, confidence?, correct?, answeredAt?, ageDays?,
+  abandoned? }`. Evidence = `{ items, now?, lastPractisedAt? }` or a plain array.
+- Constants: `DIMENSIONS`, `KINDS`, `GRADERS` (`auto`, `ai`, `ai_accepted`, `self`, `manual`, as the §6.2 CHECK),
+  `LEVELS` (`not_assessed`, `emerging`, `developing`, `proficient`, `mastered`), `DEFAULT_MASTERY_CONFIG`
+  (deep-frozen, `version: 1`, §5.4 values).
+- `validateMasteryConfig(config) → { ok, value, errors[] }` (same error format as `validateQuestion`). Requires a
+  complete config; rejects unknown keys, out-of-range values (shares 0–1, whole-number counts, half-life > 0), all-zero
+  kind weights, and inconsistency: `proficient.recall`/`understanding` < `developing.recallOrUnderstanding`,
+  `mastered.retentionRecall` < `proficient.recall`, `proficient.minItems` < `minAssessedItems`,
+  `minDimensionItems` > `minAssessedItems`. Every other function throws `Invalid mastery config — …` on a bad config
+  (frozen configs are validated once and cached; mutable ones each call).
+- `itemWeight(answer, config) → { counted, reason, weight, factors: { kind, grader, guess, recency }, ageDays,
+  configVersion }`. Excluded answers (pending, abandoned, low-confidence provisional AI, invalid rows) get weight 0
+  and a reason.
+- `dimensionScores(evidence, config) → { configVersion, items, excluded: [{ index, reason }], dimensions: { <dim>:
+  { score | null, items, weight } } }`. `D = Σ(w·s)/Σw`, `null` below `minDimensionItems` (2).
+- `topicLevel(evidence, config) → { level, configVersion, items, excluded, dimensions, finalScore, retention,
+  recognitionOnly, allFinal }`.
+- `improvement(evidence, config) → { configVersion, dimensions: { <dim>: { diagnostic, final, delta } } }`, all
+  `null` unless both sides have ≥ 2 items.
+
+#### 4. Tests (`test/mastery-model.test.js`, 13)
+Dual-load + frozen/versioned defaults; every weight factor (kind, grader, guess incl. partial/explicit `correct`,
+recency 0/30/60 days, ISO `answeredAt`+`now`, future answers, product of factors); exclusions incl. accepted AI and
+a config that keeps low-confidence AI; worked example `1.75/2.25` and `|D − 0.78| ≤ 0.005` (with ageDays 2);
+dimension minimum; D11 (rows of other journeys are not filtered); boundaries just below/at/above for Not assessed
+(2/3 items), Developing (recognition 0.59/0.6/0.61; recall and understanding 0.39/0.4/0.41; application does not
+count), Proficient (recall 0.69/0.7/0.71, understanding 0.59/0.6/0.61, 5/6 items), Mastered (final 0.79/0.8/0.81,
+retention gap 6.99/7.01 days, retention recall 0.69/0.7/0.71, a provisional answer blocks, no retention, explicit
+`lastPractisedAt`); recognition-only cap; improvement; custom config (practice weight, Developing threshold,
+`minAssessedItems`, half-life, string `version` in every result); 23 validation cases + every function throws.
+
+#### 5. Results
+- `npm test > log 2>&1; echo EXIT=$?` → `EXIT=0`, `# tests 202`, `# pass 202`, `# fail 0` (13 new).
+- `npm run test:electron`: not run (no renderer change; not required by the brief).
+- `git diff main...HEAD`: only the two new files (+600 lines) plus this entry.
+
+#### 6. Spec ambiguities and limitations (reported, not decided)
+1. **Proficient does not require Developing.** §5.4 lists each level's own conditions; the code applies them as
+   written, so a topic with recall/understanding evidence but < 2 recognition items can be Proficient. Claude A to
+   decide whether Proficient should also require the Developing rule.
+2. **Cap rule is redundant under the defaults**: Developing already needs recall or understanding evidence, so
+   recognition-only evidence stays Emerging. The cap is kept as an explicit guard (`recognitionOnlyCap`) and
+   reported via `recognitionOnly`; no config can currently make it bind. Test asserts "≤ Developing".
+3. **Retention check** = recall answers in `retention` assessments answered ≥ `mastered.retentionDays` after the last
+   non-retention answer (or `evidence.lastPractisedAt`, e.g. a later study session from LS-012), scored with the same
+   weighted D and the same ≥ 2-item minimum. A one-item retention check therefore never reaches Mastered.
+   Answers without `answeredAt` cannot qualify.
+4. **Final-exam topic score** (D14) = unweighted Σscore/Σmax of the topic's counted `final` answers. With retakes,
+   the caller must pass only the attempt(s) that should count.
+5. **"Every open answer counted is final"** is implemented as every counted answer has `gradeStatus 'final'`
+   (deterministic answers are always final), so the module needs no question type.
+6. **"Correct" for the guess weight** = `score === max` unless the caller passes `correct`.
+7. **No clock**: recency needs `ageDays` or `answeredAt` + `now` from the caller; otherwise it is 1.
+8. **`grader: 'ai'` with `gradeStatus 'final'`** still weighs 0.75 (§4.4 says an accepted AI grade becomes
+   `ai_accepted`, so this should not occur).
+9. Results are not rounded; the UI formats them.
+
+#### 7. Commits
+`feat(learning): LS-003 pure mastery model` (`3b3ebd6`), `docs(handoff): HO-016 LS-003 submission`.
+Not pushed, not merged.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
