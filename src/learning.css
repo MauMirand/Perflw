@@ -624,3 +624,25 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-rev { padding: 10px 12px; border-radius: 8px; background: #232222; }
 .qz-rev p { margin: 4px 0; font-size: 13px; }
 @media (max-width: 600px) { .qz-opt-row { flex-direction: column; align-items: stretch; } }
+
+/* Quizzes and exams: progress, navigator, timer, feedback, pass/fail (same tokens as above). */
+.qz-bar { height: 4px; border-radius: 2px; background: var(--raised); margin: 4px 0 12px; overflow: hidden; max-width: 720px; }
+.qz-bar i { display: block; height: 100%; background: var(--text); transition: width 160ms ease; }
+.qz-timer { font-variant-numeric: tabular-nums; font-weight: 700; padding: 1px 10px; border-radius: 999px; background: var(--raised); color: var(--text); }
+.qz-dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; max-width: 720px; }
+.qz-dot { all: unset; box-sizing: border-box; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--dim); cursor: pointer; }
+.qz-dot.done { background: var(--text-2); border-color: var(--text-2); }
+.qz-dot.current { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-dot.flagged { border-radius: 3px; }
+.qz-dot:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-match { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; background: var(--raised); }
+.qz-match .field { max-width: 55%; }
+.qz-feedback { max-width: 720px; margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #232222; border-left: 3px solid var(--dim); }
+.qz-feedback p { margin: 4px 0; font-size: 13px; }
+.qz-pass, .qz-fail { font-size: 20px; font-weight: 700; margin: 4px 0; }
+.qz-pass { color: #7FD08F; }
+.qz-fail { color: #E58A8A; }
+.qz-keys { margin-top: 6px; }
+.qz kbd { font: inherit; font-size: 11px; padding: 0 6px; border-radius: 4px; background: #2A2929; color: var(--text-2); }
+.qz-table td, .qz-table th { vertical-align: top; }
+@media (prefers-reduced-motion: reduce) { .qz-bar i { transition: none; } }

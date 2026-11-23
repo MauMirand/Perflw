@@ -1,5 +1,6 @@
 'use strict';
-/* Electron check for the practice quiz slice: write three questions in the UI, take the pre-test, self-grade, see results.
+/* Electron check for quizzes and exams on the subject page: write questions in the UI, take a pre-test, practice with feedback,
+   a timed test final with pass mark and attempts table, and the pre-vs-final report.
    Throwaway data folder (PERFLW_TEST_USER_DATA), never the real one. Usage: node test/learning-quiz-smoke.js [screenshotDir]
    Same CDP approach as test/electron-smoke.js. Do not run it beside another Electron smoke run (load makes both flaky). */
 const { spawn } = require('node:child_process');
@@ -43,18 +44,36 @@ async function shoot(name) {
   await cdp('Emulation.clearDeviceMetricsOverride', {}); await sleep(200);
 }
 const step = label => console.log(`PASS ${label}`);
+const head = () => evaluate("document.querySelector('.qz-head').textContent");
+const total = async () => Number(((await head()).match(/of (\d+)/) || [])[1]);
 
-async function addQuestion(fields) {
-  await click('[data-qz="add"], [data-qz-form="add"] ~ * [data-qz="add"]').catch(() => {});
-  await waitFor("!!document.querySelector('[data-qz-form=\"add\"]')", 'question form');
-  await fill('[data-qz-form="add"] [name="type"]', fields.type);
-  await waitFor(`document.querySelector('[data-qz-form="add"] [name="type"]').value === ${q(fields.type)}`, 'type switched');
-  await fill('[data-qz-form="add"] [name="prompt"]', fields.prompt);
-  for (const [name, value] of Object.entries(fields.values || {})) await fill(`[data-qz-form="add"] [name="${name}"]`, value);
-  if (fields.correct != null) await check(`[data-qz-form="add"] input[name="correct"][value="${fields.correct}"]`);
-  if (fields.tf != null) await check(`[data-qz-form="add"] input[name="tf"][value="${fields.tf}"]`);
-  await submit('[data-qz-form="add"]');
-  await waitFor(`document.querySelector('.qz-error') == null && (window.__qzCount = (document.querySelector('.qz') || {}).textContent) && /question saved|in your bank/i.test(document.body.textContent)`, 'saved');
+/* Answer the open question the way a student would: NaCl for the choice, true, and a sentence for written answers. */
+async function answerCurrent() {
+  const type = await evaluate("document.querySelector('.qz-meta').textContent");
+  if (/Multiple/.test(type)) await evaluate("(() => { const inputs = [...document.querySelectorAll('input[name=\"choice\"]')]; const el = inputs.find(i => i.nextElementSibling.textContent.includes('NaCl')) || inputs[0]; el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  else if (/True/.test(type)) await check('input[name="tf"][value="true"]');
+  else if (/Matching/.test(type)) await evaluate("(() => { const want = { NaCl: 'Ionic', H2O: 'Covalent' }; document.querySelectorAll('select[name^=\"match:\"]').forEach(s => { const label = s.previousElementSibling.textContent; const o = [...s.options].find(x => x.textContent === want[label]); if (o) { s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); } }); })()");
+  else await fill('textarea[name="text"]', 'Ions attract strongly, so it takes a lot of heat.');
+}
+async function answerAll() {
+  const n = await total();
+  for (let i = 0; i < n; i++) {
+    await answerCurrent();
+    if (i < n - 1) { await click('[data-qz="next"]'); await waitFor(`/Question ${i + 2} of ${n}/.test(document.querySelector('.qz-head').textContent)`, 'next question'); }
+  }
+  return n;
+}
+/* Submit; if written answers exist, self-grade them (tick `ticks` boxes per answer). */
+async function submitAndGrade(ticks) {
+  await click('[data-qz="submit"]');
+  await waitFor("!!document.querySelector('[data-qz-form=\"grade\"], .qz-score')", 'grade screen or results');
+  if (await evaluate("!!document.querySelector('[data-qz-form=\"grade\"]')")) {
+    await evaluate(`document.querySelectorAll('[data-qz-form="grade"] fieldset').forEach(f => f.querySelectorAll('input[type="checkbox"]').forEach((c, i) => { c.checked = i < ${ticks}; }))`);
+    await submit('[data-qz-form="grade"]');
+    await waitFor("!!document.querySelector('.qz-score')", 'results');
+    return true;
+  }
+  return false;
 }
 
 async function main() {
@@ -94,7 +113,7 @@ async function main() {
   await evaluate("(() => { const el = document.querySelector('[data-ln-subject]'); el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })); return true; })()");
   await waitFor("document.querySelector('.ln-page-head h1')?.textContent === 'Chemistry' && !!document.querySelector('.qz')", 'subject page with the quiz block');
   await waitFor("/0 questions in your bank/.test(document.querySelector('.qz').textContent)", 'empty bank message');
-  assert.ok(await evaluate("document.querySelector('[data-qz=\"start\"]').disabled"), 'Start is disabled with no questions');
+  for (const action of ['start', 'practice', 'exam']) assert.ok(await evaluate(`document.querySelector('[data-qz="${action}"]').disabled`), `${action} is disabled with no questions`);
   step('quiz block on the subject page, empty bank');
   await shoot('quiz-1-home');
 
@@ -106,65 +125,118 @@ async function main() {
   assert.equal(await evaluate("document.querySelector('[data-qz-form=\"add\"] [name=\"prompt\"]').value"), 'Which bond is ionic?', 'typed text kept');
   step('invalid question rejected with a plain message, input kept');
 
+  const saved = n => waitFor(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.length === ${n})`, `question ${n} saved`);
   await fill('[data-qz-form="add"] [name="opt0"]', 'Covalent'); await fill('[data-qz-form="add"] [name="opt1"]', 'NaCl');
   await check('[data-qz-form="add"] input[name="correct"][value="1"]');
-  await submit('[data-qz-form="add"]');
-  await waitFor("document.querySelector('.qz-error') == null && /1 question in your bank/.test(document.querySelector('.qz').textContent) || (document.querySelector('.qz-form') && /1 question/.test(document.querySelector('.qz').textContent))", 'first question saved');
+  await submit('[data-qz-form="add"]'); await saved(1);
   await fill('[data-qz-form="add"] [name="type"]', 'truefalse');
   await waitFor("!!document.querySelector('[data-qz-form=\"add\"] [name=\"statement\"]')", 'true/false form');
   await fill('[data-qz-form="add"] [name="prompt"]', 'True or false?');
   await fill('[data-qz-form="add"] [name="statement"]', 'Salt is held by electrostatic attraction.');
   await check('[data-qz-form="add"] input[name="tf"][value="true"]');
-  await submit('[data-qz-form="add"]');
-  await waitFor("/2 questions in your bank/.test(document.querySelector('.qz').textContent) || /2 question/.test(document.querySelector('.qz').textContent)", 'second question saved');
+  await submit('[data-qz-form="add"]'); await saved(2);
+  await fill('[data-qz-form="add"] [name="type"]', 'matching');
+  await waitFor("!!document.querySelector('[data-qz-form=\"add\"] [name=\"left0\"]')", 'matching form');
+  await fill('[data-qz-form="add"] [name="prompt"]', 'Match each compound to its bond.');
+  await fill('[data-qz-form="add"] [name="left0"]', 'NaCl'); await fill('[data-qz-form="add"] [name="right0"]', 'Ionic');
+  await fill('[data-qz-form="add"] [name="left1"]', 'H2O'); await fill('[data-qz-form="add"] [name="right1"]', 'Covalent');
+  await submit('[data-qz-form="add"]'); await saved(3);
   await fill('[data-qz-form="add"] [name="type"]', 'explain');
   await waitFor("!!document.querySelector('[data-qz-form=\"add\"] [name=\"crit0\"]')", 'explain form');
   await fill('[data-qz-form="add"] [name="prompt"]', 'Why does NaCl have a high melting point?');
   await fill('[data-qz-form="add"] [name="crit0"]', 'Mentions ions'); await fill('[data-qz-form="add"] [name="crit1"]', 'Mentions strong attraction');
-  await submit('[data-qz-form="add"]');
-  await waitFor("/3 questions in your bank/.test(document.querySelector('.qz').textContent) || /3 question/.test(document.querySelector('.qz').textContent)", 'third question saved');
-  step('three questions written in the UI');
+  await submit('[data-qz-form="add"]'); await saved(4);
+  await fill('[data-qz-form="add"] [name="type"]', 'essay');
+  await waitFor("!!document.querySelector('[data-qz-form=\"add\"] [name=\"maxWords\"]')", 'essay form');
+  await fill('[data-qz-form="add"] [name="prompt"]', 'Discuss ionic and covalent bonding.');
+  await fill('[data-qz-form="add"] [name="crit0"]', 'Defines both'); await fill('[data-qz-form="add"] [name="crit1"]', 'Compares properties');
+  await fill('[data-qz-form="add"] [name="minWords"]', '5'); await fill('[data-qz-form="add"] [name="maxWords"]', '200');
+  await submit('[data-qz-form="add"]'); await saved(5);
+  step('five questions written in the UI: choice, true/false, matching, explain, essay');
+  // More choice questions through the API, so the pre-test, practice set and a final can each draw different ones.
+  const topicId = await evaluate(`window.learningData.topics(${q(subjectId)}).then(t => t.rows[0].id)`);
+  for (let i = 1; i <= 8; i++) {
+    await evaluate(`window.learningData.questionsSave({ question: { subjectId: ${q(subjectId)}, topicId: ${q(topicId)}, type: 'choice', prompt: 'Which one is NaCl-like ${i}?', dimension: 'recognition', difficulty: ${1 + (i % 3)}, explanation: 'Because of ionic bonds.', payload: { options: [{ id: 'a', text: 'Covalent' }, { id: 'b', text: 'NaCl' }], correct: ['b'] } } })`);
+  }
   await shoot('quiz-2-bank');
 
   await click('[data-qz="home"]');
   await waitFor("!!document.querySelector('[data-qz=\"start\"]') && !document.querySelector('[data-qz=\"start\"]').disabled", 'start enabled');
   await click('[data-qz="start"]');
   await waitFor("!!document.querySelector('.qz-card')", 'quiz opened');
-  const asked = await evaluate("document.querySelector('.qz-head').textContent");
-  assert.match(asked, /Question 1 of 3/);
-  step('pre-test started: 3 questions');
+  const n = await total();
+  assert.ok(n >= 2, `pre-test has ${n} questions`);
+  assert.match(await head(), /Pre-test · Question 1 of/);
+  step(`pre-test started: ${n} questions`);
   await shoot('quiz-3-question');
 
   // The renderer never holds the answer key while the quiz is open.
-  const leaked = await evaluate(`window.learningData.assessmentList({ subjectId: ${q(subjectId)} }).then(async list => JSON.stringify(await window.learningData.assessmentGet({ assessmentId: list[0].id })))`);
-  for (const key of ['"correct"', '"modelAnswer"', '"explanation"', '"keywords"']) assert.ok(!leaked.includes(key), `no ${key} in an open assessment`);
+  const leaked = await evaluate(`window.learningData.assessmentList({ subjectId: ${q(subjectId)} }).then(async list => JSON.stringify((await window.learningData.assessmentGet({ assessmentId: list[0].id })).items.map(i => i.question)))`);
+  for (const key of ['"correct"', '"modelAnswer"', '"explanation"', '"keywords"', '"pairs"']) assert.ok(!leaked.includes(key), `no ${key} in an open assessment's questions`);
   step('no answer key in an open assessment');
 
-  for (let i = 0; i < 3; i++) {
-    const type = await evaluate("document.querySelector('.qz-meta').textContent");
-    if (/Multiple/.test(type)) await evaluate("(() => { const inputs = [...document.querySelectorAll('input[name=\"choice\"]')]; const el = inputs.find(i => i.nextElementSibling.textContent === 'NaCl'); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
-    else if (/True/.test(type)) await check('input[name="tf"][value="true"]');
-    else await fill('textarea[name="text"]', 'Ions attract strongly, so it takes a lot of heat to separate them.');
-    await check('input[name="confidence"][value="2"]');
-    if (i < 2) { await click('[data-qz="next"]'); await waitFor(`/Question ${i + 2} of 3/.test(document.querySelector('.qz-head').textContent)`, 'next question'); }
-  }
-  await click('[data-qz="submit"]');
-  await waitFor("!!document.querySelector('[data-qz-form=\"grade\"]')", 'self-grade screen');
-  step('submitted; written answer waits for a self-grade');
-  await shoot('quiz-4-selfgrade');
-  await evaluate("document.querySelectorAll('[data-qz-form=\"grade\"] input[type=\"checkbox\"]').forEach((c, i) => { c.checked = i === 0; })");
-  await submit('[data-qz-form="grade"]');
-  await waitFor("!!document.querySelector('.qz-score')", 'results');
+  await answerAll();
+  const graded = await submitAndGrade(1);
   const score = await evaluate("document.querySelector('.qz-score').textContent");
-  assert.match(score, /^2\.5 of 3 points$|^\d+(\.\d+)? of 3 points$/, score);
-  assert.ok(await evaluate("document.querySelectorAll('.qz-rev').length === 3"), 'three reviewed answers');
-  assert.ok(await evaluate("/Not assessed/.test(document.querySelector('.qz-table').textContent)"), 'thin evidence reads Not assessed');
-  step(`results: ${score}; topic level reads Not assessed with 3 items`);
+  assert.match(score, /^Pre-test: \d+(\.\d+)? of \d+ points$/, score);
+  assert.ok(await evaluate("document.querySelectorAll('.qz-rev').length === " + n), 'every question is reviewed');
+  assert.ok(await evaluate("/Not assessed|Emerging|Developing|Proficient|Mastered/.test(document.querySelector('.qz-table').textContent)"), 'a level per topic');
+  step(`results: ${score}${graded ? ' (self-graded)' : ''}`);
   await shoot('quiz-5-results');
+  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'pretest', 'journey moved to the pre-test stage');
 
-  assert.equal(await evaluate("window.learningData.journeyList({ subjectId: " + q(subjectId) + " }).then(j => j[0].stage)"), 'pretest', 'journey moved to the pre-test stage');
+  // Practice: feedback after Check, key shown only for that question.
+  await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"practice\"]') && !document.querySelector('[data-qz=\"practice\"]').disabled", 'practice enabled');
+  await click('[data-qz="practice"]');
+  await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');
+  await answerCurrent();
+  await click('[data-qz="check"]');
+  await waitFor("!!document.querySelector('.qz-feedback')", 'feedback after Check');
+  assert.ok(await evaluate("[...document.querySelectorAll('.qz-card input, .qz-card textarea, .qz-card select')].every(el => el.disabled)"), 'a checked answer is locked');
+  step('practice: feedback after Check, answer locked');
+  await shoot('quiz-6-practice');
+  await click('[data-qz="leave"]');
+
+  // Final exam: a real one needs 50–100 questions; a test final does not; time options; pass mark; attempts table.
+  await waitFor("!!document.querySelector('[data-qz=\"exam\"]') && !document.querySelector('[data-qz=\"exam\"]').disabled", 'exam enabled');
+  await click('[data-qz="exam"]');
+  await waitFor("!!document.querySelector('[data-qz-form=\"exam\"]') && /50–100 questions/.test((document.querySelector('.qz-error') || {}).textContent || '')", 'a real final needs 50–100 questions');
+  assert.ok(await evaluate("document.querySelector('[data-qz-form=\"exam\"] button[type=\"submit\"]').disabled"), 'Start is disabled while the setup is invalid');
+  await check('[data-qz-form="exam"] input[name="test"]');
+  await fill('[data-qz-form="exam"] [name="count"]', '4');
+  await waitFor("/pass mark \\d/.test((document.querySelector('[data-qz-form=\"exam\"]') || {}).textContent || '') && !document.querySelector('[data-qz-form=\"exam\"] button[type=\"submit\"]').disabled", 'test final preview with limit and pass mark');
+  const preview = await evaluate("document.querySelector('[data-qz-form=\"exam\"] [role=\"status\"]').textContent");
+  assert.match(preview, /time limit \d+ min/);
+  step(`exam setup: ${preview.replace(/\s+/g, ' ')}`);
+  await shoot('quiz-7-exam-setup');
+  await submit('[data-qz-form="exam"]');
+  await waitFor("!!document.querySelector('.qz-card') && /Final exam/.test(document.querySelector('.qz-head').textContent)", 'final opened');
+  const first = await waitFor("(document.querySelector('[data-qz-timer]') || {}).textContent", 'timer shown');
+  assert.match(first, /^\d+:\d\d$/);
+  await sleep(2200);
+  const later = await evaluate("document.querySelector('[data-qz-timer]').textContent");
+  assert.notEqual(first, later, 'the clock runs');
+  step(`timed final: clock ${first} → ${later}`);
+  await shoot('quiz-8-exam');
+  await answerAll();
+  await submitAndGrade(2);
+  await waitFor("!!document.querySelector('.qz-pass, .qz-fail')", 'exam verdict');
+  const verdict = await evaluate("document.querySelector('.qz-pass, .qz-fail').textContent");
+  assert.match(verdict, /Passed|Not passed/);
+  assert.ok(await evaluate("/pass mark \\d/.test(document.querySelector('.qz').textContent)"), 'pass mark shown');
+  assert.ok(await evaluate("/side by side/.test(document.body.textContent)"), 'attempts table shown');
+  step(`exam result: ${verdict}`);
+  await shoot('quiz-9-exam-results');
+  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'final_exam', 'journey moved to the final stage');
+
+  // Report: pre-test vs now.
+  await click('[data-qz="report"]');
+  await waitFor("!!document.querySelector('.qz-table caption') && /Pre-test vs now/.test(document.querySelector('.qz-table caption').textContent)", 'report');
+  step('report: pre-test vs now by topic');
+  await shoot('quiz-10-report');
   assert.ok(!/Unhandled|TypeError|ReferenceError/.test(stderr), `no errors on stderr: ${stderr.slice(0, 300)}`);
-  step('journey stage and stderr clean');
+  step('stderr clean');
 }
 
 main().then(() => 0, error => { console.error(`FAIL: ${error.message}`); return 1; }).then(async code => {
