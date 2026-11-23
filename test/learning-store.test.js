@@ -152,6 +152,25 @@ test('createAssessment: order, snapshot fields, D3 rule, retakes and full rollba
   assert.throws(() => store.createAssessment('u', { subjectId: 's1', kind: 'practice', config: {}, questionIds: [q1.id], retakeOf: f1.id }), /Only a final/);
 });
 
+test('used flag and deleteQuestion: only unused questions can be deleted', () => {
+  const { db, store } = setup();
+  const usedQ = store.saveQuestion('u', { question: choice() });
+  const free = store.saveQuestion('u', { question: choice({ prompt: 'Unused' }) });
+  assert.equal(usedQ.used, false);
+  store.createAssessment('u', { subjectId: 's1', kind: 'practice', config: {}, questionIds: [usedQ.id] });
+  assert.deepEqual(store.listQuestions('u', { subjectId: 's1' }).map(q => [q.id, q.used]), [[usedQ.id, true], [free.id, false]]);
+  assert.equal(store.getQuestion('u', { questionId: usedQ.id }).used, true);
+  assert.equal(store.retireQuestion('u', { questionId: usedQ.id }).used, true);
+
+  assert.throws(() => store.deleteQuestion('u', { questionId: usedQ.id }), { message: 'This question was used in an assessment. Retire it instead.' });
+  assert.ok(store.getQuestion('u', { questionId: usedQ.id }), 'still there');
+  assert.throws(() => store.deleteQuestion('v', { questionId: free.id }), { message: 'Question not found.' });
+  assert.throws(() => store.deleteQuestion('u', { questionId: 'missing' }), { message: 'Question not found.' });
+  assert.deepEqual(store.deleteQuestion('u', { questionId: free.id }), { id: free.id, deleted: true });
+  assert.equal(count(db, 'question_items'), 1);
+  assert.throws(() => store.getQuestion('u', { questionId: free.id }), /Question not found/);
+});
+
 test('lifecycle: start only from draft; abandon; list filters', () => {
   const { store } = setup();
   const q = store.saveQuestion('u', { question: choice() });
@@ -343,6 +362,7 @@ test('cross-account: a second user gets "not found" from every method that takes
     listQuestions: [() => store.listQuestions('v', { subjectId: 's1' }), /Subject not found/],
     'listQuestions topic': [() => store.listQuestions('v', { subjectId: 'sv', topicId: 't1' }), /Topic not found/],
     retireQuestion: [() => store.retireQuestion('v', { questionId: q.id }), /Question not found/],
+    deleteQuestion: [() => store.deleteQuestion('v', { questionId: q.id }), /Question not found/],
     setReview: [() => store.setReview('v', { questionId: q.id, review: 'approved' }), /Question not found/],
     'createAssessment subject': [() => store.createAssessment('v', { subjectId: 's1', kind: 'practice', config: {}, questionIds: [vq.id] }), /Subject not found/],
     'createAssessment questionIds': [() => store.createAssessment('v', { subjectId: 'sv', kind: 'practice', config: {}, questionIds: [vq.id, q.id] }), /Question not found/],

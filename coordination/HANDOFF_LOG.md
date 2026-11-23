@@ -1404,9 +1404,10 @@ row and another account's row give the same `"<Thing> not found."`. Rules come f
 dependency, no IPC, file I/O, AI or logging.
 
 #### 2. Implementation
-- **`src/learning-store.js` (new, 541 lines; no split needed).** Methods as built:
+- **`src/learning-store.js` (new, 551 lines; no split needed).** Methods as built:
   - Journeys: `createJourney`, `getJourney`, `listJourneys`, `updateJourney`.
-  - Questions: `saveQuestion`, `getQuestion`, `listQuestions`, `retireQuestion`, `setReview`.
+  - Questions: `saveQuestion`, `getQuestion`, `listQuestions`, `retireQuestion`, `deleteQuestion`, `setReview`.
+    Every question row returned carries `used` (true when an `assessment_items` row references it).
   - Assessments: `createAssessment`, `startAssessment`, `getAssessment` (unstripped), `listAssessments`,
     `abandonAssessment`.
   - Answers: `saveAnswer`, `submitAssessment`, `gradeOpenAnswer`.
@@ -1422,25 +1423,27 @@ dependency, no IPC, file I/O, AI or logging.
   payload). No statement updates that column.
 - **`src/workspace.js`:** `learningStore: () => createLearningStore(db)` beside `connectionStore`, plus its
   `require` line (2 lines, not 1).
-- **`test/learning-store.test.js` (new, 12 tests).**
+- **`test/learning-store.test.js` (new, 13 tests).**
 
 #### 3. Acceptance (evidence: unit tests on in-memory and on-disk `node:sqlite` databases; Electron smoke run once)
 | Criterion | Result | Test |
 |---|---|---|
 | All methods exist, each `(userId, { … })` | PASS | every test |
-| Cross-account "not found" for every id-taking method, incl. nested `topicIds`, `questionIds`, `parentId`, `parentMaterialId`, `retakeOf`, `sessionId`, `materials`, section `fileId`, `journeyId` of another subject (43 calls) | PASS | `cross-account…` |
+| Cross-account "not found" for every id-taking method, incl. nested `topicIds`, `questionIds`, `parentId`, `parentMaterialId`, `retakeOf`, `sessionId`, `materials`, section `fileId`, `journeyId` of another subject (44 calls, incl. `deleteQuestion`) | PASS | `cross-account…` |
 | Answer write rejected for `draft`, `submitted`, `graded`, `abandoned` | PASS | `saveAnswer…` |
 | Edit + retire leaves the snapshot byte-identical | PASS | `editing or retiring…` |
 | Field-named `validateQuestion` errors; oversize payload and response rejected | PASS | `questions…`, `saveAnswer…` |
 | `createAssessment` rolls back fully (invalid id before the transaction; CHECK failure inside it) | PASS | `createAssessment…` |
 | D3: `unreviewed` rejected for diagnostic/final/retention, allowed for practice; `rejected` refused everywhere | PASS | `createAssessment…` |
 | `submitAssessment`: `not_answered` rows, scores equal `grade()`, pure choice → `graded`, `explain` → `submitted` until `gradeOpenAnswer` | PASS | `submitAssessment…` |
+| Brief update (`1130d5a`, `ef5a3e7` on main): `deleteQuestion` refused with "This question was used in an assessment. Retire it instead." when used, deletes when unused, "Question not found." for another account or a missing id; `used` true/false in `listQuestions`, `getQuestion` and write results | PASS | `used flag and deleteQuestion…` |
 | D11: cycle 1 absent from cycle 2's evidence and still stored | PASS | `D11…` |
 | Subject delete through `workspace.deleteSubject` leaves no learning rows for it; other subject's rows kept | PASS | `deleting a subject…` |
-| `npm test > log 2>&1; echo EXIT=$?` | PASS: EXIT=0, 201 tests, 201 pass, 0 fail | — |
-| `npm ci` then `npm run test:electron`, run once | PASS: `npm ci` exit 0; smoke exit code 0, "Electron smoke test passed." | — |
+| `npm test > log 2>&1; echo EXIT=$?` (after merging `main` at `d0697f8`) | PASS: EXIT=0, 202 tests, 202 pass, 0 fail | — |
+| `npm ci` then `npm run test:electron`, run once | PASS: `npm ci` exit 0; smoke exit code 0, "Electron smoke test passed." (before the merge) | — |
+| `npm run test:electron` after the merge and the brief update, run once (no `npm ci`: `package.json`/lock unchanged by the merge) | **FAIL**: exit code 1, `Error: UI condition did not become true: viewer drew the PDF`. Same step as the known PF-004 timeout (`test/electron-smoke.js:581`). The only code changed since the passing run is `src/learning-store.js` (+`deleteQuestion`, `used`) and its test; the store is created only when `learningStore()` is called, and nothing calls it yet. Assessed as the existing smoke flake, not this change; not re-run (brief: run once). Claude A may ask for a confirming run. | — |
 
-S4: branch from `main` at `46c8cd8`. S5–S7 do not apply.
+S4: branch from `main` at `46c8cd8`; `main` at `d0697f8` merged in (docs and `docs/ui-baseline/` only, no conflict). S5–S7 do not apply.
 
 #### 4. Choices and open points for review (reported, not decided by the brief)
 1. **Default `topicIds`** = rows of the subject with `kind='topic'`; milestones are left out. Say if they belong.
@@ -1461,11 +1464,14 @@ S4: branch from `main` at `46c8cd8`. S5–S7 do not apply.
    ended session. `markVisited` checks section `fileId` against `subject_files` of the session's subject.
 8. **`addMaterial`**: `origin` limited to `manual`/`template`/`generated` (the column has no CHECK); `bodyFile` must
    be a plain file name (no `/`, `\`, `:`, leading `.`); `provenance` stored as given (ADR-007).
-9. Spec §4.6 snapshots "when it starts"; the brief (governs) snapshots at create. Implemented per the brief.
+9. `deleteQuestion` returns `{ id, deleted: true }` (the brief gives no return shape). Its `question_review` row goes
+   with it (CASCADE). `used` is not part of `question_snapshot`.
+10. Spec §4.6 snapshots "when it starts"; the brief (governs) snapshots at create. Implemented per the brief.
 
 #### 5. Commits
-`0376944 feat(learning): LS-006 learning store for all Learning System SQL`, then `docs(handoff): HO-021 LS-006
-submission`. Not pushed, not merged.
+`0376944 feat(learning): LS-006 learning store for all Learning System SQL`, `986b28f docs(handoff): HO-021 LS-006
+submission`, `fb56afc` merge of `main`, then `feat(learning): LS-006 deleteQuestion and used flag` (with this update).
+Not pushed, not merged.
 
 ---
 

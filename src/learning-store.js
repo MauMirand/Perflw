@@ -71,7 +71,7 @@ const questionOut = row => ({
   id: row.id, subjectId: row.subject_id, topicId: row.topic_id, type: row.type, prompt: row.prompt,
   dimension: row.dimension, difficulty: row.difficulty, explanation: row.explanation, points: row.points,
   source: parse(row.source, []), origin: row.origin, provenance: parse(row.provenance, null), status: row.status,
-  review: row.review, payload: parse(row.payload, {}), reviewedAt: row.reviewed_at, createdAt: row.created_at, updatedAt: row.updated_at,
+  review: row.review, payload: parse(row.payload, {}), reviewedAt: row.reviewed_at, used: row.used === 1, createdAt: row.created_at, updatedAt: row.updated_at,
 });
 const snapshotOf = question => Object.fromEntries(SNAPSHOT_FIELDS.map(field => [field, question[field]]));
 const assessmentOut = row => ({
@@ -232,23 +232,33 @@ function createLearningStore(db) {
     }
     return getQuestion(userId, { questionId: id });
   }
+  // `used`: an assessment item references the question (it can then be retired, not deleted).
+  const USED = 'EXISTS(SELECT 1 FROM assessment_items i WHERE i.question_id=q.id) AS used';
   function getQuestion(userId, input) {
-    return questionOut(owned('question_items', 'Question', userId, args(input).questionId));
+    const row = owned('question_items', 'Question', userId, args(input).questionId);
+    return questionOut(one(`SELECT q.*, ${USED} FROM question_items q WHERE q.id=?`, row.id));
   }
   function listQuestions(userId, input) {
     const { subjectId, topicId, status, review } = args(input);
     const subject = subjectOf(userId, subjectId);
-    let sql = 'SELECT * FROM question_items WHERE user_id=? AND subject_id=?';
+    let sql = `SELECT q.*, ${USED} FROM question_items q WHERE q.user_id=? AND q.subject_id=?`;
     const params = [userId, subject.id];
-    if (topicId != null) { sql += ' AND topic_id=?'; params.push(topicIn(userId, subject.id, topicId).id); }
-    if (status != null) { sql += ' AND status=?'; params.push(oneOf(status, model.STATUSES, 'Status')); }
-    if (review != null) { sql += ' AND review=?'; params.push(oneOf(review, model.REVIEWS, 'Review')); }
-    return all(`${sql} ORDER BY created_at, id`, ...params).map(questionOut);
+    if (topicId != null) { sql += ' AND q.topic_id=?'; params.push(topicIn(userId, subject.id, topicId).id); }
+    if (status != null) { sql += ' AND q.status=?'; params.push(oneOf(status, model.STATUSES, 'Status')); }
+    if (review != null) { sql += ' AND q.review=?'; params.push(oneOf(review, model.REVIEWS, 'Review')); }
+    return all(`${sql} ORDER BY q.created_at, q.id`, ...params).map(questionOut);
   }
   function retireQuestion(userId, input) {
     const row = owned('question_items', 'Question', userId, args(input).questionId);
     run("UPDATE question_items SET status='retired',updated_at=? WHERE id=? AND user_id=?", now(), row.id, userId);
     return getQuestion(userId, { questionId: row.id });
+  }
+  /* Only an unused question can be deleted; a used one is retired instead, so past assessments keep their link. */
+  function deleteQuestion(userId, input) {
+    const row = owned('question_items', 'Question', userId, args(input).questionId);
+    if (one('SELECT 1 FROM assessment_items WHERE question_id=? LIMIT 1', row.id)) fail('This question was used in an assessment. Retire it instead.');
+    run('DELETE FROM question_items WHERE id=? AND user_id=?', row.id, userId);
+    return { id: row.id, deleted: true };
   }
   function setReview(userId, input) {
     const a = args(input);
@@ -530,7 +540,7 @@ function createLearningStore(db) {
 
   return {
     createJourney, getJourney, listJourneys, updateJourney,
-    saveQuestion, getQuestion, listQuestions, retireQuestion, setReview,
+    saveQuestion, getQuestion, listQuestions, retireQuestion, deleteQuestion, setReview,
     createAssessment, startAssessment, getAssessment, listAssessments, abandonAssessment,
     saveAnswer, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
