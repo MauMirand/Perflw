@@ -59,6 +59,7 @@ refer to `PROJECT_STATUS.md` §6.
 | PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **INTEGRATED** (`5664f56`, 2026-11-23; `--no-ff`, not pushed): `8475dcb` + `b545f18`, APPROVED in HO-010 | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
 | PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | **ASSIGNED** (lane 1, 2026-11-23; submission HO-014). Full brief: "TASK: PF-020" | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
 | PF-021 | Startup: show a plain-language dialog when the workspace or accounts database cannot be backed up or migrated, then quit (today `createWorkspace`/`createAuth` throw uncaught in `main.js:217-218`) | **P1, required before the first release (packaged build)** | READY (queued; starts when a lane is free). Full brief: "TASK: PF-021" | PF-006 INTEGRATED ✔ | From HO-012 §7.2, decided in HO-013. `src/main.js` only; test by injecting a failing migration list |
+| PF-022 | Flush renderer storage before the app quits (`session.flushStorageData()`), only if reproduced | P2 | BACKLOG (evidence-gated). Full brief: "TASK: PF-022" | PF-020 evidence | From PF-020 interim (batch 1 run 7: "folded Plan group persisted" lost after a restart). Cause unproven; `src/main.js` only |
 | PF-008 | `npm run verify` and Windows CI (GitHub Actions) | P1 | BACKLOG | PF-004; owner OK for Actions | R6 |
 | PF-009 | Owner decision: build expense tracking or remove the unused finance and ledger tables | P1 | BACKLOG | owner | R9; needs a decision, not code |
 | PF-010 | IPC contract test (channels in `preload.js` ↔ `handle()` in `main.js`) | P2 | BACKLOG | — | Cheap guard for about 120 channels |
@@ -189,7 +190,13 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
    about 1 in 11).
 9. **Failure probe:** in a throwaway copy, flip one asserted condition and confirm the suite fails within the helper's timeout
    with the label and last value (it must not hang or pass).
-10. **Decision:** APPROVED only when 1 to 9 hold; otherwise CHANGES REQUESTED with the failing item numbers. The orchestrator
+10. **Load-isolated evidence (added 2026-11-23, from the PF-020 interim):** the 10/10 batch must be run on an otherwise idle
+    machine (no other smoke or `npm test` running; CPU load logged per run). A batch run in parallel with other lanes does not count
+    for or against the waits. The A/B data (main's smoke file vs the new one, alternating, same load) is the comparison that
+    decides whether the condition waits are an improvement. A cross-process smoke lock in `electron-smoke.js` is acceptable only if
+    it is test-only, covers smoke runs only (never `npm test`), cleans stale locks by PID, excludes the lock wait from every step
+    timeout and from the run-time report, and weakens no assertion.
+11. **Decision:** APPROVED only when 1 to 10 hold; otherwise CHANGES REQUESTED with the failing item numbers. The orchestrator
     merges after `npm test` and one `npm run test:electron` on the merge result (G2 opens when PF-020 is INTEGRATED).
 
 ---
@@ -238,6 +245,45 @@ after a backup. Spec §6.2 lists the tables, columns and indexes, including the 
       materials; deleting a topic sets `topic_id` NULL on questions/items (spec §6.2 notes).
 - [ ] CHECK tests: an unknown `stage`, `kind`, `type`, `review` or `grade_status` is rejected.
 - [ ] `npm test` exit 0; `npm run test:electron` exit 0 (startup path changed); HANDOFF entry HO-018.
+
+---
+
+### TASK: PF-022 — Make renderer-saved preferences survive quit (evidence-gated)
+
+**Status:** BACKLOG (evidence-gated; queued 2026-11-23). Do **not** release until the reproduction in step 1 exists ·
+**Priority:** P2 (P1 if it reproduces outside the test harness) · **Assigned To:** Claude B · **Submission:** **HO-040**
+(reserved; reviews use HO-030 and up) · **Created By:** Claude A
+
+#### Objective
+A preference the student just changed (folded sidebar group, theme, layout, motion) is still there after the app is closed and
+reopened.
+
+#### Context (evidence, not yet proof)
+PF-020 batch 1 (10 runs on `4e9a1a7`): run 7 failed at "folded Plan group persisted" after the smoke test's restart. Preferences
+live in `localStorage` (`renderer.js:63-65`, `PREFS_KEY`). Chromium writes `localStorage` to disk asynchronously; a clean
+shutdown flushes it, a forced stop may not. `src/main.js:697-698` quits through `before-quit`/`window-all-closed` and does not call
+`session.defaultSession.flushStorageData()`. The smoke harness `stop()` closes the window through `windowControls.close()` and
+then waits for exit, and may kill the process after a timeout. Two unproven readings: (a) a real app bug (clean quit loses the
+last write) or (b) a harness artefact (the process is killed before Chromium flushes under machine load; batch 2 ran 5 lanes in
+parallel).
+
+#### Requirements
+1. **Reproduce first, report in HO-040.** Decide between (a) and (b) with a loop that changes a preference, closes the app the way
+   a user does (window close button, and `app.quit()`), reopens and reads it back, ≥ 50 iterations, **on an otherwise idle machine**,
+   and again with the app killed after 1 s. Record counts and the exact `stop()` behavior (clean exit or kill).
+2. **If (a):** call `session.defaultSession.flushStorageData()` in `before-quit` (and before any `app.exit`), keeping the existing
+   cleanup; the loop then shows 0 losses in ≥ 50 iterations. **If (b):** change nothing in `src/`; report, and PF-020's harness gets
+   the fix (wait for a clean exit before the restart step).
+3. Never block quit: a 2 s cap on the flush.
+
+#### Restrictions
+`src/main.js` only (the quit handlers). No renderer change, no new dependency. Do not touch the PF-021 startup block.
+Sequencing: after PF-021 (both edit `main.js`).
+
+#### Acceptance Criteria
+- [ ] Reproduction evidence in HO-040 (counts per variant, idle machine stated, load logged).
+- [ ] Fix only if (a); 0 losses in ≥ 50 iterations after it; the before-fix loss count shown for comparison.
+- [ ] `npm test` exit 0; `npm run test:electron` exit 0.
 
 ---
 
