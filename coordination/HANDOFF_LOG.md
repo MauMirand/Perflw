@@ -847,7 +847,8 @@ conflict-free.
 **Task ID:** LS-001 (spec)  
 **From:** Claude A  
 **To:** Project Owner (through the desktop orchestrator session)  
-**Status:** OPEN: owner answers needed. The spec is not changed until they arrive.
+**Status:** **ANSWERED** 2026-11-23 (§3). Folded into the spec as D6–D11, plus D12 (UI). 5 follow-up questions in
+spec §9.1.
 
 #### 1. Mapping (spec §2.1 flow, §2.2 stages)
 | Owner's diagram | Spec | Fit |
@@ -878,6 +879,32 @@ conflict-free.
 6. **Next cycle:** does it start with a fresh Pre Test, or does the Final Exam result count as the next cycle's
    pre-test? Which topics: only the unmastered ones (spec) or the student's choice?
 7. **Spec extras:** keep the Mastery report and the delayed Retention check (≥ 7 days) that are not in the diagram?
+
+#### 3. Owner answers (verbatim, relayed by the desktop orchestrator session, 2026-11-23)
+1. Quest: "(a) for now and (c) for something more adventure feeling"
+2. Journey: "I think we can make it step by step at the time and progress along the way"
+3. Side notes: "I think both would be cool and convenient, but majority of the note must be from use rather than ai,
+   the the ai scan those notes and aid/help them in building and fully understanding the note. Yes they are sperate
+   from weakness notes and pdf highlights"
+4. Final Learning: "required to give total evaluation in statistical evaluation."
+5. Final Exam: "user's can make a range with in 50-100, yes provide a solid and valid time depending on how hard the
+   questions and how many items there is, passing mark would be 75-90% above depending on how hard it is, retakes are
+   allowed if you review the entire study load of that topic, so we can compare the difference in changes and
+   advancement in learning"
+6. Next cycle: "its optional if user wants to proceed, if no then keep it that way, if yes, reset his statistic
+   regarding that topic, it cover anything it should be flexible either ways"
+   - Follow-up: asked whether "reset" means a soft reset (new cycle starts at 0, old cycle kept as history), the
+     owner answered "yes".
+7. Not answered; the spec keeps the Mastery report and the Retention check (D10's attempt comparison relies on the
+   report).
+- UI (separate question): "could we keep the over all ui design for this similar to what we currently have?" → D12.
+
+#### 4. Result
+Spec decisions D6–D12 (spec §9), new §4.9 (final exam rules, proposed formulas), §5.6 (final learning evaluation),
+§5.4 scope = one cycle, §6.2 columns `assessments.attempt`/`retake_of`, `learning_materials.parent_material_id` +
+kind `side_note_ai`. Tasks changed: LS-005, LS-006, LS-008, LS-012, LS-013, LS-022, LS-023, LS-024; new LS-031
+(game layer, backlog), LS-032 (side-note AI help), LS-033 (final learning evaluation); S7 UI parity on 20 renderer
+tasks. Unchanged: PF-006, LS-002 to LS-004.
 
 ---
 

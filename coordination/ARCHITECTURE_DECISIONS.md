@@ -257,6 +257,9 @@ Do not implement major proposed changes until they are approved.
 - **Constraints**: purely additive (`CREATE TABLE`/`INDEX` only, no change to existing tables) as **migration 2**
   of PF-006/ADR-002; upgrade test from a v1 fixture. Fallback only if ADR-002 is rejected: `IF NOT EXISTS` for these
   additive tables. No mastery table: mastery is computed (ADR-006).
+- **Note (2026-11-23, within the accepted scope):** owner decisions D8/D10 add `assessments.attempt`,
+  `assessments.retake_of` and `learning_materials.parent_material_id` + kind `side_note_ai` to migration 2. Still
+  `CREATE TABLE` only; no existing table changes. Spec §6.2.
 - **Approval**: Project Owner: ACCEPTED 2026-11-23 (owner decision relayed by the desktop orchestrator session).
 
 ### ADR-005 — Learning module boundaries and object-argument IPC

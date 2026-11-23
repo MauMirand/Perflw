@@ -226,6 +226,13 @@ task is assigned only after the previous one is reviewed by Claude A. No batches
   at 1280 px and 400 px width; keyboard-only path works; motion respects `reduceMotion()` (`renderer.js:66`).
 - S6 (main-process handlers only) `requireUser()` and ownership checks on every id; errors are plain-language
   (they reach the UI unchanged unless they match `main.js:166`'s filter).
+- S7 (renderer tasks only, owner decision D12) **UI parity**: the new screen reuses existing tokens, components,
+  layouts and motion from `styles.css`/`learning.css` (no new visual language or token set; any new CSS rule is
+  named in the handoff). Screenshots at 1280 px and 400 px placed **side by side with the existing Learning pages**
+  (subject page and topic viewer) in the handoff; Claude A compares them in review.
+
+**Owner decisions D6–D12 (2026-11-23)** are in spec §9; open follow-ups in spec §9.1. They change LS-005, LS-006,
+LS-008, LS-012, LS-013, LS-022 to LS-024 and add LS-031 to LS-033. LS-002 to LS-004 are unchanged.
 
 #### Phase 1 — Engine core (pure modules, no schema, no UI)
 
@@ -264,6 +271,8 @@ block LS-002.
       rows byte-identical, `user_version` = 2; a second run is a no-op; a fresh install reaches v2.
 - [ ] Failure test: an injected error inside migration 2 rolls back to v1 and leaves the backup file in place.
 - [ ] FK cascade test: deleting a subject removes its journeys, questions, assessments, answers.
+- [ ] Includes the D8/D10 columns from spec §6.2: `assessments.attempt`, `assessments.retake_of`,
+      `learning_materials.parent_material_id`, kind `side_note_ai` (all inside migration 2, still additive).
 
 **LS-006 · `src/learning-store.js`** — P1 · Depends: LS-005, LS-002 (both APPROVED).
 - [ ] CRUD for journeys (+topics), questions, assessments, items (with immutable `question_snapshot`), answers,
@@ -273,6 +282,8 @@ block LS-002.
 - [ ] Writing an answer to a `submitted`/`graded` assessment is rejected (test).
 - [ ] Editing or retiring a question does not change an existing snapshot (test).
 - [ ] Questions are validated with `validateQuestion` before insert; JSON size caps from spec §6.2 enforced (test).
+- [ ] Mastery evidence query is scoped to one journey (D11 soft reset, spec §5.4): answers of an earlier cycle are
+      not returned for the current cycle, and nothing is deleted when a new cycle starts (test).
 
 **LS-007 · IPC + preload for journeys, questions, assessments, mastery** — P1 · Depends: LS-006 (APPROVED).
 - [ ] Channels from spec §6.3 for those four areas only, each through `handle()` with `requireUser()`; one object
@@ -287,13 +298,17 @@ block LS-002.
       optional target date), stage stepper, next-action card, journey list; `learning.js` change limited to mounting.
 - [ ] Reuses renderer helpers (`esc`, `toast`, `confirmDialog`, `announce`) through `init(H)`; no new copies.
 - [ ] Empty states from spec §3.6 for "no topics" and "no source text".
+- [ ] Stepper unlocks stages one at a time (D7): done / current / locked; a locked stage is visible but not
+      startable; notes, files and Ask stay available at every stage.
 - [ ] Smoke step: create a journey on the fixture subject and see stage "Pre-test" (S5).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-009 · Question bank (`src/learning-bank.js`)** — P1 · Depends: LS-007 (APPROVED), G2. Not in parallel with LS-008.
 - [ ] List per subject filtered by topic/type/review state; editor for choice, true/false, matching, explain.
 - [ ] Field errors come from `validateQuestion` and are shown next to the field.
 - [ ] Retire instead of delete when a question has been used in an assessment.
 - [ ] Smoke step: create one question of each of the four types (S5).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-010 · Quiz panel (`src/learning-quiz.js`, `learning-quiz.css`)** — P1 · Depends: LS-008, LS-009 (APPROVED).
 - [ ] Diagnostic/final mode for choice, true/false, matching, explain per spec §3.3–3.5; "I don't know"; confidence.
@@ -302,36 +317,43 @@ block LS-002.
 - [ ] Explain answers self-graded with the rubric checklist after submit (no AI in M-L1).
 - [ ] Keyboard handlers attached to the quiz root, not `document` capture (avoids the conflicts in Claude B HO-002 §4.6).
 - [ ] Smoke step: 4-question pre-test, leave mid-way, resume, submit, self-grade (S5).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-011 · Results page** — P1 · Depends: LS-003, LS-004, LS-010 (APPROVED).
 - [ ] Score line, topic table with level chips and evidence counts, dimension bars with item counts, review answers.
 - [ ] A fixture assessment's displayed values equal `mastery-model`/`learning-insight` outputs (unit test of the view
       model + smoke screenshot).
 - [ ] "Not assessed" shown instead of a number when evidence is insufficient.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-012 · Study session (`src/learning-session.js`)** — P1 · Depends: LS-007 (APPROVED), ADR-008 confirmed, G2.
 - [ ] `study:start`/`study:end`/`study:sideNote` handlers; start uses the existing active timer with
       `source:'learning'`; end saves one focus entry via `saveFocusEntry` and links it.
 - [ ] Refuses to start when another timer runs (plain message offering to stop it).
 - [ ] App quit with a running session closes it at the last activity time (test with injected clock).
-- [ ] Side notes stored as `learning_materials` kind `side_note`.
+- [ ] Side notes stored as `learning_materials` kind `side_note`; the body is only the student's text (D8); they
+      are listed separately from targeted notes and from PDF annotations.
 - [ ] Smoke step: start session, add side note, end; calendar/timer shows the entry (S5).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **M-L1 exit** (Claude A review, not a task): one smoke run walks journey → pre-test → results → session → final
 (same quiz mode, different items) → results, with no AI provider configured.
 
 #### Phase 2 — Quiz completeness
 
-**LS-013 · Practice mode** — P2 · Depends: LS-011 (APPROVED).
+**LS-013 · Practice mode ("Quest" in the UI, D6)** — P2 · Depends: LS-011 (APPROVED).
+- [ ] Student-facing label is "Quest" (pending spec §9.1 Q5; code keeps kind `practice`).
 - [ ] Check → immediate feedback with explanation and source link; one retry for deterministic types scored ×0.5.
 - [ ] Practice answers recorded as kind `practice` (weight 0.5 in mastery; test).
 - [ ] Smoke step: answer wrong, see feedback, retry.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-014 · Essay type, full keyboard map, accessibility, narrow layout** — P2 · Depends: LS-013 (APPROVED).
 - [ ] Essay editor with word range and rubric self-grade.
 - [ ] All shortcuts in spec §3.3 work and never fire while typing in a text field (test).
 - [ ] `design:accessibility-review` run on the quiz; every High finding fixed or justified.
 - [ ] Matching usable without drag at 400 px (screenshot).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 #### Phase 3 — Diagnosis, notes and AI
 
@@ -344,6 +366,7 @@ block LS-002.
 - [ ] Weak topics ranked on the results page; "Generate targeted notes" writes one Markdown material per weak topic
       (atomic write) and opens it in the viewer's Notes view.
 - [ ] Works with no provider configured (smoke step with AI disabled).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-017 · Question Writer agent and generation job** — P2 · Depends: LS-015 (APPROVED), ADR-007 confirmed.
 - [ ] Agent + skill created via the `learning-agents.js` pattern; `learning-coach.js` job via `ecosystem.runAgent`,
@@ -367,6 +390,15 @@ block LS-002.
 - [ ] Explanation constrained to the note's cited excerpts; labelled with the model; omitted cleanly with AI off.
 - [ ] Unit test with fake `runAgent` covering success, NOT_IN_FILE-style refusal, and error.
 
+**LS-032 · Side-note AI help (D8)** — P3 · Depends: LS-012, LS-017 (APPROVED); ADR-007 remainder confirmed.
+- [ ] "Check my note" runs a `learning-coach.js` job via `ecosystem.runAgent`; output = suggestions (gaps, unclear
+      points, short explanation) grounded on the note and its cited pages.
+- [ ] Stored as a `side_note_ai` material linked by `parent_material_id`, with provenance; **never** written into
+      the student's note (test: note body byte-identical after a run).
+- [ ] Labelled "AI · suggestion"; AI-off state hides the button and leaves side notes fully usable. Unit tests with
+      a fake `runAgent` (success, invalid output, error).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
+
 #### Phase 4 — Practice journey
 
 **LS-020 · Review queue (Leitner)** — P2 · Depends: LS-004, LS-013 (APPROVED).
@@ -375,22 +407,38 @@ block LS-002.
 **LS-021 · Mistake analysis view + supplementary loop** — P2 · Depends: LS-016, LS-020 (APPROVED).
 - [ ] Mistakes grouped by category and topic; "Practice these" starts a practice set of exactly those items;
       supplementary session/notes for still-weak topics. Smoke step.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-022 · Journey history** — P3 · Depends: LS-011 (APPROVED).
 - [ ] Per journey and per topic: every assessment with date, kind, score and level at that time; abandoned
       assessments shown but marked excluded. View-model unit test with a 3-assessment fixture.
+- [ ] Earlier cycles of the same topics shown as history next to the current cycle (D11); a 2-cycle fixture test.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 #### Phase 5 — Final exam and mastery
 
-**LS-023 · Final exam with parallel items** — P2 · Depends: LS-010, LS-017 (APPROVED).
+**LS-023 · Final exam with parallel items (D10)** — P2 · Depends: LS-010, LS-017, LS-033 (APPROVED).
 - [ ] Final selection excludes every item used in the journey's diagnostics and unreviewed AI items (test).
 - [ ] When too few items exist, the setup sheet says how many are missing per topic and offers bank/template/AI.
+- [ ] Item count 50–100 chosen by the student (validated; spec §4.9).
+- [ ] Pure `DEFAULT_EXAM_CONFIG` (frozen, versioned) + `examTimeLimit(items, config)` and `passMark(items, config)`
+      per spec §4.9, with boundary tests (d̄ = 1 / 2 / 3 → 75 / 82.5 / 90%; the 50-item example → 50 min).
+- [ ] Timer with 5- and 1-minute warnings; time-out submits saved answers (test with an injected clock).
+- [ ] Result shows passed / not passed against the stored pass mark.
+- [ ] Retake: a new attempt (`attempt` + 1, `retake_of`) is allowed only when `assessment:retakeStatus` reports the
+      review complete (definition per spec §9.1 Q1); earlier attempts are never changed (test).
+- [ ] Unlocks only after Final learning (LS-033) is done (D9).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-024 · Mastery report, retention check, next cycle** — P2 · Depends: LS-003, LS-023 (APPROVED).
 - [ ] Pre vs final per topic and dimension with evidence counts; improvement only when both sides have ≥ 2 items.
 - [ ] Report is marked "provisional" while any counted open answer is not `final`.
 - [ ] Retention check can be scheduled ≥ 7 days after the final; selection per spec §4.1 (test).
-- [ ] "Next cycle" creates a journey with `parent_journey_id` and the topics below Mastered.
+- [ ] Every final attempt compared side by side: score, pass mark, time used, per-topic and per-dimension change (D10).
+- [ ] "Next cycle" is optional (D11): declining leaves the journey completed with its stats unchanged; accepting
+      creates a journey with `parent_journey_id`, topics pre-filled with those below Mastered and freely editable,
+      and the new cycle's stats start at 0 while the old cycle stays in history (test: no rows deleted).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-025 · Replace manual subject mastery/time (D2)** — P2 · Depends: LS-024 (APPROVED).
 - [ ] Edit panel no longer edits mastery % or time; columns untouched (no migration).
@@ -398,30 +446,48 @@ block LS-002.
       entries).
 - [ ] The old manual value stays visible read-only as "Earlier self-estimate (entered manually)" until the subject
       has evidence, and is never used in calculations (test).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
+
+**LS-033 · Final learning evaluation (D9)** — P2 · Depends: LS-003, LS-004, LS-011, LS-012 (APPROVED).
+- [ ] `journey:evaluation {journeyId}` returns the spec §5.6 report for the current cycle, computed (no new table);
+      view-model unit test on a fixture journey; values equal `mastery-model`/`learning-insight` outputs.
+- [ ] Stage 12 is required: the final exam unlocks after the evaluation was viewed and a `review` session ended.
+- [ ] Topics below Developing are flagged, not blocked. Smoke step (S5).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 #### Phase 6 — Integration
 
 **LS-026 · Calendar scheduling** — P2 · Depends: LS-024 (APPROVED), ADR-008 confirmed.
 - [ ] `schedule:create` creates the event and link in one transaction (rollback test); clicking the event offers
       Start; deleting the event deletes only the link. Smoke step.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-027 · Home Learn card** — P3 · Depends: LS-020, LS-026 (APPROVED).
 - [ ] Shows continue-journey, reviews due, next scheduled check; each row navigates correctly (smoke).
 - [ ] Verify first whether any UI writes `planner_items` kind `learning`; report before using it.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-028 · Analytics Learning section** — P3 · Depends: LS-012, LS-024 (APPROVED); **owner decision PF-019**
 (Analytics is not reachable from navigation today, Claude B HO-002 §5).
 - [ ] Study time by subject, assessments taken, topics by level; numbers equal store queries on a fixture.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 #### Phase 7 — Hardening
 
 **LS-029 · Onboarding and state audit** — P2 · Depends: M-L1 exit, LS-018 (APPROVED).
 - [ ] Every state in spec §3.6 reachable and screenshotted; first-use hint on the journey hub (dismissible,
       remembered per account).
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-030 · Performance** — P3 · Depends: M-L1 exit.
 - [ ] Bench with 1,000 questions and 200 assessments in one subject: `mastery:subject` < 100 ms, quiz start
       < 200 ms (median of 5); add indexes only through a new migration (G1).
+
+#### Later — Quest game layer
+
+**LS-031 · Quest game layer (D6 c)** — P3 · Depends: M-L1 exit, LS-013 (APPROVED); **owner design first** (what
+is rewarded, whether it affects mastery: proposed *never*). Inside the existing visual style (D12). BACKLOG.
+- [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **Critical path:** PF-004 → PF-007 (P0 data integrity, 2026-11-23) → PF-006 → LS-002 → LS-005 → LS-006 → LS-007 → LS-008 → LS-009 → LS-010 → (LS-003,
 LS-004) → LS-011 → LS-012 → M-L1 exit. LS-003/LS-004 may be assigned any time after LS-002 when Claude B would
