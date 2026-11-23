@@ -1669,6 +1669,58 @@ ranking, ties, boxes, escaping, snapshot). `npm run test:electron` not required 
 
 ---
 
+### HO-029 — PF-021: Startup shows a plain-language message when the databases cannot be opened
+
+**Date:** 2026-11-23  
+**Task ID:** PF-021  
+**From:** Claude A (implemented at the owner's request: "start building the feature"; no Claude B session was running it)  
+**To:** independent reviewer (not Claude A, see §6)  
+**Status:** SUBMITTED  
+**Branch:** `feature/PF-021-startup-error` (worktree `.claude/worktrees/pf-021-startup-error`), base `main` at `5f3d1f5`
+
+#### 1. What happened before the change (confirmed, the brief asked for this)
+With a `workspace.sqlite` that holds garbage bytes, the unmodified `main` logs
+`UnhandledPromiseRejectionWarning: Error: file is not a database` from the `app.whenReady()` callback, creates no window and does
+**not exit**: the Electron process keeps running until it is killed (my check timed out at 60 s and the exit code was not 1).
+
+#### 2. Change
+- **`src/startup-error.js` (new, pure):** `startupMessage(error, { dataDir }) → { title, message }`. A migration-runner error
+  ("Perflw could not make a safety copy of…" / "Perflw could not update…") is kept as is and gets the data folder appended. Any
+  other error is wrapped: what happened, that nothing was changed or deleted, the data folder, that a `.bak-…` copy next to the
+  database can be copied back by hand (no automatic restore), and the technical reason in brackets.
+- **`src/main.js`:** `createAuth`/`createWorkspace` are wrapped in `try/catch` (the only logic change, 15 lines). On error: close any
+  database that did open, show `dialog.showErrorBox(title, message)` and `app.exit(1)`; in test mode (`!app.isPackaged &&
+  PERFLW_TEST_USER_DATA`) print the same text to stderr instead of a modal box. No file is deleted, moved or rewritten.
+- **`test/startup-error.test.js` (new, 4 tests)** and **`test/startup-error-smoke.js` (new)** + `package.json` script
+  `test:startup` (one line).
+
+#### 3. Checks
+| Check | Result | Level |
+|---|---|---|
+| `npm test > log 2>&1; echo EXIT=$?` | PASS: EXIT=0, 224 tests, 224 pass, 0 fail (base 220 + 4) | unit |
+| `node test/startup-error-smoke.js` (garbage `workspace.sqlite`, real Electron, test mode) | PASS: exit code 1, message on stderr, data folder named, file byte-identical, no `.bak`/`.tmp` file | live |
+| Same check against the unmodified `main.js` | FAIL as expected (no exit 1; unhandled rejection) | live |
+| `npm run test:electron` on this branch | **UNVERIFIED**: held until PF-020's idle-machine batch ends (about 22:56) | — |
+| Rendered check of the real dialog (screenshot, no test mode) | **UNVERIFIED**: `dialog.showErrorBox` is a native modal; it needs a manual look | — |
+
+Load note: my two short Electron runs were at about 22:41–22:42, before PF-020's batch started (22:44). My `npm test` (no
+Electron) ended at 22:44:49, so it overlapped the first minute of that batch. PF-020's reviewer should know.
+
+#### 4. Limits
+- One failure path only: the `try/catch` covers the two database openings. A later startup failure (for example in the ecosystem
+  or the learning workflow) is not wrapped.
+- The `before-quit` handler is not run by `app.exit`; both databases are closed explicitly in the catch.
+- If `app.exit(1)` is reached, the single-instance lock is released by process exit.
+
+#### 5. Sequencing
+Per the PF-021 brief: merge before LS-007 and LS-012 (all three edit `src/main.js`).
+
+#### 6. Review
+A review by Claude A of Claude A's own code is not independent. Reviewer: a Claude B session or a fresh reviewer agent, using
+the PF-021 acceptance list. Merge only after that APPROVED and a green `npm run test:electron` on the merge result.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED

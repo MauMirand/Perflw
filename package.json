@@ -17,6 +17,7 @@
     "test:electron": "node test/electron-smoke.js",
     "test:automation": "node test/automation-smoke.js",
     "test:learning": "node test/learning-study-smoke.js",
+    "test:startup": "node test/startup-error-smoke.js",
     "build": "node scripts/build.js",
     "icons": "node scripts/make-icons.js",
     "setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",

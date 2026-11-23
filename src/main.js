@@ -6,6 +6,7 @@ const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { createAuth } = require('./auth');
 const { createWorkspace } = require('./workspace');
+const { startupMessage } = require('./startup-error');
 const learningImport = require('./learning-import');
 const { runWorkflow, LIMITS: AUTOMATION_LIMITS } = require('./automation/engine');
 const { createOllamaRuntime } = require('./automation/ollama');
@@ -214,8 +215,20 @@ app.whenReady().then(() => {
       return new Response(bytes, { headers: { 'content-type': 'application/pdf', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
     } catch { return new Response('', { status: 404 }); }
   });
-  auth = createAuth(root);
-  workspace = createWorkspace(root);
+  // If a database cannot be opened, backed up or migrated (PF-021), say so in plain language and quit. Nothing is deleted or moved.
+  try {
+    auth = createAuth(root);
+    workspace = createWorkspace(root);
+  } catch (error) {
+    if (workspace) workspace.close();
+    if (auth) auth.close();
+    const { title, message } = startupMessage(error, { dataDir: root });
+    // Test mode: a modal box would block an automated run, so print the message instead.
+    if (!app.isPackaged && process.env.PERFLW_TEST_USER_DATA) console.error(`${title}: ${message}`);
+    else dialog.showErrorBox(title, message);
+    app.exit(1);
+    return;
+  }
   // API keys are encrypted with the OS credential protection behind safeStorage (DPAPI on Windows).
   ecosystem = createEcosystem({
     root, workspace,
