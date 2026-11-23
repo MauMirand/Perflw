@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const { createAuth } = require('./auth');
 const { createWorkspace } = require('./workspace');
 const { startupMessage } = require('./startup-error');
+const { registerLearningIpc } = require('./learning-ipc');
 const learningImport = require('./learning-import');
 const { runWorkflow, LIMITS: AUTOMATION_LIMITS } = require('./automation/engine');
 const { createOllamaRuntime } = require('./automation/ollama');
@@ -343,6 +344,7 @@ app.whenReady().then(() => {
     let fileIds = []; try { fileIds = workspace.listTopics(user.id, id).files.map(f => f.id); } catch { /* subject already gone */ }
     removeLearningFiles(user, workspace.deleteSubject(user.id,id)); removeAnnotations(user, fileIds); learningFlow.subjectRemoved(user.id, id);
   });
+  registerLearningIpc({ handle, requireUser, workspace });
   handle('learning:topics', subjectId => workspace.listTopics(requireUser().id, subjectId));
   handle('learning:addTopic', (subjectId, details) => workspace.addTopic(requireUser().id, subjectId, details));
   handle('learning:renameTopic', (topicId, title) => workspace.renameTopic(requireUser().id, topicId, title));
