@@ -91,6 +91,7 @@ test('existing databases are upgraded to accept learning goals without losing it
   raw.exec('ALTER TABLE planner_items RENAME TO planner_items_new');
   raw.exec(sql.replace(", 'learning'", '').replace(",'learning'", '').replace('planner_items_new', 'planner_items'));
   raw.exec('INSERT INTO planner_items SELECT * FROM planner_items_new; DROP TABLE planner_items_new');
+  raw.exec('PRAGMA user_version = 0'); // installs from before PF-006 have no schema version
   raw.close();
   second = createWorkspace(root);
   const goal = second.createPlannerItem('user-a', { kind: 'learning', text: 'Spanish' });
