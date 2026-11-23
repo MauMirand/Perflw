@@ -463,7 +463,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Smoke step: create one question of each of the four types (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-010 · Quiz panel (`src/learning-quiz.js`, `learning-quiz.css`)** — P1 · Depends: LS-008, LS-009 (APPROVED).
+**LS-010 · Quiz panel (`src/learning-quiz.js`, `learning-quiz.css`)** — P1 · Depends: LS-008, LS-009 (INTEGRATED). **Brief complete**; submission HO-025. Full brief: "TASK: LS-010".
 - [ ] Diagnostic/final mode for choice, true/false, matching, explain per spec §3.3–3.5; "I don't know"; confidence.
 - [ ] Autosave (600 ms debounce) with "Saved"/"Not saved — Retry"; cannot submit while a save is pending/failed.
 - [ ] Leave and resume restores answers and position; submit shows unanswered count first.
@@ -1103,6 +1103,101 @@ No main-process change; no new IPC channel (if a channel is missing, report it).
 #### Deliverables
 Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-024**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-010 — Quiz panel (`src/learning-quiz.js`, `src/learning-quiz.css`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-008 and LS-009 are INTEGRATED (renderer chain is
+sequential). Submission **HO-025**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+A focus-mode quiz panel that runs a diagnostic (pre-test) or final-style assessment end to end: answer, save, leave,
+resume, submit, self-grade the open answers. No AI in M-L1.
+
+#### Context
+Spec §3.3 (layout, keyboard), §3.4 (controls per type), §3.5 (feedback states), §3.6 (loading/save errors), §3.9
+(responsive, accessible), §4.5 (when answers are evaluated). Data comes through `window.learningData.assessment*`
+(LS-007): `assessmentGet` returns the **student view** while the assessment is in progress (no key; options and matching
+right items already shuffled with the seed, HO-019 §4.6), `assessmentSaveAnswer` upserts one answer,
+`assessmentSubmit` grades and returns the full view, `assessmentGrade` records a self-grade. LS-008's setup sheet calls
+`H.startQuiz({ assessmentId })`, which this task provides. Modules attach to `window` and take `H` from `learning.js`
+(`esc`, `announce`, `toast`, `confirmDialog`, `reduceMotion`).
+
+#### Requirements
+- New `src/learning-quiz.js` (IIFE → `window.PerflwQuiz`; `module.exports` for the pure parts) and `src/learning-quiz.css`.
+  Pure, unit-tested helpers: `quizState(view, answers, flags)` (answered count, unanswered ids, per-question dot state
+  empty/answered/current/flagged); `autosave()` — a small state machine with a 600 ms debounce for choice/true-false/matching
+  and 2 s idle for text, states `saved | saving | failed`, one in-flight save per item, retry; `canSubmit(state)` (false while
+  any save is pending or failed); `responseFromForm(question, form)`; `selfGradeVerdicts(question, ticks)` (ticked → `met`,
+  unticked → `missing`).
+- **Panel:** header (✕, title, "Question n of N", progress = answered/total), question card (type chip, topic, prompt,
+  source link when present), answer control per type, confidence row (Guessing / Fairly sure / Certain → 1/2/3), "I don't
+  know" (`dontKnow:true`), footer (Previous, Flag, Next / Submit) and the question navigator (dot strip; below 600 px a
+  "3 / 12 ▾" button opening a grid).
+- **Types in M-L1:** choice (radio cards, checkbox cards when `multiple`), true/false (+ justification field when
+  `requireJustification`), matching (select left, then right; chips with ✕ to undo; stacks to one column with "Connect to…"
+  menus below 600 px; drag optional), explain (short textarea with word counter against `maxWords`). Essay is not offered.
+- **Autosave:** every change saves through `assessmentSaveAnswer`; footer shows "Saved" / "Saving…" / "Not saved — Retry".
+  The answer stays in memory on failure and **Submit is disabled until every save succeeded**.
+- **Leave and resume:** ✕ or `Esc` opens an inline "Leave? Your answers are saved." row (no `confirm()`); reopening the
+  assessment restores answers, flags and position (position and flags kept in `sessionStorage` keyed by assessment id; answers
+  come from the database).
+- **Submit:** first shows "N unanswered" with Go back / Submit anyway; then `assessmentSubmit`.
+- **After submit (no AI):** completion view; each `explain` answer shows its rubric as a checklist (spec §3.5 "Self-grade":
+  tick what the answer covered; chip "Self-graded") and saves with `assessmentGrade` (`grader:'self'`); the view says how many
+  items still need a self-grade. Results screen is LS-011: this task ends at "View results" calling
+  `H.openResults({ assessmentId })` if provided, else showing the score line only.
+- **Keyboard:** handlers are attached to the quiz root element, **never** `document` capture (HO-002 §4.6). `1–9`/`A–D`
+  choose an option, `T`/`F` true/false, `←`/`→` previous/next, `Ctrl+Enter` next/submit, `F` flag; letter keys are ignored while
+  a text field has focus. Every control reachable with Tab, visible focus ring, `role="radiogroup"` for choices, a live region
+  announces "Saved", "Not saved", question changes.
+- **Motion:** card change 150 ms fade/slide through `reduceMotion()`; no animation under reduced motion.
+- **Files touched outside the new module:** `learning.js` (provide `H.startQuiz`, open the quiz from the hub, mount/unmount
+  focus mode), `index.html` (script `learning-quiz.js`, link `learning-quiz.css`, script `assessment-model.js` if LS-009 has
+  not already loaded it), `electron-smoke.js` (one step).
+
+#### Relevant Files
+New: `src/learning-quiz.js`, `src/learning-quiz.css`, `test/learning-quiz.test.js`. Edited: `src/learning.js` (hand-off only),
+`src/index.html`, `test/electron-smoke.js`. Read only: `src/learning-journey.js`, `src/learning-bank.js` (module pattern),
+`src/assessment-model.js`, `src/learning.css`, `src/styles.css`, `docs/ui-baseline/`.
+
+#### Dependencies
+LS-008, LS-009 (INTEGRATED, sequential chain), LS-007 (INTEGRATED), PF-020 (G2).
+
+#### Restrictions
+No main-process change and no new IPC channel (report a missing one). No AI, practice mode ("Check" feedback, LS-013), timer
+or exam rules (LS-023). New CSS only in `learning-quiz.css`, built from existing tokens (no new token, font or library).
+Overlap check at release: nothing else edits `index.html`, `learning.js` or `electron-smoke.js` while LS-010 runs.
+
+#### Acceptance Criteria
+- [ ] Unit tests: `quizState` (answered/unanswered/flags), `autosave` (debounce timing with a fake clock, retry after failure,
+      single in-flight save, `saved`/`failed` states), `canSubmit` false while saving or failed, `responseFromForm` per type,
+      `selfGradeVerdicts`.
+- [ ] **Smoke step (S5):** 4-question pre-test (one each: choice, true/false, matching, explain) → answer two → leave → resume
+      (answers and position restored) → answer the rest → submit shows "N unanswered" only when some are blank → submit →
+      self-grade the explain answer → score line shown. `npm run test:electron` exit 0.
+- [ ] Failed save test (unit or smoke with a forced rejection): "Not saved — Retry" appears, Submit disabled, retry succeeds.
+- [ ] **No answer key in the renderer** during the quiz: a smoke assertion reads the in-memory view (`PerflwQuiz` debug hook or
+      a serialization of the assessment object it holds) and finds no `correct`, `modelAnswer`, `keywords`, `explanation` key in
+      any question.
+- [ ] Keyboard-only path through one full quiz; focus ring visible; shortcuts do not fire while typing; no `document`-level key
+      capture added (grep in the diff).
+- [ ] Reduced-motion: with `prefers-reduced-motion` the card change has no transition (rendered check).
+- [ ] **S7 UI parity (D12):** the panel reuses `styles.css`/`learning.css` tokens, cards, buttons, chips; every new CSS rule is in
+      `learning-quiz.css` and listed in HO-025; screenshots at 1280 px and 400 px of each question type and the completion view,
+      beside the baseline (`docs/ui-baseline/`).
+- [ ] S1, S2, S3 (≤ ~600 lines per file; split `learning-quiz-controls.js` if needed and say so), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-025**.
 
 #### Review
 **Reviewed By:**  
