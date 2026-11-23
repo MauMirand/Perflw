@@ -55,9 +55,9 @@ refer to `PROJECT_STATUS.md` §6.
 |---|---|---|---|---|---|
 | PF-004 | Fix the failing Electron E2E smoke test (Learning PDF stage) | P0 | **INTEGRATED** (`dfd1fbd`, 2026-11-23) | — | R2. Commits `3b8f738`, `f2006fa` on `fix/PF-004-smoke-pdf`. Independently re-verified: `npm test` 126 pass/0 fail/2 todo; smoke 3/3. Follow-ups: PF-007, PF-020. |
 | PF-005 | Upgrade Electron off EOL 38.x to a supported major | P0 | BACKLOG | PF-004; ADR-001 approval | R1, R5 |
-| PF-006 | Versioned, transactional schema migrations with a backup | P1 | READY (after PF-007 review) | ADR-002 ✔ (D1); PF-004 APPROVED; PF-007 reviewed | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
-| PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | READY on ADR-003 approval; **next after PF-004** | ADR-003 (amended); PF-004 APPROVED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
-| PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs) and the side-panel collapse flake (`:620`) | P1 | BACKLOG | PF-004 APPROVED | From Claude B HO-004 §8.2; the E2E net is usable but not yet reliable |
+| PF-006 | Versioned, transactional schema migrations with a backup | P1 | READY — assignment written and HELD (HO-009) until PF-007 is merged | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
+| PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **REVISION (minor)** — `8475dcb` reviewed in HO-008: re-queue stored `pending`, correct HO-007 §8.2 | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
+| PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | BACKLOG | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
 | PF-008 | `npm run verify` and Windows CI (GitHub Actions) | P1 | BACKLOG | PF-004; owner OK for Actions | R6 |
 | PF-009 | Owner decision: build expense tracking or remove the unused finance and ledger tables | P1 | BACKLOG | owner | R9; needs a decision, not code |
 | PF-010 | IPC contract test (channels in `preload.js` ↔ `handle()` in `main.js`) | P2 | BACKLOG | — | Cheap guard for about 120 channels |
@@ -169,7 +169,8 @@ DDL must move into migration 1), new `src/db-migrate.js`, new `test/db-migrate.t
 `test/fixtures/`.
 
 #### Dependencies
-PF-004 APPROVED (UI regression net), ADR-002 ✔.
+PF-004 INTEGRATED (`dfd1fbd`), PF-007 APPROVED and merged (branch PF-006 from that `main`), ADR-002 ✔ (in principle, D1).
+Assignment: HO-009.
 
 #### Restrictions
 - No change to any table's shape beyond the two defect fixes. No new dependency. No change to app behavior visible

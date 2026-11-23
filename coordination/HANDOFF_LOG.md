@@ -179,7 +179,7 @@ Requested by the owner after the coordination setup (HO-001).
 
 #### 5. Git Information
 **Branch:** `worktree-perflow-manager`  
-**Commit:** none yet (uncommitted, awaiting owner approval)  
+**Commit:** `ac7f302` (committed 2026-11-23 at the owner's request, rebased onto `main` `dfd1fbd`)  
 **Base Branch:** `main` @ `e9cc8ae`
 
 #### 6. Testing
@@ -240,8 +240,7 @@ args), `events`.
 - coordination/ARCHITECTURE_DECISIONS.md, TASK_QUEUE.md, PROJECT_STATUS.md, HANDOFF_LOG.md
 
 #### 5. Git Information
-**Branch:** `worktree-perflow-manager` · **Commit:** none (uncommitted with the HO-002 docs, awaiting owner
-approval) · **Base:** `main` @ `e9cc8ae`
+**Branch:** `worktree-perflow-manager` · **Commit:** `ac7f302` (with the HO-002 docs, rebased onto `main` `dfd1fbd`)
 
 #### 6. Testing
 Documentation only; no tests run. Code claims are cited by file and line at `e9cc8ae`.
@@ -503,6 +502,109 @@ Claude A's uncommitted coordination edits will be reconciled on top of the merge
 Owner: merge PF-004; approve ADR-003 (amended); confirm ADR-004/005/008; approve committing Claude A's docs.
 Claude A then assigns **PF-007** to Claude B. LS-002 does not start until ADR-005 is confirmed and PF-006 is
 approved.
+
+---
+
+### HO-008 — Review of PF-007 (Claude B, branch `fix/PF-007-safe-file-io`, commit `8475dcb`)
+
+**Date:** 2026-11-23  
+**Task ID:** PF-007  
+**From:** Claude A  
+**To:** Claude B, Project Owner  
+**Status:** COMPLETE (review) · **APPROVED WITH MINOR CHANGES**
+
+> Numbering: Claude B's submission is HO-007 (on its branch). This review is HO-008.
+
+#### 1. Scope reviewed
+Full diff `main..fix/PF-007-safe-file-io` (9 files, +375/−45): `src/safe-file.js` (new), `learning-workflow.js`,
+`learning-agents.js`, `learning-annotate.js`, `automation/packages.js`, `main.js`, `test/safe-file.test.js` (new),
+`test/learning-state-io.test.js`, HO-007. No schema, dependency, file-format or location change; `workspace.js` and
+`auth.js` untouched.
+
+#### 2. Acceptance criteria
+| Criterion | Result | Evidence |
+|---|---|---|
+| `safe-file` behaves as ADR-003 items 1–2 (retry then success; exhausted → throws, no `.tmp`, old file kept; `ENOENT` → fallback; busy read throws for EBUSY/EPERM/EACCES; invalid JSON moved aside; mode `0o600` off Windows) | **Met** | Code read; 9 unit tests read and passing |
+| Both PF-004 reproducers pass without `todo` | **Met** | Claude A run |
+| Preferences and agent-registry busy reads do not wipe the file | **Met** | 2 new tests; read-modify-write stops on a throwing read (item 3) |
+| Tests really guard the fix | **Met** | Claude A ran the 4 `learning-state-io` tests against `main`'s pre-fix `src/`: **4/4 fail**, as HO-007 states |
+| `npm test` exit 0, 0 todo | **Met** | Claude A: EXIT=0, 139 tests, 139 pass, 0 todo |
+| `npm run test:electron` exit 0 | **Met by Claude B (3/3); not reproduced 3-in-a-row by Claude A** | Claude A, 6 runs on an exact branch export (linked install, lockfile versions): pass, **fail**, pass, pass, **fail**, pass. Failures: `:949` "Plan group hides Calendar…" (sidebar collapse measured after `sleep(250)`) and `:620`-class "collapsed column takes no width" (measured after `sleep(450)`). Neither step involves file I/O or code PF-007 changed; both are fixed-wait steps (PF-020). Not a PF-007 regression by inspection; not proven by an A/B run on `main`. |
+| Committed, handoff written | **Met** | `8475dcb`, HO-007 |
+
+Additional checks: no caller broken by readers that now throw: background callers run inside `enrich().catch`
+and `run()`'s try. `learning-agents.js` has no remaining `fs` use. The annotation guard is sound: `flush()`
+only sends when `save()` armed a timer, and `save()` refuses while `S.unreadable`. The scope extension to
+`learning-annotate.js` is justified (same defect class, in a file PF-007 already touched).
+
+#### 3. Required changes (small; re-review of the delta only)
+1. **A stored `pending` status is never re-queued.** `fileAnalysis` (`src/learning-workflow.js:382`) returns
+   `entry.status` when it is not `ready`, so a file whose final status could not be saved (or an app quit
+   mid-analysis) shows "Analyzing this file…" forever after a restart. PF-007's objective is that nothing is
+   "left stuck". Fix: when the stored status is `pending` and the file is neither queued nor **currently being
+   analyzed** (`run()` has already shifted the active job off `queue`, so track the in-flight file id), call
+   `queueFile`. Add a unit test: a `state.json` with a `pending` entry and a fresh workflow instance →
+   `fileAnalysis` leads to `ready`; and a test that a file being analyzed is not queued twice.
+2. **Correct HO-007 §8 item 2.** It says a stored `pending` "is re-queued when opened (existing behavior)"; the code
+   does not do that (see 1). Update the entry after the fix.
+
+#### 4. Non-blocking notes (no change needed in PF-007)
+- `restoreToken` (`main.js`) still reads with a swallowed `fs.readFileSync`: a held session file signs the user out
+  for that start (no data loss). Leave as is; noted for PF-014.
+- `*.corrupt-*` files are never cleaned up (HO-007 §8.4). Acceptable; they are rare and are recovery data.
+- Other `readFileSync`+`JSON.parse` sites in `src/automation/` are unaudited (HO-007 §8.5) → PF-014.
+- **E2E reliability is lower than recorded:** Claude A saw 2 fixed-wait failures in 6 runs (PF-004 review: 0 in 3;
+  Claude B: about 1 in 11). PF-020 gains the `:949` step and should be done before the first LS renderer task (gate G2
+  depends on a trustworthy smoke run).
+
+#### 5. Decision
+**APPROVED WITH MINOR CHANGES.** Claude B makes changes 1–2 on the same branch as a new commit (no rebase). Claude A
+reviews only that delta (unit tests + one smoke run). Then the owner merges. PF-006 is issued only after that
+(HO-009).
+
+---
+
+### HO-009 — Assignment: PF-006 (versioned, transactional schema migrations with a backup)
+
+**Date:** 2026-11-23  
+**Task ID:** PF-006  
+**From:** Claude A  
+**To:** Claude B  
+**Status:** **HELD**. Issued when PF-007 is APPROVED (after the HO-008 changes) and merged into `main`. One task
+at a time.
+
+#### 1. Assignment
+Implement PF-006 exactly as specified in `coordination/TASK_QUEUE.md` → "TASK: PF-006". ADR-002 is accepted in
+principle (owner decision D1). This is **gate G1**: no Learning System table may exist before PF-006 is approved and
+merged.
+
+#### 2. Setup
+- Branch `refactor/PF-006-migrations` from `main` **after** PF-007 is merged (so the baseline includes
+  `safe-file.js`).
+- Run `npm ci` in your worktree before `npm run test:electron` (CLAUDE.md §6).
+
+#### 3. Key points (summary; the task spec governs)
+- New runner (e.g. `src/db-migrate.js`): `PRAGMA user_version`, ordered `{ version, up(db) }` list, each migration in
+  `BEGIN IMMEDIATE … COMMIT`, `ROLLBACK` on error with a plain-language message.
+- **Migration 1 = today's schema**, idempotent for every existing install; includes the tables
+  `createAutomationStore`/`createSessionStore` create. Fix inside it: the `planner_items` rebuild runs in the
+  runner's transaction (`workspace.js:140-154`); the two `subject_files` columns are guarded separately
+  (`workspace.js:190`).
+- Backup before the first pending migration on an existing DB (e.g. `VACUUM INTO`, proven under `node:sqlite` by a
+  test first); keep the newest 3; never touch the live file otherwise.
+- Same runner for `accounts.sqlite`.
+- **Out of scope:** any learning table (that is LS-005), any other schema change, any new dependency.
+
+#### 4. Acceptance
+As listed in the PF-006 task spec: fresh install = today's schema at v1 (compared against a fixture generated from
+`main`); three old-install fixtures upgraded with rows preserved; injected failure rolls back and leaves a usable
+backup; second start is a no-op; backups pruned to 3; `npm test` and `npm run test:electron` exit 0; commit on
+`refactor/PF-006-migrations`; HANDOFF entry; `docs/ARCHITECTURE.md` §2 updated.
+
+#### 5. Restrictions
+Do not touch files outside `workspace.js`, `auth.js`, the automation store/session modules (only if their DDL
+moves into migration 1), the new runner and its tests/fixtures. Report anything else before changing it. Smoke
+flakes at `:620`, `:949`, `:1031` are known (PF-020); report them, do not fix them in PF-006.
 
 ---
 

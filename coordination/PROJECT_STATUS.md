@@ -121,7 +121,8 @@ Objectives:
 |---|---|---|---|
 | PF-001–003 | Baseline audit (architecture, features, risks) | Claude A | REVIEW (by owner) |
 | PF-004 | Fix the failing E2E smoke test | Claude B | INTEGRATED (`dfd1fbd`) |
-| PF-007 | Safe user-data file I/O (P0) | Claude B | REVIEW (Claude A); branch `fix/PF-007-safe-file-io` @ `8475dcb` |
+| PF-007 | Safe user-data file I/O (P0) | Claude B | REVISION (minor) — HO-008: re-queue stored `pending`; correct HO-007 §8.2 |
+| PF-006 | Versioned migrations (gate G1) | Claude B (next) | Assignment HO-009 written, HELD until PF-007 is merged |
 | LS-001 | Learning System spec | Claude A | APPROVED in principle (D1–D5); ADR-004/005/008 pending |
 
 Update this section whenever a task becomes active.
@@ -155,7 +156,8 @@ Update this section whenever a task becomes active.
 - **Description**: the audit, Learning spec, PF-006 and LS task specs are uncommitted in Claude A's worktree.
 - **Impact**: Claude B cannot read its next assignments.
 - **Required action**: owner approves committing them on `worktree-perflow-manager` and merging (or sharing) them.
-- **Resolution status**: Open.
+- **Update 2026-11-23**: committed on `worktree-perflow-manager` on top of `main` `dfd1fbd` (owner request).
+- **Resolution status**: Open until the owner merges `worktree-perflow-manager` into `main`.
 
 ---
 
