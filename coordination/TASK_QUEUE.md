@@ -171,6 +171,27 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
 - [ ] Root cause stated for each named flake, or "not reproduced in N runs" with what was tried.
 - [ ] Committed on the session's branch (ref and base in HO-014); HANDOFF entry HO-014.
 
+#### Claude A review checklist (prepared 2026-11-23; LS-002 needed none, it was reviewed and integrated)
+1. **Scope:** `git diff --stat <base>..<tip>` lists `test/electron-smoke.js` and HO-014 only. Anything under `src/` is a defect
+   of the submission (report-only rule).
+2. **Remaining sleeps:** every `sleep(` left in the file is listed in HO-014 with a reason and is pacing input, not waiting for
+   layout, animation or async state.
+3. **Wait quality:** each new `waitFor` polls the *asserted* condition (not a proxy such as "element exists"), has a label, a
+   bounded timeout, and its failure message carries the last observed value.
+4. **No weakened assertions:** compare removed/changed `assert*` lines in the diff; tolerances, expected values and selectors are
+   unchanged, or the change is justified in HO-014.
+5. **Transitions:** steps that waited a duration now wait for `transitionend` or the final computed value.
+6. **Root causes:** the three named flakes (Home card drag, side-panel collapse, sidebar group collapse) each have a cause with
+   evidence (logged values or timings), or "not reproduced in N runs" with what was tried; any `src/` race is reported, not fixed.
+7. **Evidence:** 10 consecutive exit codes (each captured right after its command), before/after total time, `npm test` count.
+8. **Claude A re-run:** `npm ci` in a clean checkout of the tip, then `npm run test:electron` three times (exit codes
+   recorded) and `npm test`; compare duration with HO-014. Three green runs support the claim but do not prove it (flakes were
+   about 1 in 11).
+9. **Failure probe:** in a throwaway copy, flip one asserted condition and confirm the suite fails within the helper's timeout
+   with the label and last value (it must not hang or pass).
+10. **Decision:** APPROVED only when 1 to 9 hold; otherwise CHANGES REQUESTED with the failing item numbers. The orchestrator
+    merges after `npm test` and one `npm run test:electron` on the merge result (G2 opens when PF-020 is INTEGRATED).
+
 ---
 
 ### TASK: LS-005 — Migration 2: Learning System tables
@@ -438,7 +459,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Mastery evidence query is scoped to one journey (D11 soft reset, spec §5.4): answers of an earlier cycle are
       not returned for the current cycle, and nothing is deleted when a new cycle starts (test).
 
-**LS-007 · IPC + preload for journeys, questions, assessments, mastery** — P1 · Depends: LS-006 (APPROVED).
+**LS-007 · IPC + preload for journeys, questions, assessments, mastery** — P1 · Depends: LS-006, LS-003 (INTEGRATED). **Brief complete**; submission HO-022. Full brief: "TASK: LS-007".
 - [ ] Channels from spec §6.3 for those four areas only, each through `handle()` with `requireUser()`; one object
       argument; new preload bridge `learningData` methods (no new bridge object).
 - [ ] Contract test: every new preload method has a matching `handle()` channel and vice versa.
@@ -446,7 +467,7 @@ brief: "TASK: LS-005". Submission HO-018.
       rubric keywords anywhere in the payload (deep scan).
 - [ ] Test: renderer input with wrong types or oversize strings is rejected with a plain-language error.
 
-**LS-008 · Journey hub in the subject page (`src/learning-journey.js`)** — P1 · Depends: LS-007 (APPROVED), G2.
+**LS-008 · Journey hub in the subject page (`src/learning-journey.js`)** — P1 · Depends: LS-007 (INTEGRATED), G2. **Brief complete**; submission HO-023. Full brief: "TASK: LS-008" (its smoke step supersedes the line below: a journey starts at `material`).
 - [ ] Replaces the subject page placeholder blocks (`learning.js:156-160`) with: create journey (title, topic scope,
       optional target date), stage stepper, next-action card, journey list; `learning.js` change limited to mounting.
 - [ ] Reuses renderer helpers (`esc`, `toast`, `confirmDialog`, `announce`) through `init(H)`; no new copies.
@@ -456,14 +477,14 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Smoke step: create a journey on the fixture subject and see stage "Pre-test" (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-009 · Question bank (`src/learning-bank.js`)** — P1 · Depends: LS-007 (APPROVED), G2. Not in parallel with LS-008.
+**LS-009 · Question bank (`src/learning-bank.js`)** — P1 · Depends: LS-007, LS-008 (INTEGRATED), G2. **Brief complete**; submission HO-024. Full brief: "TASK: LS-009". Not in parallel with LS-008.
 - [ ] List per subject filtered by topic/type/review state; editor for choice, true/false, matching, explain.
 - [ ] Field errors come from `validateQuestion` and are shown next to the field.
 - [ ] Retire instead of delete when a question has been used in an assessment.
 - [ ] Smoke step: create one question of each of the four types (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-010 · Quiz panel (`src/learning-quiz.js`, `learning-quiz.css`)** — P1 · Depends: LS-008, LS-009 (APPROVED).
+**LS-010 · Quiz panel (`src/learning-quiz.js`, `learning-quiz.css`)** — P1 · Depends: LS-008, LS-009 (INTEGRATED). **Brief complete**; submission HO-025. Full brief: "TASK: LS-010".
 - [ ] Diagnostic/final mode for choice, true/false, matching, explain per spec §3.3–3.5; "I don't know"; confidence.
 - [ ] Autosave (600 ms debounce) with "Saved"/"Not saved — Retry"; cannot submit while a save is pending/failed.
 - [ ] Leave and resume restores answers and position; submit shows unanswered count first.
@@ -472,7 +493,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Smoke step: 4-question pre-test, leave mid-way, resume, submit, self-grade (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-011 · Results page** — P1 · Depends: LS-003, LS-004, LS-010 (APPROVED).
+**LS-011 · Results page** — P1 · Depends: LS-003, LS-004, LS-010 (INTEGRATED). **Brief complete**; submission HO-026. Full brief: "TASK: LS-011".
 - [ ] Score line, topic table with level chips and evidence counts, dimension bars with item counts, review answers.
 - [ ] A fixture assessment's displayed values equal `mastery-model`/`learning-insight` outputs (unit test of the view
       model + smoke screenshot).
@@ -751,10 +772,10 @@ factory that takes the open `DatabaseSync`, exposed by `createWorkspace` (`works
   topicIds?, targetDate?, status? })`. `stage` must be in `JOURNEY_STAGES`; `topicIds` must belong to the journey's
   subject; `status: 'completed'` sets `completed_at`; `parentId` must be the same subject and account.
 - **Questions.** `saveQuestion({ question })` assigns an id when absent, runs `validateQuestion`, rejects with the
-  validator's plain-language errors joined, checks `subjectId`/`topicId` ownership (topic must belong to that subject),
+  validator's plain-language errors joined with a newline (one `field: problem.` per line, text unchanged), checks `subjectId`/`topicId` ownership (topic must belong to that subject),
   enforces payload ≤ 32 KB (spec §6.2) and source ≤ 8 KB (cap chosen here), inserts or updates; an update never changes an existing
-  snapshot. `getQuestion`, `listQuestions({ subjectId, topicId?, status?, review? })`, `retireQuestion({ questionId })`
-  (status `retired`), `setReview({ questionId, review })` (sets `reviewed_at`; `approved`/`rejected` only).
+  snapshot. `getQuestion`, `listQuestions({ subjectId, topicId?, status?, review? })` (each row carries `used`: true when an `assessment_items` row references it), `retireQuestion({ questionId })`
+  (status `retired`), `deleteQuestion({ questionId })` (only when no `assessment_items` row references it, else the error "This question was used in an assessment. Retire it instead."), `setReview({ questionId, review })` (sets `reviewed_at`; `approved`/`rejected` only).
 - **Assessments.** `createAssessment({ subjectId, journeyId?, kind, title?, config, questionIds })`: one transaction
   creates the `draft` assessment and one `assessment_items` row per id, in the given order, each with
   `question_snapshot` = the stored normalized question JSON (immutable; the store never updates that column),
@@ -824,6 +845,473 @@ LS-005, LS-002 (both INTEGRATED).
 #### Deliverables
 Summary, files, the method list as built, test output with exit code, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-021**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-007 — IPC and preload for journeys, questions, assessments, mastery
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-006 is INTEGRATED, LS-003 is INTEGRATED (the `mastery:*`
+channels call `mastery-model.js`; if LS-003 is not merged, drop the two `mastery:*` channels and move them to LS-011), and
+PF-021 is INTEGRATED or not running (both edit `src/main.js`). Submission **HO-022**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Expose the learning store to the renderer through thin, authenticated, validated IPC handlers and preload methods,
+so LS-008 to LS-011 can build screens without touching main-process code.
+
+#### Context
+Handler pattern: `handle(channel, action)` in `main.js:159` wraps every action in `assertSender` and returns
+`{ ok, value }` / `{ ok: false, error }`; `error` reaches the UI unchanged unless it matches
+`/SQLITE|EACCES|ENOENT|EPERM/` (`main.js:166`, PF-017), so every message written here must be plain language and
+must not contain those words. Preload pattern: `call(channel, …args)` and the frozen `learningData` object
+(`preload.js:80`). Spec §6.3 lists the channels; ADR-005: one object argument each, thin handlers, answer keys never
+in renderer memory during an exam. `main.js` is 698 lines, so the handlers live in a new module that can be loaded
+without Electron and therefore unit-tested.
+
+#### Requirements
+New `src/learning-ipc.js` exports `registerLearningIpc({ handle, requireUser, workspace })` (no `electron` import) and
+the pure helpers it uses. `main.js` gets one `require` and one call. Each handler: `const user = requireUser()` first,
+then input checks, then one store call (`workspace.learningStore()`); the argument is **one object**; unknown keys are
+dropped; wrong types, oversize strings (ids ≤ 100 chars, text ≤ the model limits) and missing required keys fail with
+a plain-language message naming the field.
+
+| Channel | Argument | Does |
+|---|---|---|
+| `journey:list` | `{ subjectId }` | `listJourneys` |
+| `journey:create` | `{ subjectId, title?, topicIds?, targetDate?, parentId? }` | `createJourney` |
+| `journey:get` | `{ journeyId }` | `getJourney` |
+| `journey:update` | `{ journeyId, stage?, title?, topicIds?, targetDate?, status? }` | `updateJourney` |
+| `questions:list` | `{ subjectId, topicId?, status?, review? }` | `listQuestions` (rows include `used`) |
+| `questions:save` | `{ question }` | `saveQuestion`; validator errors returned as one message, one `field: problem.` per line, text unchanged |
+| `questions:retire` | `{ questionId }` | `retireQuestion` |
+| `questions:delete` | `{ questionId }` | `deleteQuestion` (only when no assessment item uses it; otherwise "This question was used in an assessment. Retire it instead.") |
+| `assessment:create` | `{ subjectId, journeyId?, kind, config }` | selects questions with `selectItems` (kind, topic scope of the journey, `config.count/types/dimensions`, `config.seed` or a random seed generated here and stored in `config`), then `createAssessment`; returns the assessment plus `{ requested, available }` so the UI can show the §3.6 "only N questions are available" message; zero available → "No questions are available yet. Add questions in the Question bank." |
+| `assessment:start` | `{ assessmentId }` | `startAssessment` |
+| `assessment:list` | `{ subjectId, journeyId?, kind?, status? }` | `listAssessments` (summaries, no snapshots) |
+| `assessment:get` | `{ assessmentId }` | `getAssessment`, **student view while `draft`/`in_progress`** (below); full view once `submitted`/`graded`/`abandoned` |
+| `assessment:saveAnswer` | `{ itemId, response }` | `saveAnswer`; returns `{ savedAt }` only |
+| `assessment:submit` | `{ assessmentId }` | `submitAssessment` |
+| `assessment:abandon` | `{ assessmentId }` | `abandonAssessment` |
+| `assessment:grade` | `{ itemId, verdicts, grader? }` | `gradeOpenAnswer`, `grader` `self` or `manual` (default `self`) |
+| `assessment:results` | `{ assessmentId }` | full view; rejected unless `submitted`/`graded` ("Submit the assessment to see results.") |
+| `mastery:journey` | `{ journeyId }` | `journeyEvidence` → `mastery-model` (default config) |
+| `mastery:subject` | `{ subjectId }` | for each topic of the subject: the level from the subject's most recent non-archived journey's evidence (D11: one cycle), with that journey's id and cycle; no journey → `[]` |
+
+Not in this task: `questions:generate`/`templates`, `assessment:check`/`acceptGrade`/`regrade`, `study:*`,
+`materials:*`, `schedule:create`, `journey:evaluation`, `assessment:retakeStatus` (later tasks).
+
+**Student view** (pure `studentAssessment(assessment)`, exported and unit-tested): items carry
+`assessment-model.stripAnswerKey(snapshot)`; `choice` options and `matching` right items are **shuffled with the
+assessment seed** (`shuffle(list, seed + ':' + itemId)`) so authored order cannot leak the key (HO-019 §4.6); the
+student's own `response`, `confidence`, `dontKnow`, `savedAt` are kept; `score`, `criteria`, `feedback`,
+`mistakeCategory`, `grader` are omitted until the assessment is submitted. `config.seed` is never sent while in
+progress.
+
+**Preload** (`learningData`, flat names, no new bridge object): `journeyList`, `journeyCreate`, `journeyGet`,
+`journeyUpdate`, `questionsList`, `questionsSave`, `questionsRetire`, `questionsDelete`, `assessmentCreate`,
+`assessmentStart`, `assessmentList`, `assessmentGet`, `assessmentSaveAnswer`, `assessmentSubmit`, `assessmentAbandon`,
+`assessmentGrade`, `assessmentResults`, `masterySubject`, `masteryJourney`; each `arg => call('<channel>', arg)`.
+
+#### Relevant Files
+New: `src/learning-ipc.js`, `test/learning-ipc.test.js`. Edited: `src/main.js` (require + one registration call),
+`src/preload.js` (the methods above). Read only: `src/learning-store.js`, `src/assessment-model.js`,
+`src/mastery-model.js`, `src/workspace.js`.
+
+#### Dependencies
+LS-006 (INTEGRATED), LS-003 (INTEGRATED, for `mastery:*`).
+
+#### Restrictions
+No SQL in this file. No renderer change. No AI, no file I/O. Do not change `handle()`, `requireUser()` or
+`assertSender`. Do not add a bridge object. No new dependency. Overlap check at release: PF-021 edits only the
+`main.js` startup block, LS-008 (next) edits renderer files; if PF-021 is running, release LS-007 after it merges.
+
+#### Acceptance Criteria
+- [ ] **Contract test:** the set of channels registered by `registerLearningIpc` (fake `handle`) equals the set of
+      `call('…')` channels for the new methods found by parsing `src/preload.js`, and every new preload method name
+      maps to exactly one channel (both directions).
+- [ ] **S6:** with a `requireUser` that throws, every channel rejects before touching the store (spy); with two users,
+      user B gets "not found" for user A's journey, question, assessment and item ids through every id-taking channel.
+- [ ] **Answer key (deep scan):** `assessment:get` on an in-progress diagnostic **and** final returns no `correct`,
+      `pairs`, `modelAnswer`, `keywords`, `explanation`, `provenance`, `quote` key anywhere in `items[].question`
+      (deep key scan), for all five question types; the scan covers the question snapshots only, because the student's
+      own `response.pairs` is allowed. After submit the full snapshot is returned.
+- [ ] Shuffle: same seed → same option order across two `assessment:get` calls; different assessments differ.
+- [ ] Input: wrong types, unknown keys, oversize strings and a non-object argument each fail with a plain-language
+      error naming the field; no message contains `SQLITE`, `EACCES`, `ENOENT` or `EPERM`.
+- [ ] `assessment:create` returns `{ requested, available }`; with fewer questions than requested it still creates with
+      what exists; with none it fails with the message above.
+- [ ] `mastery:journey` shows no evidence from an earlier cycle's journey (D11).
+- [ ] S1 (`npm test > log 2>&1; echo EXIT=$?`, count reported), S2, S3 (one object argument; module ≤ ~600 lines), S4;
+      `npm run test:electron` exit 0 (main/preload changed), run once. S5 and S7 do not apply (no renderer).
+
+#### Deliverables
+Summary, files, channel table as built, test output with exit code, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-022**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-008 — Journey hub in the subject page (`src/learning-journey.js`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-007 is INTEGRATED and PF-020 is INTEGRATED (gate G2).
+**Renderer chain LS-008 → LS-009 → LS-010 → LS-011 is strictly sequential** (all four edit `index.html`, `learning.css`,
+`electron-smoke.js`; LS-008 and LS-009 also edit `learning.js`). Submission **HO-023**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Replace the placeholder blocks on the subject page with a journey hub: create a journey, see the stage stepper and the
+next action, list past journeys, and set up (create) the pre-test assessment.
+
+#### Context
+Placeholders to replace: `placeholders()` in `src/learning.js:156` (the "Mastery Statistics" skeleton) and the subject
+page's missing journey area. `learning.js` (1114 lines) is the Learning controller; sibling modules (`learning-study.js`,
+`learning-annotate.js`) are IIFEs attached to `window`, loaded by `<script defer>` in `index.html:21-24`, and started from
+`renderer.js:1740` (`LN.init({ icon, toast, confirmDialog, reduceMotion, view, refreshNav })`). Each module defines its own
+`esc`; `announce` lives in `renderer.js:1000` and is **not** passed today. Spec §2.2 (stages), §3.1, §3.6, D7
+(one stage unlocks at a time), D12 (UI parity). Stage keys are `JOURNEY_STAGES` from `src/learning-schema.js`
+(13 stored stages). A journey is created at stage `material` (HO-018 §5.2). The IPC methods are `window.learningData.journey*`,
+`questionsList`, `assessment*` from LS-007.
+
+#### Requirements
+- New `src/learning-journey.js` (IIFE → `window.PerflwJourney`; also `module.exports` for the pure parts, like
+  `topic-model.js`). Pure, unit-tested helpers: `stageSteps(journey)` → one entry per stage in order with state
+  `done | current | locked` and a label; `nextAction(journey, context)` → `{ title, text, action }`; `setupDefaults(topicCount)`
+  (2 per topic, max 40; spec stage 4); `bankMessage({ requested, available, topics })` (the §3.6 wording).
+  DOM code: `mount(container, { subject })`, `init(H)`.
+- Hub UI on the subject page: **Journey** block with (a) "Start a learning journey" form (title default `Cycle N`,
+  topic scope checkboxes default all, optional target date) → `journeyCreate`; (b) **stepper** for the 13 stages
+  (D7: done / current / locked; a locked stage is visible, not startable; notes, files and Ask stay available at every
+  stage); (c) **next-action card** for the current stage; (d) **journey list** (title, cycle, stage, status) with open /
+  archive.
+- Stages built in M-L1: `material` (shows file/topic status; "Continue" advances with `journeyUpdate`; allowed without
+  source text, with the §3.6 note), `pretest_setup` (**assessment setup sheet**: question count default 2 per topic max 40,
+  types, source = question bank; shows `bankMessage` when the bank is short; "Create pre-test" → `assessmentCreate` kind
+  `diagnostic`; then "Start pre-test" calls `H.startQuiz({ assessmentId })` if LS-010 has provided it, else is disabled
+  with the tooltip "The quiz panel arrives with the next update"), and the later stages shown as locked with the
+  tooltip "Coming in a later update". Do not invent behavior for `diagnostic` onward (LS-010/LS-011).
+- Empty states (§3.6): no topics → "Add topics or import a file to start a journey." with Import / Add topic buttons that
+  reuse the existing topic actions; topics without source text → the message in §3.6.
+- `learning.js`: mount only. Replace the `placeholders()` use for the journey area with `PerflwJourney.mount(...)`;
+  keep the "Mastery Statistics" skeleton until LS-011 (do not delete it here). No other `learning.js` change.
+- `renderer.js`: extend the `LN.init({...})` argument with `esc` and `announce` (one line); `learning.js` forwards `H` to
+  `PerflwJourney.init(H)`. Use these (no new copies of `esc`, `toast`, `confirmDialog`, `announce`).
+- `index.html`: one `<script src="learning-journey.js" defer>` after `learning.js`'s dependencies and before `learning.js`
+  consumers (order stated in HO-023). `learning.css`: only the rules the hub needs; each new rule named in HO-023.
+- Accessibility (S5): stepper is an ordered list with `aria-current="step"`; locked stages use `aria-disabled`; every action
+  reachable by keyboard; state changes announced with `announce`; motion through `reduceMotion()` (`renderer.js:66`);
+  works at 400 px.
+
+#### Relevant Files
+New: `src/learning-journey.js`, `test/learning-journey.test.js`. Edited: `src/learning.js` (mount only),
+`src/renderer.js` (one init line), `src/index.html` (one script tag), `src/learning.css` (named rules), `test/electron-smoke.js`
+(one new step). Read only: `src/learning-schema.js`, `src/topic-model.js`, `src/learning-study.js` (module pattern),
+`docs/ui-baseline/` (current pages).
+
+#### Dependencies
+LS-007 (INTEGRATED), PF-020 (INTEGRATED, G2).
+
+#### Restrictions
+No main-process change. No new CSS token, font or component library; no new dependency. Do not add quiz, bank or results
+UI. Do not remove the "Mastery Statistics" skeleton. Overlap check at release: nothing else touches `index.html`,
+`learning.js`, `learning.css`, `renderer.js` or `electron-smoke.js` while LS-008 runs (sequential chain; PF-021 edits
+`main.js` only).
+
+#### Acceptance Criteria
+- [ ] Unit tests: `stageSteps` for each of the 13 stages (exactly one `current`, earlier `done`, later `locked`);
+      `nextAction` per M-L1 stage; `setupDefaults` (2 per topic, capped at 40, minimum 1); `bankMessage` wording.
+- [ ] **Smoke step (S5):** on the fixture subject with topics, create a journey → stepper shows **Material** current and
+      the later stages locked → Continue → **Pre-test setup** current → create the pre-test → the draft assessment exists
+      (`assessmentList`) → "Start pre-test" is disabled with its tooltip (LS-010 not merged). (Supersedes the earlier wording
+      "see stage Pre-test": a journey now starts at `material`, HO-018 §5.2.) `npm run test:electron` exit 0.
+- [ ] Empty states: subject without topics and topics without source text show the §3.6 texts (rendered check).
+- [ ] D7: clicking a locked stage does nothing and announces why; notes, files and Ask remain usable.
+- [ ] **S7 UI parity (D12):** the hub reuses `styles.css`/`learning.css` tokens, cards, buttons, chips and motion; any new CSS
+      rule is listed in HO-023. Screenshots at 1280 px and 400 px of the hub, placed beside the baseline screenshots in
+      `docs/ui-baseline/` (subject page `03-*`), in HO-023 or a linked folder.
+- [ ] Keyboard-only path: create journey, advance, create pre-test, without a mouse; focus ring visible; no
+      `document`-level key capture added.
+- [ ] S1, S2, S3 (new module ≤ ~600 lines), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-023**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-009 — Question bank (`src/learning-bank.js`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-008 is INTEGRATED (renderer chain is sequential; both
+edit `index.html`, `learning.js`, `learning.css`, `electron-smoke.js`). Submission **HO-024**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Let the student write, edit, retire and delete their own questions per subject, with field-level validation errors, so the
+pre-test setup from LS-008 has questions to draw from without any AI.
+
+#### Context
+The bank is the `question_items` table through `window.learningData.questions*` (LS-007). Questions are validated by
+`assessment-model.validateQuestion` in main; the renderer shows the errors it returns (one `field: problem.` per line,
+text unchanged). `assessment-model.js` is dual-load (`window.PerflwAssessmentModel`) and may be loaded in the renderer for
+**form hints only** (counts, limits, enums via `LIMITS`/`TYPES`); the main-process validator stays the only gate. Manual
+questions are `origin:'manual'`, `review:'approved'` (D3). Spec §3.1 (bank placement), §3.2 (QuestionList, QuestionEditor),
+§3.4, §3.6, §4.2. Modules attach to `window` and are started from `learning.js` (`H` from LS-008, which includes `esc` and
+`announce`).
+
+#### Requirements
+- New `src/learning-bank.js` (IIFE → `window.PerflwBank`; `module.exports` for the pure parts). Pure, unit-tested helpers:
+  `emptyQuestion(type, { subjectId, topicId })`; `formToQuestion(type, form)` (form state → the question object sent to
+  `questionsSave`); `questionToForm(question)`; `mapErrors(message)` → `{ [fieldPath]: text }` plus `general[]` for lines
+  without a known field (a line is `"<field path>: <problem>."`); `listFilter(questions, { topicId, type, review, status })`.
+- **List** per subject: filter by topic, type, status (active/retired) and review state; each row shows type chip, topic,
+  prompt excerpt, dimension, difficulty, review chip ("Approved" / "AI · not reviewed" / "Rejected" — words, not only
+  colour) and used-in-assessment marker; empty state: "No questions yet. Write your first question." with an Add button.
+- **Editor** (sheet or inline panel, the existing pattern from `learning.js` dialogs) for **choice** (single/multiple,
+  2–8 options, mark correct), **true/false** (statement, answer, optional justification), **matching** (2–10 pairs, optional
+  distractors on the right) and **explain** (prompt, rubric criteria with points, optional model answer). Common fields:
+  topic, dimension, difficulty, explanation, optional source reference. Essay is not offered in M-L1 (the model supports it).
+- **Field errors:** after `questionsSave` fails, show each message next to its field (`aria-describedby`, `role="alert"`
+  for the first one), focus the first invalid field, keep every entered value. Do not re-implement validation rules.
+- **Retire or delete:** a question used in an assessment can only be retired; an unused one can be deleted
+  (`questionsDelete`, with an inline confirm row, not `confirm()`); retired questions are hidden by default (filter shows
+  them) and can be restored by editing status back to active only through a "Restore" action (re-save with
+  `status:'active'`).
+- Mount: a **Question bank** block on the subject page (spec §3.1), `PerflwBank.mount(container, { subject })`; the LS-008
+  "bank short" message links to it.
+- Accessibility (S5): editor is a labelled form; option and pair rows are reachable and removable by keyboard; correct-answer
+  markers have text, not only colour; focus returns to the trigger on close; works at 400 px (matching editor stacks).
+
+#### Relevant Files
+New: `src/learning-bank.js`, `test/learning-bank.test.js`. Edited: `src/learning.js` (mount of the Question bank block only),
+`src/index.html` (script tags: `assessment-model.js` if not yet loaded, `learning-bank.js`), `src/learning.css` (named rules),
+`test/electron-smoke.js` (one step). Read only: `src/assessment-model.js`, `src/learning-journey.js` (module pattern, `H`).
+
+#### Dependencies
+LS-007 (INTEGRATED), LS-008 (INTEGRATED, sequential chain), PF-020 (G2).
+
+#### Restrictions
+No main-process change; no new IPC channel (if a channel is missing, report it). No AI, templates or draft review UI
+(LS-015, LS-017). No new dependency, token or visual language. Overlap check at release: nothing else edits `index.html`,
+`learning.js`, `learning.css` or `electron-smoke.js` while LS-009 runs.
+
+#### Acceptance Criteria
+- [ ] Unit tests: `formToQuestion`/`questionToForm` round-trip for the four types; `mapErrors` with the exact message format
+      from the validator (use real `validateQuestion` output for at least one invalid question per type); `listFilter`.
+- [ ] **Smoke step (S5):** create one question of each of the four types on the fixture subject, with one deliberately invalid
+      save first (error shown next to its field, values kept) → the list shows four rows → retire one → delete an unused
+      one → the used-in-assessment case is covered by a unit test of the delete/retire decision (the row exposes the marker
+      from `assessmentList`/the store). `npm run test:electron` exit 0.
+- [ ] Field errors are the validator's text, unchanged; no validation rule duplicated in the renderer.
+- [ ] A question created here appears as available to the LS-008 setup sheet (`bankMessage` counts it) (smoke assertion).
+- [ ] **S7 UI parity (D12):** reuses `styles.css`/`learning.css` forms, chips, buttons, sheet pattern; new CSS rules listed in
+      HO-024; screenshots at 1280 px and 400 px of list and editor beside the baseline (`docs/ui-baseline/` `03-*`, `04-*`).
+- [ ] Keyboard-only: add a choice question and fix a validation error without a mouse.
+- [ ] S1, S2, S3 (≤ ~600 lines; split `learning-bank-editor.js` if needed and say so), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-024**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-010 — Quiz panel (`src/learning-quiz.js`, `src/learning-quiz.css`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-008 and LS-009 are INTEGRATED (renderer chain is
+sequential). Submission **HO-025**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+A focus-mode quiz panel that runs a diagnostic (pre-test) or final-style assessment end to end: answer, save, leave,
+resume, submit, self-grade the open answers. No AI in M-L1.
+
+#### Context
+Spec §3.3 (layout, keyboard), §3.4 (controls per type), §3.5 (feedback states), §3.6 (loading/save errors), §3.9
+(responsive, accessible), §4.5 (when answers are evaluated). Data comes through `window.learningData.assessment*`
+(LS-007): `assessmentGet` returns the **student view** while the assessment is in progress (no key; options and matching
+right items already shuffled with the seed, HO-019 §4.6), `assessmentSaveAnswer` upserts one answer,
+`assessmentSubmit` grades and returns the full view, `assessmentGrade` records a self-grade. LS-008's setup sheet calls
+`H.startQuiz({ assessmentId })`, which this task provides. Modules attach to `window` and take `H` from `learning.js`
+(`esc`, `announce`, `toast`, `confirmDialog`, `reduceMotion`).
+
+#### Requirements
+- New `src/learning-quiz.js` (IIFE → `window.PerflwQuiz`; `module.exports` for the pure parts) and `src/learning-quiz.css`.
+  Pure, unit-tested helpers: `quizState(view, answers, flags)` (answered count, unanswered ids, per-question dot state
+  empty/answered/current/flagged); `autosave()` — a small state machine with a 600 ms debounce for choice/true-false/matching
+  and 2 s idle for text, states `saved | saving | failed`, one in-flight save per item, retry; `canSubmit(state)` (false while
+  any save is pending or failed); `responseFromForm(question, form)`; `selfGradeVerdicts(question, ticks)` (ticked → `met`,
+  unticked → `missing`).
+- **Panel:** header (✕, title, "Question n of N", progress = answered/total), question card (type chip, topic, prompt,
+  source link when present), answer control per type, confidence row (Guessing / Fairly sure / Certain → 1/2/3), "I don't
+  know" (`dontKnow:true`), footer (Previous, Flag, Next / Submit) and the question navigator (dot strip; below 600 px a
+  "3 / 12 ▾" button opening a grid).
+- **Types in M-L1:** choice (radio cards, checkbox cards when `multiple`), true/false (+ justification field when
+  `requireJustification`), matching (select left, then right; chips with ✕ to undo; stacks to one column with "Connect to…"
+  menus below 600 px; drag optional), explain (short textarea with word counter against `maxWords`). Essay is not offered.
+- **Autosave:** every change saves through `assessmentSaveAnswer`; footer shows "Saved" / "Saving…" / "Not saved — Retry".
+  The answer stays in memory on failure and **Submit is disabled until every save succeeded**.
+- **Leave and resume:** ✕ or `Esc` opens an inline "Leave? Your answers are saved." row (no `confirm()`); reopening the
+  assessment restores answers, flags and position (position and flags kept in `sessionStorage` keyed by assessment id; answers
+  come from the database).
+- **Submit:** first shows "N unanswered" with Go back / Submit anyway; then `assessmentSubmit`.
+- **After submit (no AI):** completion view; each `explain` answer shows its rubric as a checklist (spec §3.5 "Self-grade":
+  tick what the answer covered; chip "Self-graded") and saves with `assessmentGrade` (`grader:'self'`); the view says how many
+  items still need a self-grade. Results screen is LS-011: this task ends at "View results" calling
+  `H.openResults({ assessmentId })` if provided, else showing the score line only.
+- **Keyboard:** handlers are attached to the quiz root element, **never** `document` capture (HO-002 §4.6). `1–9`/`A–D`
+  choose an option, `T`/`F` true/false, `←`/`→` previous/next, `Ctrl+Enter` next/submit, `F` flag; letter keys are ignored while
+  a text field has focus. Every control reachable with Tab, visible focus ring, `role="radiogroup"` for choices, a live region
+  announces "Saved", "Not saved", question changes.
+- **Stage changes:** `H.startQuiz` on a `diagnostic` assessment with a journey calls `assessmentStart` then `journeyUpdate({ journeyId, stage: 'pretest' })`;
+  a successful submit of a `diagnostic` assessment calls `journeyUpdate({ journeyId, stage: 'diagnostic' })`. Resume does not change the stage.
+- **Motion:** card change 150 ms fade/slide through `reduceMotion()`; no animation under reduced motion.
+- **Files touched outside the new module:** `learning.js` (provide `H.startQuiz`, open the quiz from the hub, mount/unmount
+  focus mode), `index.html` (script `learning-quiz.js`, link `learning-quiz.css`, script `assessment-model.js` if LS-009 has
+  not already loaded it), `electron-smoke.js` (one step).
+
+#### Relevant Files
+New: `src/learning-quiz.js`, `src/learning-quiz.css`, `test/learning-quiz.test.js`. Edited: `src/learning.js` (hand-off only),
+`src/index.html`, `test/electron-smoke.js`. Read only: `src/learning-journey.js`, `src/learning-bank.js` (module pattern),
+`src/assessment-model.js`, `src/learning.css`, `src/styles.css`, `docs/ui-baseline/`.
+
+#### Dependencies
+LS-008, LS-009 (INTEGRATED, sequential chain), LS-007 (INTEGRATED), PF-020 (G2).
+
+#### Restrictions
+No main-process change and no new IPC channel (report a missing one). No AI, practice mode ("Check" feedback, LS-013), timer
+or exam rules (LS-023). New CSS only in `learning-quiz.css`, built from existing tokens (no new token, font or library).
+Overlap check at release: nothing else edits `index.html`, `learning.js` or `electron-smoke.js` while LS-010 runs.
+
+#### Acceptance Criteria
+- [ ] Unit tests: `quizState` (answered/unanswered/flags), `autosave` (debounce timing with a fake clock, retry after failure,
+      single in-flight save, `saved`/`failed` states), `canSubmit` false while saving or failed, `responseFromForm` per type,
+      `selfGradeVerdicts`.
+- [ ] **Smoke step (S5):** 4-question pre-test (one each: choice, true/false, matching, explain) → answer two → leave → resume
+      (answers and position restored) → answer the rest → submit shows "N unanswered" only when some are blank → submit →
+      self-grade the explain answer → score line shown; the stepper shows **Pre-test** current during the quiz and **Diagnostic** current after submit. `npm run test:electron` exit 0.
+- [ ] Failed save test (unit or smoke with a forced rejection): "Not saved — Retry" appears, Submit disabled, retry succeeds.
+- [ ] **No answer key in the renderer** during the quiz: a smoke assertion reads the in-memory view (`PerflwQuiz` debug hook or
+      a serialization of the assessment object it holds) and finds no `correct`, `modelAnswer`, `keywords`, `explanation` key in
+      any question.
+- [ ] Keyboard-only path through one full quiz; focus ring visible; shortcuts do not fire while typing; no `document`-level key
+      capture added (grep in the diff).
+- [ ] Reduced-motion: with `prefers-reduced-motion` the card change has no transition (rendered check).
+- [ ] **S7 UI parity (D12):** the panel reuses `styles.css`/`learning.css` tokens, cards, buttons, chips; every new CSS rule is in
+      `learning-quiz.css` and listed in HO-025; screenshots at 1280 px and 400 px of each question type and the completion view,
+      beside the baseline (`docs/ui-baseline/`).
+- [ ] S1, S2, S3 (≤ ~600 lines per file; split `learning-quiz-controls.js` if needed and say so), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-025**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-011 — Results page (`src/learning-results.js`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-003, LS-004 and LS-010 are INTEGRATED (renderer chain is
+sequential). Submission **HO-026**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Show a submitted assessment's results the way spec §3.7 describes: score line, topic table with level chips and
+evidence counts, dimension bars, weak topics, and a read-only review of every answer, with "Not assessed" instead of a
+number when the evidence is too thin. It also replaces the "Mastery Statistics" skeleton on the subject page with computed
+evidence.
+
+#### Context
+Inputs: `window.learningData.assessmentResults({ assessmentId })` (full snapshots, answers with `score`, `max`,
+`grader`, `confidence`, `dontKnow`, `mistakeCategory`), `masteryJourney({ journeyId })` and `masterySubject({ subjectId })`
+(levels computed in main by `mastery-model.js`, one cycle only, D11). Pure models in the renderer through their dual-load
+globals (names as built by LS-003 and LS-004; check their wrapper lines): mastery rules in spec §5.4 (levels, cap rule,
+"Not assessed" below 3 graded items, no subject-wide percentage unless every topic has evidence), mistake categories §5.2
+(`categorize`), weak-topic ranking §5.3 (`rankWeakTopics`). Spec §3.7, §3.5 (self-grade chip, provisional chip), §3.9. Modules
+attach to `window` and take `H` from `learning.js`; LS-010 provides `H.openResults` hook usage.
+
+#### Requirements
+- New `src/learning-results.js` (IIFE → `window.PerflwResults`; `module.exports` for the pure parts). Pure, unit-tested
+  `buildResultsView({ results, mastery, insight })` returning the view model the DOM code renders: `scoreLine`
+  (`{ score, max, openPending, selfGraded }` and the text, e.g. "18 of 24 points · 3 open answers self-graded"),
+  `topics[]` (`{ topicId, title, items, correct, level, levelLabel, evidenceCount, mainMistake }`), `dimensions[]` (the four
+  dimensions, each `{ dimension, score|null, items }`, `null` → "No evidence"), `weak[]` (ranked weak topics), `answers[]`
+  (per item: prompt, student answer text, correct answer text, explanation, source link data, score/max, state chip text).
+  The view model contains only values computed by the models (no re-implemented rules).
+- **Results page** (opens from the quiz completion view via `H.openResults({ assessmentId })`, and from the journey hub for a
+  submitted diagnostic): header with title and kind; score line; **topic table**; **dimension bars** each with "n items"
+  underneath; **weak topics** list (ranked; "Generate targeted notes" is LS-016, show it disabled with the tooltip "Arrives in
+  a later update"); **Review answers** (read-only; one card per question with the student's answer, the correct answer, the
+  explanation, source reference, score, and the §3.5 state: Correct / Incorrect / Partial / Self-graded / Not answered /
+  I don't know). Every state has an icon and a word, never colour only.
+- **"Not assessed":** a topic with fewer than 3 graded items shows the "Not assessed" chip and no number; the dimension bar
+  without evidence says "No evidence"; no subject-wide percentage, only "n of m topics Proficient or better" when every
+  topic has evidence (§5.4 step 5).
+- **Subject page:** replace the "Mastery Statistics" skeleton (`learning.js` `placeholders()`) with a Mastery block from
+  `masterySubject` (per topic: level chip and "n items", "Not assessed" when thin; empty state "Take a pre-test to see where
+  you stand."). `learning.js` change limited to mounting this block and removing the skeleton markup. The old manual "mastery %"
+  is untouched here (ADR-006 handles it later).
+- Provisional/self-graded answers are counted as the models count them and labelled as spec §3.5 says; nothing here changes
+  a score.
+- Accessibility (S5): tables with header cells and captions, dimension bars have text values, the page has one `h1`, focus
+  moves to the page heading on open and back to the trigger on close, works at 400 px (table becomes stacked rows).
+
+#### Relevant Files
+New: `src/learning-results.js`, `test/learning-results.test.js`. Edited: `src/learning.js` (mastery block mount, skeleton
+removal, open-results hook), `src/index.html` (script tags: `mastery-model.js`, `learning-insight.js` if not yet loaded,
+`learning-results.js`), `src/learning.css` (named rules), `test/electron-smoke.js` (one step). Read only:
+`src/mastery-model.js`, `src/learning-insight.js`, `src/learning-quiz.js`, `docs/ui-baseline/`.
+
+#### Dependencies
+LS-003, LS-004 (INTEGRATED), LS-010 (INTEGRATED, sequential chain), LS-007 (INTEGRATED), PF-020 (G2).
+
+#### Restrictions
+No main-process change and no new IPC channel (report a missing field, for example dimension scores or item counts in the
+`mastery:*` result, instead of recomputing in the renderer). No targeted notes, practice, report comparison or history
+(LS-016, LS-013, LS-022, LS-023). No new dependency, token or visual language.
+Overlap check at release: nothing else edits `index.html`, `learning.js`, `learning.css` or `electron-smoke.js` while LS-011 runs.
+
+#### Acceptance Criteria
+- [ ] **View-model unit test:** for a fixture assessment, every displayed value in `buildResultsView` (levels, evidence
+      counts, dimension scores, weak ranking, mistake categories) equals the output of `mastery-model` and `learning-insight`
+      called directly on the same evidence; the test imports the real modules (no copies).
+- [ ] "Not assessed" cases tested: topic with 2 graded items → chip and no number; dimension with < 2 items → "No evidence";
+      subject-wide line absent until every topic has evidence.
+- [ ] Score line tested with open answers pending and self-graded.
+- [ ] **Smoke step (S5):** after the LS-010 four-question pre-test is submitted and self-graded, open the results: score line,
+      topic table, four dimension bars and the review list are present and match the view model; subject page Mastery block
+      shows the same level chips. `npm run test:electron` exit 0.
+- [ ] Review answers is read-only (no editable control present) and shows the correct answer and explanation for all five types
+      that can appear (the model supports essay even though M-L1 does not offer it).
+- [ ] **S7 UI parity (D12):** reuses `styles.css`/`learning.css` tokens, cards, chips, tables; new CSS rules named in HO-026;
+      screenshots at 1280 px and 400 px of the results page and the subject page Mastery block, beside the baseline
+      (`docs/ui-baseline/` `03-*`).
+- [ ] Keyboard-only path through the results page; reduced motion respected.
+- [ ] S1, S2, S3 (≤ ~600 lines per file), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-026**.
 
 #### Review
 **Reviewed By:**  
