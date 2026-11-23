@@ -1274,6 +1274,118 @@ Not pushed, not merged.
 
 ---
 
+### HO-019 — Review of LS-002 (Claude B, branch `claude/ls-002-assessment-model-9f8216`, tip `1ab06db`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-002  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-015 (on its branch). HO-014 to HO-018 are reserved for the submissions
+> released with it. This review is HO-019.
+
+#### 1. Scope reviewed
+`git diff 243765c 1ab06db`: `src/assessment-model.js` (+553), `test/assessment-model.test.js` (+388), HO-015 in
+`coordination/HANDOFF_LOG.md`. No other file; `package.json` unchanged, module not added to `index.html` (LS-010).
+
+#### 2. Code review (read in full)
+- Wrapper matches `topic-model.js` (CommonJS, else `window.PerflwAssessmentModel`). No I/O, DOM, Electron or dependency.
+- `validateQuestion`: all §4.2 fields, counts, enums and unique ids; `correct` and `pairs` must refer to existing ids;
+  `provenance` required for `generated`; D3 review defaults right (generated → `unreviewed`, else `approved`); errors
+  name the field in plain language; unknown fields dropped; returns the normalized value.
+- `grade` matches §4.3: single choice exact, multiple `max(0, (right − wrong)/correct)`, matching `points × hits/pairs`,
+  `dontKnow` → `not_known`, empty → `not_answered`, essay/explain `pending`, true/false justification half `pending`.
+  It re-normalizes the response first, so oversized or foreign input cannot reach the scoring.
+- `scoreFromCriteria` computes the score in code from verdicts (ADR-007); a missing or invalid verdict counts as 0.
+- `selectItems`: seeded, round-robin over topics (every topic before a second item), weak ×2, `due` first, D3 rule
+  strict for diagnostic/final/retention and for a missing `kind`, lenient (not `rejected`) for practice.
+- `stripAnswerKey` is a whitelist copy, so an unknown future field cannot leak. It also removes `explanation`,
+  `source` and `provenance`.
+
+#### 3. Checks (Claude A, in Claude B's worktree, read-only)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 167 tests, 167 pass, 0 fail (base 141, +26). The diff touches exactly
+the three files above. `npm run test:electron` not required (no renderer change).
+
+#### 4. Decisions on HO-015 §6
+1. `id` required in `validateQuestion`: **accepted**. The store (LS-006) or the coach assigns ids before validation.
+2. Default points per type: **accepted** as built (choice 1, true/false 1 or 2, matching per pair, open = rubric total).
+3. `pendingPoints` on the `grade` result and the synthesized `justification` criterion: **accepted**.
+4. Text limits: **accepted**. They live in `LIMITS`, so one place changes them.
+5. `stripAnswerKey` also removes `explanation` and source quotes: **accepted**. Rubric criterion text for essay/explain
+   **stays** in the student view: it is guidance, not a key (keywords, `modelAnswer` and `correct` are removed). The
+   no-AI self-grade checklist shows criteria after the answer (§4.4), and that needs them in the renderer anyway.
+6. Matching `right` and choice `options` keep authored order. **LS-010 must `shuffle` them with the assessment seed**
+   before sending them to the renderer (acceptance item for LS-010).
+7. `due` parameter and weak ×2 whenever `weakTopics` is passed: **accepted**. LS-013 passes `weakTopics` for practice
+   only.
+8. Mistake categories other than `not_known`/`not_answered`: stay in LS-004 (`learning-insight.js`).
+
+#### 5. Notes for later tasks (no change requested)
+- `grade` expects a question that passed `validateQuestion` or a stored snapshot of one; it does not re-validate. LS-006
+  and LS-010 must grade only validated or snapshotted questions.
+- `LIMITS`, `VERDICTS` and the type lists are exported frozen. LS-003 and LS-004 import this module instead of copying
+  its constants.
+
+#### 6. Decision
+**APPROVED.** LS-002 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` on the merge
+result (conflict only in `HANDOFF_LOG.md`: keep both sides in number order). LS-003 (HO-016) and LS-004 (HO-017) may start
+from the merged `main`.
+
+---
+
+### HO-020 — Review of LS-005 (Claude B, branch `claude/nifty-haslett-6c96fe`, tip `4508711`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-005  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-018 (on its branch). This review is HO-020.
+
+#### 1. Scope reviewed
+`git diff 0dcc21b 4508711` (7 files, +3504/−10): new `src/learning-schema.js`, `test/learning-schema.test.js`,
+`test/fixtures/schema/workspace-v2.json`; one line in `src/workspace.js`; `test/db-migrate.test.js`,
+`test/planner.test.js`; HO-018. `package.json` unchanged.
+
+#### 2. Code review
+- DDL compared table by table with spec §6.2 and the brief: all 10 tables, columns, FKs, CHECK enums and the
+  composite keys (`journey_topics`, `question_review`) match. `assessments.attempt`/`retake_of` (D10),
+  `learning_materials.parent_material_id` and `side_note_ai` (D8), `learning_sessions.visited` (D13) are present.
+- Purely additive: `CREATE TABLE`/`CREATE INDEX` only; no v1 object touched. Plain `CREATE` (no `IF NOT EXISTS`) is the
+  right choice: a clash fails the step and the runner rolls it back.
+- Delete rules match §6.2: subject → cascade; topic → `topic_id` NULL on questions, items, sessions, materials and
+  removed from `journey_topics`; event → its schedule link; side note → its AI note.
+- `workspace.js`: one line, as allowed. The inline `require` inside the frozen list is a nit (a top-level `require`
+  matches the file's style); no change requested.
+- **Out-of-brief files** (`db-migrate.test.js`, `planner.test.js`), checked in the diff: only the constructor argument
+  changes (`{ migrations: V1 }`, with `V1 = WORKSPACE_MIGRATIONS.slice(0, 1)`), no assertion edited. Justified in HO-018
+  §3: these tests exercise the v1 path and break when "latest" becomes v2. **Accepted.**
+
+#### 3. Checks (Claude A, in Claude B's worktree, read-only)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 163 tests, 163 pass, 0 fail. The worktree stayed clean.
+`npm run test:electron`: Claude B reports one PASS after `npm ci`; **not re-run by Claude A** (UNVERIFIED by me). The
+orchestrator runs it on the merge result before the merge is final, as for PF-006.
+
+#### 4. Decisions on HO-018 §5
+1. Extra FK-child indexes: **kept**. They cost little and keep cascades from scanning tables.
+2. Spec discrepancy: the brief and §2.2 govern (13 stages). Claude A corrected spec §6.2 ("the 16 stage keys" → 13) and
+   §2.2 stage 2's exit ("Saved → stage `pretest`" → `material`). The column default `'material'` stays.
+3. Looser constraints (`points > 0`, `max_score > 0`, free-text `learning_materials.origin` and `mistake_category`,
+   `json_valid` guards, `review` default `'unreviewed'`): **accepted**. The pure modules validate ranges (LS-002); a later
+   range change needs no table rebuild. Note: a new CHECK on an existing column needs a table rebuild, so if
+   `learning_materials.origin` should ever be an enum, decide before the first release.
+4. Non-idempotent migration: **accepted** (ADR-004: additive, rolled back on failure, no downgrade path writes
+   `user_version`).
+
+#### 5. Decision
+**APPROVED.** LS-005 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` and
+`npm run test:electron` on the merge result (conflict only in `HANDOFF_LOG.md`, keep both sides in number order).
+LS-006 (store) may be released once LS-002 and LS-005 are merged; its brief is in preparation.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
