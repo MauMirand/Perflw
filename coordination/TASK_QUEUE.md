@@ -244,7 +244,7 @@ after a backup. Spec §6.2 lists the tables, columns and indexes, including the 
 ### TASK: PF-021 — Startup: a clear message when the databases cannot be opened, backed up or migrated
 
 **Status:** READY (queued 2026-11-23; starts when a lane is free) · **Priority:** P1, **required before the first
-release (packaged build)** · **Assigned To:** Claude B · **Submission:** next reserved number at release ·
+release (packaged build)** · **Assigned To:** Claude B · **Submission:** **HO-029** ·
 **Created By:** Claude A
 
 #### Objective
@@ -267,6 +267,19 @@ rejection, so the app likely stays running with no window; confirm this first an
 #### Restrictions
 `src/main.js` (startup block only), new `src/startup-error.js`, new tests. No change to `db-migrate.js`,
 `workspace.js` or `auth.js`.
+
+#### Sequencing (decided by Claude A, 2026-11-23)
+**Run PF-021 before LS-007** (and before LS-012). Three tasks edit `src/main.js`: PF-021 (the startup block near
+`main.js:217` and one `require`), LS-007 (one `require` and one registration call beside the handlers) and LS-012
+(`before-quit`, the `learning:deleteSubject` handler, one registration call). Git merges disjoint hunks, but the `require`
+block and the registration area are adjacent, so out-of-order merges produce avoidable conflicts in a file where a bad
+resolution breaks every IPC call. Why this order costs nothing: LS-007 cannot start before LS-006 and LS-003 are
+INTEGRATED, PF-021 is small (one block, one new module) and fits the lane PF-020 frees, and LS-012 adds startup recovery code
+that should land on top of PF-021's tested startup path.
+- Order: PF-021 → LS-007 → (renderer chain LS-008 … LS-011) → LS-012.
+- Fallback if PF-021 slips: LS-007 may start first; PF-021 then rebases onto it (resolve the `require` lines; the hunks are
+  otherwise disjoint) and re-runs `npm run test:electron`. LS-012 waits for both.
+- Lane use: PF-021 takes the lane PF-020 frees; it never needs a lane of its own beside LS-006, LS-007 and the chain.
 
 #### Acceptance Criteria
 - [ ] Unit tests for the message builder: runner error kept as is; foreign error wrapped; data path included.
