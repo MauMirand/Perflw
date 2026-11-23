@@ -1386,6 +1386,289 @@ LS-006 (store) may be released once LS-002 and LS-005 are merged; its brief is i
 
 ---
 
+### HO-016 — LS-003: Mastery model (pure module)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-003  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED  
+**Branch:** `claude/determined-ishizaka-801785` (session-generated worktree branch), base `main` at `70f0af1`  
+**Commits:** `3b3ebd6` (module + tests); this entry in a docs commit on top.
+
+#### 1. Understanding (stated before coding)
+A pure, dependency-free `src/mastery-model.js` (no I/O, DOM, Electron, SQL, AI or clock) with the same dual-load
+wrapper as `topic-model.js`/`assessment-model.js` (`window.PerflwMasteryModel`). It implements spec §5.4 over the
+answers of **one topic in one cycle** as passed by the caller (D11: the module never filters by journey, subject or
+topic). All weights and thresholds live in a frozen, versioned `DEFAULT_MASTERY_CONFIG` (D4); every result records
+`configVersion`. It does not import `assessment-model.js` or `learning-insight.js`. Not added to `index.html`.
+
+#### 2. Files
+- New: `src/mastery-model.js` (317 lines), `test/mastery-model.test.js` (283 lines). No other file changed.
+
+#### 3. API
+- Evidence item (one answer, shaped like an `assessment_answers` row joined with its item and assessment, §6.2):
+  `{ dimension, kind, score, max, gradeStatus, grader, aiConfidence?, confidence?, correct?, answeredAt?, ageDays?,
+  abandoned? }`. Evidence = `{ items, now?, lastPractisedAt? }` or a plain array.
+- Constants: `DIMENSIONS`, `KINDS`, `GRADERS` (`auto`, `ai`, `ai_accepted`, `self`, `manual`, as the §6.2 CHECK),
+  `LEVELS` (`not_assessed`, `emerging`, `developing`, `proficient`, `mastered`), `DEFAULT_MASTERY_CONFIG`
+  (deep-frozen, `version: 1`, §5.4 values).
+- `validateMasteryConfig(config) → { ok, value, errors[] }` (same error format as `validateQuestion`). Requires a
+  complete config; rejects unknown keys, out-of-range values (shares 0–1, whole-number counts, half-life > 0), all-zero
+  kind weights, and inconsistency: `proficient.recall`/`understanding` < `developing.recallOrUnderstanding`,
+  `mastered.retentionRecall` < `proficient.recall`, `proficient.minItems` < `minAssessedItems`,
+  `minDimensionItems` > `minAssessedItems`. Every other function throws `Invalid mastery config — …` on a bad config
+  (frozen configs are validated once and cached; mutable ones each call).
+- `itemWeight(answer, config) → { counted, reason, weight, factors: { kind, grader, guess, recency }, ageDays,
+  configVersion }`. Excluded answers (pending, abandoned, low-confidence provisional AI, invalid rows) get weight 0
+  and a reason.
+- `dimensionScores(evidence, config) → { configVersion, items, excluded: [{ index, reason }], dimensions: { <dim>:
+  { score | null, items, weight } } }`. `D = Σ(w·s)/Σw`, `null` below `minDimensionItems` (2).
+- `topicLevel(evidence, config) → { level, configVersion, items, excluded, dimensions, finalScore, retention,
+  recognitionOnly, allFinal }`.
+- `improvement(evidence, config) → { configVersion, dimensions: { <dim>: { diagnostic, final, delta } } }`, all
+  `null` unless both sides have ≥ 2 items.
+
+#### 4. Tests (`test/mastery-model.test.js`, 13)
+Dual-load + frozen/versioned defaults; every weight factor (kind, grader, guess incl. partial/explicit `correct`,
+recency 0/30/60 days, ISO `answeredAt`+`now`, future answers, product of factors); exclusions incl. accepted AI and
+a config that keeps low-confidence AI; worked example `1.75/2.25` and `|D − 0.78| ≤ 0.005` (with ageDays 2);
+dimension minimum; D11 (rows of other journeys are not filtered); boundaries just below/at/above for Not assessed
+(2/3 items), Developing (recognition 0.59/0.6/0.61; recall and understanding 0.39/0.4/0.41; application does not
+count), Proficient (recall 0.69/0.7/0.71, understanding 0.59/0.6/0.61, 5/6 items), Mastered (final 0.79/0.8/0.81,
+retention gap 6.99/7.01 days, retention recall 0.69/0.7/0.71, a provisional answer blocks, no retention, explicit
+`lastPractisedAt`); recognition-only cap; improvement; custom config (practice weight, Developing threshold,
+`minAssessedItems`, half-life, string `version` in every result); 23 validation cases + every function throws.
+
+#### 5. Results
+- `npm test > log 2>&1; echo EXIT=$?` → `EXIT=0`, `# tests 202`, `# pass 202`, `# fail 0` (13 new).
+- `npm run test:electron`: not run (no renderer change; not required by the brief).
+- `git diff main...HEAD`: only the two new files (+600 lines) plus this entry.
+
+#### 6. Spec ambiguities and limitations (reported, not decided)
+1. **Proficient does not require Developing.** §5.4 lists each level's own conditions; the code applies them as
+   written, so a topic with recall/understanding evidence but < 2 recognition items can be Proficient. Claude A to
+   decide whether Proficient should also require the Developing rule.
+2. **Cap rule is redundant under the defaults**: Developing already needs recall or understanding evidence, so
+   recognition-only evidence stays Emerging. The cap is kept as an explicit guard (`recognitionOnlyCap`) and
+   reported via `recognitionOnly`; no config can currently make it bind. Test asserts "≤ Developing".
+3. **Retention check** = recall answers in `retention` assessments answered ≥ `mastered.retentionDays` after the last
+   non-retention answer (or `evidence.lastPractisedAt`, e.g. a later study session from LS-012), scored with the same
+   weighted D and the same ≥ 2-item minimum. A one-item retention check therefore never reaches Mastered.
+   Answers without `answeredAt` cannot qualify.
+4. **Final-exam topic score** (D14) = unweighted Σscore/Σmax of the topic's counted `final` answers. With retakes,
+   the caller must pass only the attempt(s) that should count.
+5. **"Every open answer counted is final"** is implemented as every counted answer has `gradeStatus 'final'`
+   (deterministic answers are always final), so the module needs no question type.
+6. **"Correct" for the guess weight** = `score === max` unless the caller passes `correct`.
+7. **No clock**: recency needs `ageDays` or `answeredAt` + `now` from the caller; otherwise it is 1.
+8. **`grader: 'ai'` with `gradeStatus 'final'`** still weighs 0.75 (§4.4 says an accepted AI grade becomes
+   `ai_accepted`, so this should not occur).
+9. Results are not rounded; the UI formats them.
+
+#### 7. Commits
+`feat(learning): LS-003 pure mastery model` (`3b3ebd6`), `docs(handoff): HO-016 LS-003 submission`.
+Not pushed, not merged.
+
+---
+
+### HO-017 — LS-004: Learning insight (pure module)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-004  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED  
+**Branch:** `feature/LS-004-learning-insight`, base `main` at `70f0af1`  
+**Commits:** `eb49dbf` (module + tests); this entry in a docs commit on top.
+
+#### 1. Understanding (stated before coding)
+A pure, dependency-free `src/learning-insight.js` (no I/O, DOM, Electron, SQL or AI; no `require` at all) with the
+same dual-load wrapper as `assessment-model.js` (`window.PerflwLearningInsight` in the renderer). It assigns the §5.2
+mistake categories by code, ranks weak topics per §5.3, schedules Leitner reviews and builds the deterministic
+targeted note. It does not import `mastery-model.js` (LS-003 runs in parallel): topic levels are inputs. Not added to
+`index.html`.
+
+#### 2. Files
+- New: `src/learning-insight.js` (259 lines), `test/learning-insight.test.js`. No other file changed except this
+  entry.
+
+#### 3. API
+- Constants: `CATEGORIES` (§5.2 table order), `CATEGORY_LABELS` (plain-language labels used in notes),
+  `WEAK_LEVELS` (`not_assessed`, `emerging`, `developing`), `REVIEW_OFFSETS` `[1, 3, 7, 14, 30]`.
+- `categorize(answer, context = {}) → category | null`. `answer = { question, response, result }` (validated question,
+  normalized response, `grade()` result or the final score of an open answer). `context = { kind, answers, siblings,
+  earlier }`. Returns `null` for a pending result or a correct non-guess answer. Precedence = §5.2 table order:
+  `not_known` (dontKnow, blank, or grade's `not_known`/`not_answered`) › correct: `guess` if confidence 1 ›
+  `misconception` (score 0 and confidence 3) › `confusion` (choice: a wrong pick whose text equals the correct option
+  text of another choice question in `siblings` with the same topic; matching: two left items swapped) › `partial`
+  (essay/explain/matching/true-false-with-justification, 0 < score < max) › `recognition_only` (recall/understanding
+  item wrong while another answer in `answers`, same topic, is a correct recognition item) › `forgotten`
+  (`kind === 'retention'` and an `earlier` entry `{ questionId?, topicId, kind: 'final'|'practice', correct: true }`
+  matches; with a `questionId` it matches that question only, without one the whole topic) › `incorrect`.
+  Throws `TypeError` without `question`/`result` objects.
+- `rankWeakTopics({ topics: [{ id, position?, level? }], answers: [{ topicId, category, pending? }] }) → rows[]`.
+  Weak = level in `WEAK_LEVELS` (labels normalized: `'Not assessed'`, `'not-assessed'` → `not_assessed`; missing =
+  not assessed) or ≥ 1 misconception. Score = (misconceptions × 2 + wrong + not_known) / items, rounded to 4 places;
+  wrong = every other mistake category (`guess` and `null` are correct); 0 items → 0. Pending rows and rows for
+  unknown topics are ignored. Sorted by score desc, then `position` (default: array index), then id. Row:
+  `{ topicId, position, level, items, misconceptions, wrong, notKnown, score, reasons: ['level'?, 'misconception'?] }`.
+- `nextReview(box, correct, today)` or `nextReview({ box, correct, today }) → { box, dueOn, days }`. Correct (only
+  `true`) moves up one box, box 5 stays 5; anything else → box 1. Due offset of the new box: 1/3/7/14/30 days.
+  `today`: `"YYYY-MM-DD"` or a Date (its local calendar date); arithmetic in UTC days, so DST never shifts the date.
+  Missing box = 1 (matches `question_review.box DEFAULT 1`), out of range clamped. Invalid date → `TypeError`.
+- `targetedNote({ topic, analysisSection, missed }) → Markdown string` (deterministic, ends with one newline).
+  Sections: title, "What this topic covers" (section title, description paragraphs, key points; a placeholder if
+  none), "Your mistakes" (per missed question: prompt, "You answered", correct answer, mistake label, why, and each
+  cited source as a quote with section/page; a placeholder if none). The caller turns choice ids into text.
+- `escapeMarkdown(text)`: collapses whitespace (newlines included) to single spaces, backslash-escapes
+  `` \ ` * _ [ ] < > | ~ & # `` everywhere and `> + = -` / `1.` `1)` at the start. All user and analysis text goes
+  through it.
+
+#### 4. Tests (`test/learning-insight.test.js`, 18)
+Dual-load (require + vm browser global, no `require(` in the source); one test per category (`not_known`,
+`misconception`, `guess`, `confusion` choice and matching, `partial`, `recognition_only`, `forgotten`, `incorrect` +
+pending + TypeError), with answers built through `assessment-model.js` `validateQuestion`/`grade`; precedence test
+(dontKnow › misconception, dontKnow › forgotten, misconception › confusion, confusion › partial, partial ›
+recognition_only, confident partial stays partial, recognition_only › forgotten); weak-topic formula, reasons, guess
+counted correct, pending/unknown ignored; tie-break by array index and by explicit `position`; Leitner 1→5 offsets,
+box 5 cap, wrong → 1 from every box, year/leap-year rollover, object form, clamping, local Date across a DST change,
+invalid dates; targeted note full-string snapshot; escaping of headings, emphasis, code fences, links, HTML, pipes,
+quotes and list markers; empty note.
+
+#### 5. Results
+- `node --test test/learning-insight.test.js` → `# pass 18`, `# fail 0`.
+- `npm test > log 2>&1; echo EXIT=$?` → `EXIT=0`, `# tests 207`, `# pass 207`, `# fail 0` (base `70f0af1`: 189).
+- `npm run test:electron`: not run (no renderer change; brief: no smoke run needed).
+
+#### 6. Spec ambiguities and limitations (reported, not decided)
+1. Blank answers: §4.3 gives `not_answered`, §5.2 says blank → `not_known`. `categorize` returns `not_known` for both
+   (§5.2 governs this module); the stored `grade` category is unchanged.
+2. `misconception` needs a score of 0. A partly right answer given with confidence 3 is `partial`, not
+   `misconception` (§5.2 says "wrong"; reading partial credit as wrong seemed too harsh).
+3. `partial` covers only the types §5.2 names (open, matching) plus true/false with justification. A multiple-choice
+   answer with partial credit falls through to `recognition_only`/`forgotten`/`incorrect`.
+4. `confusion` compares option **text** (normalized case/whitespace), because option ids are local to a question.
+5. `forgotten` is topic-level unless the caller gives `questionId` in `earlier`: retention items are usually not the
+   same questions as the final (§4.1). The caller passes only results earlier than the retention check.
+6. §5.3 lists resurfacing after 1, 3 and 7 days; the LS-004 brief's 5 boxes (1/3/7/14/30) were implemented.
+7. S3 (one object argument): `categorize(answer, context)` keeps the brief's two-argument form (like LS-003's
+   `(evidence, config)`); `nextReview` accepts both the brief's positional form and one object.
+8. `rankWeakTopics` treats a missing level as Not assessed (weak). A caller that forgets levels gets every topic.
+
+---
+
+### HO-030 — Review of LS-003 (Claude B, branch `claude/determined-ishizaka-801785`, tip `d290d0b`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-003  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-016 (on its branch). HO-021 to HO-029 are reserved for released submissions
+> (LS-006 HO-021 … LS-012 HO-027, LS-034 HO-028, PF-021 HO-029). This review is HO-030.
+
+#### 1. Scope reviewed
+`git diff 70f0af1 d290d0b`: `src/mastery-model.js` (+317), `test/mastery-model.test.js` (+283), HO-016. No other file;
+`package.json` unchanged; `index.html` untouched. No `require(` in the module (it imports neither `assessment-model.js` nor
+`learning-insight.js`).
+
+#### 2. Code review (module read in full)
+- Wrapper matches `topic-model.js` (`window.PerflwMasteryModel`). No I/O, DOM, SQL, AI or clock; `now` comes from the caller.
+- `DEFAULT_MASTERY_CONFIG` is deep-frozen and versioned; all spec §5.4 values are in it (kind weights, grader weights, guess
+  weight, 30-day half-life, minimums, thresholds). `validateMasteryConfig` rejects unknown keys, out-of-range values and
+  inconsistent ladders; every function validates a custom config and throws a plain-language error.
+- Rules match §5.4: item score `score/max`; weight = kind × grader × guess × recency; `D = Σ(w·s)/Σw` with ≥ 2 items per
+  dimension; Not assessed < 3 counted items; Developing, Proficient (≥ 6 items), Mastered (final ≥ 0.8, retention ≥ 7 days with
+  Recall ≥ 0.7, every counted grade `final`); `improvement` only when both sides have ≥ 2 items. Pending, abandoned, invalid and
+  low-confidence provisional AI answers are excluded with a reason.
+- Every result carries `configVersion` (checked in `itemWeight`, `dimensionScores`, `topicLevel`, `improvement`).
+
+#### 3. Checks (Claude A, in Claude B's worktree)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 202 tests, 202 pass, 0 fail (13 new). Boundary tests sit just
+below/at/above each threshold; the worked example gives 1.75/2.25 ≈ 0.78. Spot probes: three perfect recognition items →
+`emerging`; recall 0.8 + understanding 0.7 + recognition 0.2 → `proficient` (see §4.1); empty evidence → `not_assessed`.
+`npm run test:electron` not required (no renderer change).
+
+#### 4. Decisions on HO-016 §6
+1. **Proficient does not require Developing: accepted as written.** The spec gives each level its own conditions. Requiring
+   Developing first would leave explain-only topics (no recognition items) stuck at Emerging. Revisit with real data at the D4
+   validation after M-L1.
+2. Cap rule redundant under the defaults: **accepted**; keep the guard and the `recognitionOnly` flag.
+3. Retention definition: **accepted**. LS-024 passes `lastPractisedAt` (the later of the last non-retention answer and the last
+   ended study session) from LS-012 data.
+4. Final-exam topic score is unweighted: **accepted**. With retakes (D10) the caller passes only the **latest graded final
+   attempt** for `final` rows; other kinds pass all attempts. Recorded in the LS-007 brief.
+5–9: **accepted** (counted-answer `final` check, `correct` default, caller-supplied clock, `ai` + `final` weighing 0.75,
+   unrounded results).
+
+#### 5. Note for LS-006/LS-007 (evidence mapping, no change requested here)
+The model expects `abandoned`, `aiConfidence`, `answeredAt`, `now`. The store's `journeyEvidence` rows (LS-006 brief) carry
+neither the assessment status nor an AI confidence. LS-006 should add `assessmentStatus`; LS-007 maps `abandoned =
+assessmentStatus === 'abandoned'`, sets `now` from an injected clock and `aiConfidence` from the stored AI feedback when the
+grader is `ai` (none exist before LS-018). Added to the LS-007 brief.
+
+#### 6. Decision
+**APPROVED.** LS-003 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` on the merge result
+(conflict only in `HANDOFF_LOG.md`: keep both sides in number order). LS-007 may be released once LS-006 is integrated.
+
+---
+
+### HO-031 — Review of LS-004 (Claude B, branch `feature/LS-004-learning-insight`, tip `0f122d8`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-004  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-017 (on its branch). This review is HO-031.
+
+#### 1. Scope reviewed
+`git diff 70f0af1 0f122d8`: `src/learning-insight.js` (+259), `test/learning-insight.test.js` (+295), HO-017. No other file.
+**No `require(` in the module**: it does not import `mastery-model.js` (or `assessment-model.js`); a topic level is an input
+to `rankWeakTopics`, as the brief required.
+
+#### 2. Code review (module read in full)
+- Wrapper matches `topic-model.js` (`window.PerflwLearningInsight`). Pure: no I/O, DOM, SQL, AI or clock (`today` is an input).
+- `categorize` follows the §5.2 table order: `not_known` (don't know, blank, or `grade`'s `not_answered`) › correct answer
+  (`guess` at confidence 1, otherwise `null`) › `misconception` (score 0 at confidence 3) › `confusion` (choice: a distractor
+  that is another same-topic question's correct answer, compared by text; matching: swapped pairs) › `partial` › `recognition_only`
+  › `forgotten` › `incorrect`. Pending results return `null`. "I don't know" beats a confident wrong answer, as the brief asks.
+- `rankWeakTopics`: weak = level Not assessed/Emerging/Developing or any misconception; score = (misconceptions × 2 + wrong +
+  not_known) / items; `guess` counts as correct; ties by topic position, then id. Matches §5.3.
+- `nextReview`: Leitner boxes 1–5, offsets 1/3/7/14/30 days, correct → next box (5 stays), wrong → box 1; date maths in UTC so
+  daylight-saving changes cannot shift a due date; invalid dates throw a plain-language error.
+- `targetedNote`: deterministic Markdown; all user text goes through `escapeMarkdown` (inline markers, block markers at the
+  start, whitespace collapsed so text cannot open a heading, list, quote or fence); `[`/`]` are escaped, so no link or image
+  forms; empty analysis and no mistakes give a valid note.
+
+#### 3. Checks (Claude A, in Claude B's worktree)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 207 tests, 207 pass, 0 fail (18 new: one per category, precedence,
+ranking, ties, boxes, escaping, snapshot). `npm run test:electron` not required (no renderer change).
+
+#### 4. Decisions on HO-017 §6
+1. Blank → `not_known` in `categorize` (§5.2 governs; the stored `grade` category stays `not_answered`): **accepted**.
+2. `misconception` needs score 0; a partly right answer at confidence 3 is `partial`: **accepted**.
+3. **`partial` and multiple-choice partial credit:** accepted as built for LS-004. Intended behavior, to fix with the next change to
+   this module (LS-016): a multiple-choice answer with 0 < score < max is `partial` too. It changes a label only; the weak-topic
+   score counts both as wrong. Added to the LS-016 brief.
+4. `confusion` by option text: **accepted**.
+5. `forgotten` topic-level unless `earlier` carries a `questionId`; the caller passes only results earlier than the retention
+   check: **accepted**.
+6. Five Leitner boxes (1/3/7/14/30 days): **accepted**; spec §5.3 corrected from "1, 3 and 7 days" to the five offsets.
+7. Positional `categorize(answer, context)` / `nextReview(box, correct, today)`: **accepted**. ADR-005's one-object rule
+   governs IPC, store and handlers; pure model functions keep readable positional forms, as `grade(question, response)` and
+   LS-003's `(evidence, config)` do.
+8. A missing level counts as Not assessed (weak): **accepted**. LS-011 passes levels from `mastery:journey`.
+
+#### 5. Decision
+**APPROVED.** LS-004 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` on the merge result
+(conflict only in `HANDOFF_LOG.md`: keep both sides in number order). LS-011 can use both pure models once LS-010 lands.
+
+---
+
 ### HO-021 — LS-006: Learning store (`src/learning-store.js`)
 
 **Date:** 2026-11-23  
