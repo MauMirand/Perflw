@@ -55,9 +55,10 @@ refer to `PROJECT_STATUS.md` §6.
 |---|---|---|---|---|---|
 | PF-004 | Fix the failing Electron E2E smoke test (Learning PDF stage) | P0 | **INTEGRATED** (`dfd1fbd`, 2026-11-23) | — | R2. Commits `3b8f738`, `f2006fa` on `fix/PF-004-smoke-pdf`. Independently re-verified: `npm test` 126 pass/0 fail/2 todo; smoke 3/3. Follow-ups: PF-007, PF-020. |
 | PF-005 | Upgrade Electron off EOL 38.x to a supported major | P0 | BACKLOG | PF-004; ADR-001 approval | R1, R5 |
-| PF-006 | Versioned, transactional schema migrations with a backup | P1 | **ASSIGNED** to Claude B (HO-009 released 2026-11-23); branch `refactor/PF-006-migrations` from `main` `5664f56` | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
+| PF-006 | Versioned, transactional schema migrations with a backup | P1 | **APPROVED** (HO-013, 2026-11-23): `claude/pf-006-migrations-3b8b79` @ `84741f0`; awaiting owner merge | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
 | PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **INTEGRATED** (`5664f56`, 2026-11-23; `--no-ff`, not pushed): `8475dcb` + `b545f18`, APPROVED in HO-010 | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
-| PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | BACKLOG | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
+| PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | **ASSIGNED** (lane 1, 2026-11-23; submission HO-014). Full brief: "TASK: PF-020" | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
+| PF-021 | Startup: show a plain-language dialog when the workspace or accounts database cannot be backed up or migrated, then quit (today `createWorkspace`/`createAuth` throw uncaught in `main.js:217-218`) | **P1, before any release** | READY | PF-006 merged | From HO-012 §7.2, decided in HO-013. `src/main.js` only; test by injecting a failing migration list |
 | PF-008 | `npm run verify` and Windows CI (GitHub Actions) | P1 | BACKLOG | PF-004; owner OK for Actions | R6 |
 | PF-009 | Owner decision: build expense tracking or remove the unused finance and ledger tables | P1 | BACKLOG | owner | R9; needs a decision, not code |
 | PF-010 | IPC contract test (channels in `preload.js` ↔ `handle()` in `main.js`) | P2 | BACKLOG | — | Cheap guard for about 120 channels |
@@ -130,9 +131,98 @@ PF-004 APPROVED; ADR-003 approval.
 
 ---
 
+### TASK: PF-020 — Make the Electron smoke test trustworthy (condition waits, flake root causes)
+
+**Status:** ASSIGNED (lane 1, 2026-11-23) · **Priority:** P1 (gate G2 for every LS renderer task) · **Assigned To:**
+Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
+
+#### Objective
+`npm run test:electron` passes reliably, so a failure means a real regression (gate G2).
+
+#### Context (evidence)
+- PF-004 review and HO-008/HO-010: across 9 runs on PF-007 code, 7 passed; failures were fixed-wait steps:
+  "Plan group hides Calendar, the date card and Routine only" (sidebar group measured after `sleep(250)`, was
+  `:949`) and the "collapsed column takes no width" side-panel step (measured after `sleep(450)`, was `:620`).
+  Claude B saw a Home card-drag flake (was `:1031`, about 1 in 11 runs). Line numbers are from `main` at PF-004 and
+  may have moved: find the steps by their assertion text.
+- HO-010 and HO-013 runs: 3/3 and 3/3 passed, so the flakes are rare; one green run proves nothing.
+
+#### Requirements
+1. Add one helper in the smoke file, e.g. `waitFor(check, { timeout, interval, label })`, that polls a renderer
+   condition and fails with the label and the last observed value.
+2. Replace every fixed `sleep(...)` that precedes an assertion on layout, animation or async state with `waitFor`
+   on the asserted condition. A `sleep` that only paces input (e.g. a drag sequence) may stay, with a comment.
+3. For each of the 3 named flakes: state the root cause (what the step measured too early, or what raced), with the
+   evidence (logged values, timings).
+4. Motion: where a step waits for a CSS transition, wait for `transitionend`, or for the final computed value, not
+   for a duration.
+
+#### Restrictions
+- Change `test/electron-smoke.js` only. If a root cause is in `src/` (e.g. a real race in the app), **report it in
+  HO-014 with evidence and do not fix it**; Claude A turns it into a task.
+- Do not weaken an assertion to make it pass (no larger tolerances, no removed checks) without stating why in HO-014.
+- No new dependency. Run `npm ci` in the worktree first (CLAUDE.md §6).
+
+#### Acceptance Criteria
+- [ ] No fixed `sleep` before an assertion remains (list any kept, with the reason).
+- [ ] **10 consecutive** `npm run test:electron` runs exit 0, each exit code saved right after the command; total
+      time reported (before vs after, to show the condition waits did not slow the suite much).
+- [ ] `npm test` exit 0 (count reported).
+- [ ] Root cause stated for each named flake, or "not reproduced in N runs" with what was tried.
+- [ ] Committed on the session's branch (ref and base in HO-014); HANDOFF entry HO-014.
+
+---
+
+### TASK: LS-005 — Migration 2: Learning System tables
+
+**Status:** READY when PF-006 is merged (G1) · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
+**Submission:** HO-018 · **Created By:** Claude A
+
+#### Objective
+Create the Learning System tables as workspace migration 2 through PF-006's runner, without changing any existing
+table.
+
+#### Context
+PF-006 (`src/db-migrate.js`, `WORKSPACE_MIGRATIONS` in `src/workspace.js`) runs each migration in a transaction
+after a backup. Spec §6.2 lists the tables, columns and indexes, including the owner-decision additions:
+`assessments.attempt`, `assessments.retake_of` (D10), `learning_materials.parent_material_id` + kind `side_note_ai`
+(D8), `learning_sessions.visited` (D13). ADR-004 (accepted): additive only.
+
+#### Requirements
+- New file `src/learning-schema.js` exporting `learningSchemaV2(db)`: `CREATE TABLE` and `CREATE INDEX` only, for
+  the 10 tables of spec §6.2 (`learning_journeys`, `journey_topics`, `question_items`, `assessments`,
+  `assessment_items`, `assessment_answers`, `learning_sessions`, `learning_materials`, `learning_schedule`,
+  `question_review`) with their FKs, CHECKs and the listed indexes. Every table: `id TEXT PRIMARY KEY` (except the
+  composite-key tables), `user_id TEXT NOT NULL`, `created_at`, `updated_at`.
+- `src/workspace.js`: append `{ version: 2, up: learningSchemaV2 }` to `WORKSPACE_MIGRATIONS`; no other change.
+- `learning_journeys.stage` CHECK uses exactly these keys (spec §2.2 stages 3–15):
+  `material, pretest_setup, pretest, diagnostic, targeted_notes, main_learning, practice, mistake_analysis,
+  supplementary, final_learning, final_exam, report, retention`. Export them as a frozen `JOURNEY_STAGES`.
+- FKs reference existing tables by their current names (`subjects`, `subject_topics`, `events`, `focus_entries`);
+  verify each name and key column in `workspace.js` before writing the DDL.
+- Extend `test/fixtures/schema/generate.js` use: commit a `workspace-v2.json` fixture generated from the new code.
+
+#### Restrictions
+- No `ALTER`, `DROP` or rebuild of any existing table. No store, IPC or UI code (LS-006/LS-007).
+- Files: `src/learning-schema.js` (new), `src/workspace.js` (migration list line only), `test/learning-schema.test.js`
+  (new), `test/fixtures/schema/workspace-v2.json` (new). Report anything else first.
+
+#### Acceptance Criteria
+- [ ] Fresh install reaches `user_version` 2; schema equals the v2 fixture; v1 objects unchanged vs `workspace-v1.json`.
+- [ ] Upgrade from a v1 database with rows in every existing learning-related table (`subjects`, `subject_topics`,
+      `subject_files`, `events`, `focus_entries`): rows byte-identical, new tables present, one `bak-v1-*` backup.
+- [ ] Injected failure inside migration 2 → stays v1, no new table, backup exists and passes `integrity_check`.
+- [ ] Second start is a no-op. `PRAGMA foreign_key_check` is empty after upgrade.
+- [ ] FK cascade: deleting a subject removes its journeys, questions, assessments, items, answers, sessions,
+      materials; deleting a topic sets `topic_id` NULL on questions/items (spec §6.2 notes).
+- [ ] CHECK tests: an unknown `stage`, `kind`, `type`, `review` or `grade_status` is rejected.
+- [ ] `npm test` exit 0; `npm run test:electron` exit 0 (startup path changed); HANDOFF entry HO-018.
+
+---
+
 ### TASK: PF-006 — Versioned, transactional schema migrations with a backup
 
-**Status:** ASSIGNED (HO-009 released 2026-11-23; PF-007 integrated as `5664f56`)  
+**Status:** APPROVED (HO-013, 2026-11-23); awaiting owner merge  
 **Priority:** P1 (gate G1 for the Learning System)  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -179,22 +269,22 @@ Assignment: HO-009.
 - Do not run in parallel with any other task touching `workspace.js` or `auth.js`.
 
 #### Acceptance Criteria
-- [ ] Fresh install → `user_version` 1 for both DBs; schema identical to today's (compare `sqlite_master` SQL with a
+- [x] Fresh install → `user_version` 1 for both DBs; schema identical to today's (compare `sqlite_master` SQL with a
       fixture generated from `main` before the change).
-- [ ] Old-install fixtures (at least: before `planner_items` included `'learning'`; before `subject_files.preview_name`;
+- [x] Old-install fixtures (at least: before `planner_items` included `'learning'`; before `subject_files.preview_name`;
       with `preview_name` but without `preview_status`) → reach v1 with all rows preserved and both columns present.
-- [ ] Injected failure in a test migration 2 → DB stays at v1, no open transaction, backup file exists and opens.
-- [ ] Running startup twice is a no-op (no backup, no changes).
-- [ ] Backups pruned to the newest 3.
-- [ ] `npm test` exit 0 (126 + new); `npm run test:electron` exit 0 (S5-style capture).
-- [ ] Committed on `refactor/PF-006-migrations`; HANDOFF_LOG entry; `docs/ARCHITECTURE.md` §2 updated.
+- [x] Injected failure in a test migration 2 → DB stays at v1, no open transaction, backup file exists and opens.
+- [x] Running startup twice is a no-op (no backup, no changes).
+- [x] Backups pruned to the newest 3.
+- [x] `npm test` exit 0 (126 + new); `npm run test:electron` exit 0 (S5-style capture).
+- [x] Committed on `refactor/PF-006-migrations`; HANDOFF_LOG entry; `docs/ARCHITECTURE.md` §2 updated.
 
 #### Deliverables
 Summary, files, test outputs with exit codes, commit hash, the list of tables/columns in v1, known limits.
 
 #### Review
 **Reviewed By:** Claude A  
-**Decision:** Pending
+**Decision:** **APPROVED** (HO-013, 2026-11-23), `84741f0` on `claude/pf-006-migrations-3b8b79` (generated branch name accepted). Not integrated yet.
 
 ---
 
@@ -206,14 +296,31 @@ ACCEPTED (2026-11-23). Open product questions on the learning loop: HO-011 (they
 **Branch names:** desktop sessions may create their own branch name (e.g. `claude/<name>-<id>`). That is
 acceptable; the HANDOFF entry must state the exact ref and the base commit.
 
-**Assignment rule (owner, 2026-11-23):** Claude B receives **one independently testable task at a time**. The next
-task is assigned only after the previous one is reviewed by Claude A. No batches.
+**Assignment rule (owner, 2026-11-23, revised the same day):** ~~one task at a time~~ → **up to 3 Claude B sessions
+in parallel** (owner: "we need it built and working asap"; chose "Yes, up to 3 parallel"), each in its own worktree,
+on tasks with **no file overlap**. Every task is still reviewed by Claude A before it merges, tests must pass, and
+G1/G2 stay in force. A task starts only when the tasks it depends on are APPROVED (G3 below).
+
+Lanes (2026-11-23):
+1. PF-020 (smoke flakes; G2 for every renderer task). Files: `test/electron-smoke.js` only.
+2. LS-002, then LS-003 and LS-004 in parallel (separate new files; G3 for LS-002 waived by the owner: pure module,
+   no PF-006 file).
+3. LS-005 after PF-006 is merged, then LS-006, then LS-007.
+Overlap check before each release: no two running tasks list the same file, except `coordination/HANDOFF_LOG.md`
+(see HO numbers) and `package.json` (none of the current tasks may change it).
+
+**HO numbers in parallel work:** Claude A reserves the submission entry's number at release, so parallel sessions
+never pick the same one: HO-014 PF-020, HO-015 LS-002, HO-016 LS-003, HO-017 LS-004, HO-018 LS-005. Claude A's own
+entries take the next unreserved number. Each session appends only its own entry at the end of section 4;
+merge conflicts in `HANDOFF_LOG.md` are resolved by keeping both sides in number order.
 
 **Gates that must stay intact:**
 - **G1 — Migration gate (D1):** no learning table, column or index is created before PF-006 is APPROVED and
   merged. LS-005 is the only task that creates learning tables.
 - **G2 — UI regression gate:** no LS task that changes the renderer merges before PF-004 is APPROVED and merged.
-- **G3 — Review gate:** every task is reviewed by Claude A against its acceptance criteria before the next is
+- **G3 — Review gate (revised for parallel lanes):** every task is reviewed by Claude A against its acceptance
+  criteria before it merges and before any task that **depends on it** starts. Earlier wording, kept for the record:
+  every task is reviewed by Claude A against its acceptance criteria before the next is
   assigned; only the owner merges.
 
 **Standard acceptance (applies to every LS task in addition to its own criteria):**
@@ -245,7 +352,11 @@ block LS-002.
 
 **LS-002 · `src/assessment-model.js`** — P1 · Depends: LS-001 (ADR-005 confirmed). Full spec below.
 
-**LS-003 · `src/mastery-model.js`** — P1 · Depends: LS-002 (APPROVED).
+**LS-003 · `src/mastery-model.js`** — P1 · Depends: LS-002 (APPROVED). Submission HO-016.
+- Brief: pure module, same dual-load pattern as `topic-model.js`/`assessment-model.js`; new files
+  `src/mastery-model.js`, `test/mastery-model.test.js` only; reads spec §5.1, §5.4 (incl. the D11 one-cycle scope:
+  the caller passes one journey's evidence, the module never filters by journey itself) and §4.4 grader weights.
+  No I/O, no DOM, no dependency. Standard acceptance S1–S4. Branch from `main` after LS-002 is merged.
 - [ ] Exports `DEFAULT_MASTERY_CONFIG` (frozen, with `version`) and pure functions `itemWeight`, `dimensionScores`,
       `topicLevel`, `improvement`, each taking `(evidence, config = DEFAULT_MASTERY_CONFIG)` (D4: configurable).
 - [ ] `validateMasteryConfig(config)` rejects out-of-range or inconsistent thresholds (e.g. Proficient < Developing).
@@ -254,7 +365,11 @@ block LS-002.
       outcome as expected.
 - [ ] Results include `configVersion`.
 
-**LS-004 · `src/learning-insight.js`** — P1 · Depends: LS-002 (APPROVED). May run instead of LS-003, not alongside.
+**LS-004 · `src/learning-insight.js`** — P1 · Depends: LS-002 (APPROVED). Submission HO-017. Runs **in parallel
+with LS-003** (the earlier "not alongside" was the one-task rule; the files do not overlap).
+- Brief: pure module, same pattern; new files `src/learning-insight.js`, `test/learning-insight.test.js` only;
+  reads spec §5.2, §5.3 and §4.3 categories. It must not import `mastery-model.js` (LS-003 runs at the same time);
+  where a rule needs a topic level, take it as an input. No I/O, no DOM, no dependency. S1–S4.
 - [ ] `categorize(answer, context)` implements every rule in spec §5.2, one test per category plus precedence
       (e.g. dontKnow beats misconception).
 - [ ] `rankWeakTopics(results)` per spec §5.3, tie-break by topic position; tested.
@@ -264,7 +379,8 @@ block LS-002.
 
 #### Milestone M-L1 — Offline walking skeleton (D5)
 
-**LS-005 · Migration 2: learning tables** — P1 · Depends: PF-006 (APPROVED + merged, G1), LS-001 (ADR-004 confirmed).
+**LS-005 · Migration 2: learning tables** — P1 · Depends: PF-006 (APPROVED + merged, G1), LS-001 (ADR-004 ✔). Full
+brief: "TASK: LS-005". Submission HO-018.
 - [ ] Adds exactly the tables and indexes in spec §6.2 as migration 2 through PF-006's runner; no `ALTER`/`DROP` of
       any existing table.
 - [ ] Upgrade test: a v1 fixture DB with rows in every existing learning table → migrate → new tables exist, old
@@ -501,7 +617,7 @@ otherwise wait for a review.
 
 ### TASK: LS-002 — Assessment model (pure module)
 
-**Status:** READY (ADR-005 ACCEPTED 2026-11-23). Released by Claude A after PF-006 is reviewed (G3); branch from
+**Status:** **ASSIGNED** (lane 2, 2026-11-23; G3 waived by the owner: pure module, no PF-006 file). Submission HO-015. Branch from
 the `main` that exists at release time  
 **Priority:** P1  
 **Assigned To:** Claude B  
