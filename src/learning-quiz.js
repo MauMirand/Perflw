@@ -12,11 +12,21 @@
   const TYPES = { choice: 'Multiple choice', truefalse: 'True / false', explain: 'Explain', matching: 'Matching', essay: 'Essay' };
   const KIND_LABEL = { diagnostic: 'Pre-test', practice: 'Practice', final: 'Final exam', retention: 'Retention check' };
   const DIMENSIONS = ['recognition', 'recall', 'understanding', 'application'];
+  /* The journey's 13 stages (spec §2.2, stages 3–15). `built` = the app drives it today; the others read "later" and are skipped. */
+  const STAGES = [
+    ['material', 'Material', true, 'Add topics and write questions, then take the pre-test.'],
+    ['pretest_setup', 'Pre-test setup', false], ['pretest', 'Pre-test', true, 'Finish your pre-test.'],
+    ['diagnostic', 'Diagnostic', true, 'See your results, study the weak topics, then practice or take the final.'],
+    ['targeted_notes', 'Targeted notes', false], ['main_learning', 'Main learning', true, 'Study, practice, then take the final exam.'],
+    ['practice', 'Practice', false], ['mistake_analysis', 'Mistake analysis', false], ['supplementary', 'Supplementary', false],
+    ['final_learning', 'Final learning', false], ['final_exam', 'Final exam', true, 'Finish or review your final exam.'],
+    ['report', 'Report', true, 'Open the report. Start the next cycle when you are ready.'], ['retention', 'Retention check', false],
+  ];
   let H = { toast: () => {}, announce: () => {} };
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -32,12 +42,13 @@
     ]);
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
     S.questions = questions; S.assessments = assessments;
+    S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
     S.journey = journeys.filter(j => j.status !== 'archived').pop() || null;
   }
 
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
-  const VIEWS = { add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  const VIEWS = { bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
@@ -48,6 +59,18 @@
   }
   const btn = (action, label, extra = '', cls = 'btn btn-sm') => `<button class="${cls}" type="button" data-qz="${action}" ${extra}>${label}</button>`;
   const ghost = (action, label, extra = '') => btn(action, label, extra, 'btn btn-sm btn-ghost');
+
+  function stepperView(S) {
+    const j = S.journey; if (!j) return '';
+    const at = STAGES.findIndex(x => x[0] === j.stage);
+    const steps = STAGES.map(([key, label, built], i) => {
+      const state = !built ? 'later' : i < at ? 'done' : i === at ? 'current' : 'locked';
+      const word = { later: 'later update', done: 'done', current: 'current', locked: 'not yet' }[state];
+      return `<li class="qz-step ${state}"${state === 'current' ? ' aria-current="step"' : ''}><span class="qz-step-label">${esc(label)}</span><span class="qz-step-state">${word}</span></li>`;
+    }).join('');
+    const next = (STAGES[at] || [])[3] || '';
+    return `<div class="qz-journey"><p class="qz-journey-title"><strong>${esc(j.title)}</strong> · cycle ${j.cycle} · ${esc(j.status)}</p><ol class="qz-stepper" aria-label="Journey stages">${steps}</ol>${next ? `<p class="qz-next">Next: ${esc(next)}</p>` : ''}</div>`;
+  }
 
   function homeView(S) {
     if (!S.topics.length) return '<p class="ln-soon">Add topics or import a file first, then write questions for them here.</p>';
@@ -61,13 +84,29 @@
     };
     const past = S.assessments.filter(a => a.status !== 'abandoned').map(row).join('');
     const hasDone = S.assessments.some(a => ['submitted', 'graded'].includes(a.status));
-    return `<p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.</p>
-      <div class="qz-row">${ghost('add', 'Add question', 'data-qz-focus')}
+    return `${stepperView(S)}<p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.</p>
+      <div class="qz-row">${ghost('add', 'Add question', 'data-qz-focus')}${ghost('bank', 'Question bank')}
         ${btn('start', 'Pre-test', has ? '' : 'disabled title="Add at least one question first"')}
         ${btn('practice', 'Practice', has ? 'title="Short set with feedback after each question"' : 'disabled title="Add at least one question first"')}
         ${btn('exam', 'Final exam', has ? 'title="Timed exam with a pass mark"' : 'disabled title="Add at least one question first"')}
-        ${hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : ''}</div>
+        ${hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : ''}
+        ${S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''}</div>
       ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}`;
+  }
+
+  function bankView(S) {
+    const f = S.bankFilter || {};
+    const list = S.allQuestions.filter(x => (!f.topicId || String(x.topicId) === String(f.topicId)) && (!f.type || x.type === f.type) && (f.retired ? true : x.status === 'active'));
+    const topicTitle = id => (S.topics.find(t => String(t.id) === String(id)) || {}).title || 'No topic';
+    const rows = list.map(x => `<li class="qz-q"><p class="qz-q-prompt">${esc(x.prompt)}</p><p class="ln-soon">${esc(TYPES[x.type] || x.type)} · ${esc(topicTitle(x.topicId))} · ${esc(x.dimension)} · ${['', 'easy', 'medium', 'hard'][x.difficulty] || ''}${x.used ? ' · used in an assessment' : ''}${x.status === 'retired' ? ' · retired' : ''}${x.review !== 'approved' ? ` · ${esc(x.review)}` : ''}</p>
+      <span class="qz-row">${ghost('edit', 'Edit', `data-id="${esc(x.id)}"`)}${x.status === 'active' ? ghost('retire', 'Retire', `data-id="${esc(x.id)}"`) : ghost('restore', 'Restore', `data-id="${esc(x.id)}"`)}${x.used ? '' : ghost('delete', 'Delete', `data-id="${esc(x.id)}"`)}</span>${S.confirmDelete === x.id ? `<span class="qz-confirm" role="alert">Delete this question for good? ${btn('delete-yes', 'Delete', `data-id="${esc(x.id)}"`)} ${ghost('delete-no', 'Keep')}</span>` : ''}</li>`).join('');
+    const topics = S.topics.map(t => `<option value="${esc(t.id)}"${String(f.topicId) === String(t.id) ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
+    const types = Object.keys(TYPES).map(k => `<option value="${k}"${f.type === k ? ' selected' : ''}>${TYPES[k]}</option>`).join('');
+    return `<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
+      <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired questions</label></form>
+      <p class="ln-soon" role="status">${list.length} question${list.length === 1 ? '' : 's'}.</p>
+      ${rows ? `<ul class="qz-qlist">${rows}</ul>` : '<p class="ln-soon">No questions match. Write your first one with Add question.</p>'}
+      <div class="qz-row">${btn('add', 'Add question')}${ghost('home', 'Back', 'data-qz-focus')}</div>`;
   }
 
   function addView(S) {
@@ -90,6 +129,7 @@
     }
     const dims = DIMENSIONS.map(d => `<option value="${d}"${(f.dimension || (type === 'explain' ? 'recall' : type === 'essay' ? 'understanding' : 'recognition')) === d ? ' selected' : ''}>${d[0].toUpperCase()}${d.slice(1)}</option>`).join('');
     return `<form class="qz-form" data-qz-form="add" novalidate>
+      ${S.editId ? '<p class="ln-soon">Editing a question. Past assessments keep the version they used.</p>' : ''}
       <label class="ln-field"><span>Type</span><select class="field" name="type" data-qz-type>${typeOptions}</select></label>
       <label class="ln-field"><span>Topic</span><select class="field" name="topicId">${topicOptions}</select></label>
       <label class="ln-field"><span>Question</span><textarea class="field field-area" name="prompt" rows="2" maxlength="2000" data-qz-focus>${esc(f.prompt || '')}</textarea></label>
@@ -97,7 +137,7 @@
       <span class="qz-opt-row"><label class="ln-field"><span>Skill tested</span><select class="field" name="dimension">${dims}</select></label>
         <label class="ln-field"><span>Difficulty</span><select class="field" name="difficulty">${[1, 2, 3].map(d => `<option value="${d}"${Number(f.difficulty || 2) === d ? ' selected' : ''}>${['', 'Easy', 'Medium', 'Hard'][d]}</option>`).join('')}</select></label></span>
       <label class="ln-field"><span>Explanation (shown after you answer)</span><textarea class="field field-area" name="explanation" rows="2" maxlength="2000">${esc(f.explanation || '')}</textarea></label>
-      <div class="qz-row"><button class="btn btn-sm" type="submit"${S.busy ? ' disabled' : ''}>Save question</button>${ghost('home', 'Done')}</div>
+      <div class="qz-row"><button class="btn btn-sm" type="submit"${S.busy ? ' disabled' : ''}>${S.editId ? 'Save changes' : 'Save question'}</button>${ghost(S.editId ? 'bank' : 'home', S.editId ? 'Cancel' : 'Done')}</div>
     </form>`;
   }
 
@@ -307,8 +347,17 @@
     const attempts = assessment.kind === 'final' ? await D().examAttempts({ subjectId: S.subjectId, journeyId: assessment.journeyId || undefined }) : [];
     S.results = { assessment, mastery, attempts }; S.mode = 'results'; S.errors = ''; paint(S);
   }
+  async function advance(S, submitted) {
+    // The journey moves on when a pre-test or a final is submitted (spec §2.2).
+    try {
+      if (!submitted.journeyId) return;
+      const stage = submitted.kind === 'diagnostic' ? 'diagnostic' : submitted.kind === 'final' ? 'report' : null;
+      if (stage) { await D().journeyUpdate({ journeyId: submitted.journeyId, stage }); if (S.journey) S.journey.stage = stage; }
+    } catch { /* the stage is informational; a failure here must not block the results */ }
+  }
   async function afterSubmit(S, submitted) {
     stopTimer(S);
+    await advance(S, submitted);
     if (submitted.status === 'graded') { await showResults(S, submitted.id); return; }
     S.grade = { assessment: submitted, items: submitted.items.filter(i => i.answer && i.answer.gradeStatus === 'pending' && ['explain', 'essay'].includes(i.snapshot.type)) };
     S.mode = 'grade'; S.errors = ''; paint(S);
@@ -336,7 +385,22 @@
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';
     try {
-      if (action === 'add') { S.mode = 'add'; paint(S); }
+      if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
+      else if (action === 'bank') { S.editId = null; await load(S); S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); }
+      else if (action === 'edit') { const x = S.allQuestions.find(y => y.id === target.dataset.id); S.editId = x.id; S.form = questionToForm(x); S.mode = 'add'; paint(S); }
+      else if (action === 'retire' || action === 'restore') {
+        const x = S.allQuestions.find(y => y.id === target.dataset.id);
+        if (action === 'retire') await D().questionsRetire({ questionId: x.id });
+        else await D().questionsSave({ question: { ...x, status: 'active' } });
+        await load(S); paint(S);
+      }
+      else if (action === 'delete') { S.confirmDelete = target.dataset.id; paint(S); }
+      else if (action === 'delete-no') { S.confirmDelete = null; paint(S); }
+      else if (action === 'delete-yes') { await D().questionsDelete({ questionId: target.dataset.id }); S.confirmDelete = null; await load(S); paint(S); H.toast('Question deleted.'); }
+      else if (action === 'newcycle') {
+        const parent = S.journey; const next = await D().journeyCreate({ subjectId: S.subjectId, parentId: parent.id });
+        S.journey = next; await load(S); S.journey = next; paint(S); H.toast(`Cycle ${next.cycle} started. Its statistics start at zero; cycle ${parent.cycle} stays as it was.`);
+      }
       else if (action === 'home') { stopTimer(S); await load(S); S.mode = 'home'; paint(S); }
       else if (action === 'start') { target.disabled = true; await begin(S, 'diagnostic', 'Pre-test', { count: Math.max(1, S.topics.length * 2) }); }
       else if (action === 'practice') { target.disabled = true; await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) }); }
@@ -403,6 +467,16 @@
     }
     return q;
   }
+  function questionToForm(x) {
+    const p = x.payload || {}; const f = { type: x.type, topicId: x.topicId, prompt: x.prompt, explanation: x.explanation, dimension: x.dimension, difficulty: x.difficulty };
+    if (x.type === 'choice') Object.assign(f, { opts: (p.options || []).map(o => o.text), correct: Math.max(0, (p.options || []).findIndex(o => (p.correct || []).includes(o.id))) });
+    else if (x.type === 'truefalse') Object.assign(f, { statement: p.statement, tf: String(p.correct) });
+    else if (x.type === 'matching') {
+      const pairs = new Map((p.pairs || []).map(([l, r]) => [l, r])); const used = new Set(pairs.values());
+      Object.assign(f, { left: (p.left || []).map(l => l.text), right: (p.left || []).map(l => ((p.right || []).find(r => r.id === pairs.get(l.id)) || {}).text || ''), extra: ((p.right || []).find(r => !used.has(r.id)) || {}).text || '' });
+    } else Object.assign(f, { crit: (p.rubric || []).map(c => c.criterion), minWords: p.minWords, maxWords: p.maxWords });
+    return f;
+  }
   function captureAdd(form, type) {
     const f = form.elements; const typed = { type, topicId: f.topicId.value, prompt: f.prompt.value, explanation: f.explanation.value, dimension: f.dimension.value, difficulty: Number(f.difficulty.value) };
     const radio = name => { const c = form.querySelector(`input[name="${name}"]:checked`); return c ? c.value : undefined; };
@@ -418,10 +492,10 @@
     event.preventDefault(); const kind = form.dataset.qzForm;
     try {
       if (kind === 'add') {
-        const type = form.elements.type.value; const q = readAdd(form, type); q.subjectId = S.subjectId;
+        const type = form.elements.type.value; const q = readAdd(form, type); q.subjectId = S.subjectId; if (S.editId) q.id = S.editId;
         S.form = captureAdd(form, type); S.busy = true; // keep everything typed, so a rejected question comes back as entered
         await D().questionsSave({ question: q });
-        S.form = { type, topicId: form.elements.topicId.value }; await load(S); S.busy = false; S.errors = ''; S.mode = 'add'; paint(S); H.toast('Question saved.');
+        const wasEdit = Boolean(S.editId); S.editId = null; S.form = { type, topicId: form.elements.topicId.value }; await load(S); S.busy = false; S.errors = ''; S.mode = wasEdit ? 'bank' : 'add'; paint(S); H.toast(wasEdit ? 'Question updated.' : 'Question saved.');
       } else if (kind === 'grade') {
         for (const item of S.grade.items) {
           const verdicts = {}; for (const c of item.snapshot.payload.rubric || []) verdicts[c.id] = form.elements[`${item.id}:${c.id}`].checked ? 'met' : 'missing';
@@ -445,6 +519,9 @@
       host.addEventListener('submit', event => onSubmit(S, event));
       host.addEventListener('keydown', event => onKey(S, event));
       host.addEventListener('change', event => {
+        if (S.mode === 'bank' && event.target.form && event.target.form.dataset.qzForm === 'bank-filter') {
+          const f = event.target.form.elements; S.bankFilter = { topicId: f.topicId.value, type: f.type.value, retired: f.retired.checked }; paint(S); return;
+        }
         if (event.target.matches('[data-qz-type]')) { const form = event.target.form; S.form = { type: event.target.value, topicId: form.elements.topicId.value, prompt: form.elements.prompt.value }; paint(S); return; }
         if (S.mode === 'examSetup' && event.target.form && event.target.form.dataset.qzForm === 'exam') {
           const f = event.target.form.elements; Object.assign(S.exam, { count: f.count.value, test: f.test.checked, multiplier: Number(f.multiplier.value) }); refreshPreview(S); return;

@@ -160,6 +160,37 @@ async function main() {
   }
   await shoot('quiz-2-bank');
 
+  // Question bank: list, filter, edit, retire and restore, delete with a confirm.
+  await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"bank\"]')", 'bank button');
+  await click('[data-qz="bank"]');
+  await waitFor("document.querySelectorAll('.qz-q').length === 13", 'bank lists 13 questions');
+  await fill('[data-qz-form="bank-filter"] [name="type"]', 'matching');
+  await waitFor("document.querySelectorAll('.qz-q').length === 1", 'type filter');
+  await fill('[data-qz-form="bank-filter"] [name="type"]', '');
+  await waitFor("document.querySelectorAll('.qz-q').length === 13", 'filter cleared');
+  await click('[data-qz="edit"]');
+  await waitFor("!!document.querySelector('[data-qz-form=\"add\"]') && /Editing a question/.test(document.querySelector('.qz').textContent)", 'edit form');
+  assert.equal(await evaluate("document.querySelector('[data-qz-form=\"add\"] [name=\"prompt\"]').value"), 'Which bond is ionic?', 'edit form is filled');
+  await fill('[data-qz-form="add"] [name="prompt"]', 'Which bond is ionic? (edited)');
+  await submit('[data-qz-form="add"]');
+  await waitFor("[...document.querySelectorAll('.qz-q-prompt')].some(e => e.textContent === 'Which bond is ionic? (edited)') && document.querySelectorAll('.qz-q').length === 13", 'edit saved, same count');
+  await evaluate("document.querySelectorAll('[data-qz=\"retire\"]')[12].click()");
+  await waitFor("document.querySelectorAll('.qz-q').length === 12", 'retired question leaves the list');
+  await check('[data-qz-form="bank-filter"] input[name="retired"]');
+  await waitFor("document.querySelectorAll('.qz-q').length === 13 && !!document.querySelector('[data-qz=\"restore\"]')", 'retired shown with Restore');
+  await click('[data-qz="restore"]');
+  await waitFor("!document.querySelector('[data-qz=\"restore\"]')", 'restored');
+  await evaluate("document.querySelectorAll('[data-qz=\"delete\"]')[12].click()");
+  await waitFor("!!document.querySelector('[data-qz=\"delete-yes\"]')", 'delete asks first');
+  await click('[data-qz="delete-no"]');
+  assert.equal(await evaluate("document.querySelectorAll('.qz-q').length"), 13, 'Keep leaves it');
+  await evaluate("document.querySelectorAll('[data-qz=\"delete\"]')[12].click()");
+  await waitFor("!!document.querySelector('[data-qz=\"delete-yes\"]')", 'delete asks again');
+  await click('[data-qz="delete-yes"]');
+  await waitFor("document.querySelectorAll('.qz-q').length === 12", 'deleted for good');
+  step('question bank: filter, edit, retire/restore, delete with confirm');
+
   await click('[data-qz="home"]');
   await waitFor("!!document.querySelector('[data-qz=\"start\"]') && !document.querySelector('[data-qz=\"start\"]').disabled", 'start enabled');
   await click('[data-qz="start"]');
@@ -183,10 +214,14 @@ async function main() {
   assert.ok(await evaluate("/Not assessed|Emerging|Developing|Proficient|Mastered/.test(document.querySelector('.qz-table').textContent)"), 'a level per topic');
   step(`results: ${score}${graded ? ' (self-graded)' : ''}`);
   await shoot('quiz-5-results');
-  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'pretest', 'journey moved to the pre-test stage');
+  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'diagnostic', 'journey moved to the diagnostic stage after the pre-test is submitted');
 
   // Practice: feedback after Check, key shown only for that question.
   await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('.qz-stepper')", 'journey stepper on the home screen');
+  assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Diagnostic', 'stepper shows the current stage');
+  assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 7"), 'unbuilt stages read later');
+  step('journey stepper: Diagnostic current, 7 stages marked for a later update');
   await waitFor("!!document.querySelector('[data-qz=\"practice\"]') && !document.querySelector('[data-qz=\"practice\"]').disabled", 'practice enabled');
   await click('[data-qz="practice"]');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');
@@ -228,13 +263,22 @@ async function main() {
   assert.ok(await evaluate("/side by side/.test(document.body.textContent)"), 'attempts table shown');
   step(`exam result: ${verdict}`);
   await shoot('quiz-9-exam-results');
-  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'final_exam', 'journey moved to the final stage');
+  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'report', 'journey moved to the report stage after the final is submitted');
 
   // Report: pre-test vs now.
   await click('[data-qz="report"]');
   await waitFor("!!document.querySelector('.qz-table caption') && /Pre-test vs now/.test(document.querySelector('.qz-table caption').textContent)", 'report');
   step('report: pre-test vs now by topic');
   await shoot('quiz-10-report');
+  // Next cycle: a new journey whose statistics start at zero; the old one stays.
+  await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"newcycle\"]')", 'next cycle offered after a final');
+  await click('[data-qz="newcycle"]');
+  await waitFor(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j.length === 2 && j[1].cycle === 2 && j[1].parentId === j[0].id)`, 'cycle 2 created');
+  const fresh = await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => window.learningData.masteryJourney({ journeyId: j[1].id })).then(m => m.topics.every(t => t.items === 0 && t.level === 'not_assessed'))`);
+  assert.ok(fresh, 'cycle 2 starts at zero');
+  assert.ok(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => window.learningData.masteryJourney({ journeyId: j[0].id })).then(m => m.topics.some(t => t.items > 0))`), 'cycle 1 evidence is kept');
+  step('next cycle: cycle 2 starts at zero, cycle 1 is kept');
   assert.ok(!/Unhandled|TypeError|ReferenceError/.test(stderr), `no errors on stderr: ${stderr.slice(0, 300)}`);
   step('stderr clean');
 }

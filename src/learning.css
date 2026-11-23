@@ -649,3 +649,18 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 /* Narrow widths: wide tables scroll inside the block instead of being cut off. */
 .ln-block.qz { min-width: 0; }
 .qz-table { display: block; max-width: 100%; overflow-x: auto; }
+
+/* Journey stepper and question bank list. */
+.qz-journey { margin-bottom: 12px; }
+.qz-journey-title { margin: 0 0 6px; font-size: 13px; }
+.qz-stepper { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qz-step { display: flex; flex-direction: column; gap: 1px; padding: 5px 10px; border-radius: 8px; background: var(--raised); font-size: 12px; min-width: 84px; }
+.qz-step-state { font-size: 10.5px; color: var(--dim); }
+.qz-step.done .qz-step-label { color: var(--text-2); }
+.qz-step.current { outline: 1.5px solid var(--text); }
+.qz-step.later { opacity: .55; }
+.qz-next { margin: 8px 0 0; font-size: 13px; color: var(--text-2); }
+.qz-qlist { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.qz-q { padding: 10px 12px; border-radius: 8px; background: #232222; }
+.qz-q p { margin: 2px 0; }
+.qz-q-prompt { font-weight: 600; font-size: 14px; }
