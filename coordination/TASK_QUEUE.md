@@ -422,7 +422,7 @@ block LS-002.
 
 **LS-002 · `src/assessment-model.js`** — P1 · Depends: LS-001 (ADR-005 confirmed). Full spec below.
 
-**LS-003 · `src/mastery-model.js`** — P1 · Depends: LS-002 (INTEGRATED). **APPROVED** (HO-030, `d290d0b` on `claude/determined-ishizaka-801785`, code `3b3ebd6`, `npm test` 202/202). Submission HO-016.
+**LS-003 · `src/mastery-model.js`** — P1 · Depends: LS-002 (INTEGRATED). **INTEGRATED** (`88916d2`; APPROVED in HO-030, `d290d0b` on `claude/determined-ishizaka-801785`, code `3b3ebd6`, `npm test` 202/202). Submission HO-016.
 - Brief: pure module, same dual-load pattern as `topic-model.js`/`assessment-model.js`; new files
   `src/mastery-model.js`, `test/mastery-model.test.js` only; reads spec §5.1, §5.4 (incl. the D11 one-cycle scope:
   the caller passes one journey's evidence, the module never filters by journey itself) and §4.4 grader weights.
@@ -435,7 +435,7 @@ block LS-002.
       outcome as expected.
 - [ ] Results include `configVersion`.
 
-**LS-004 · `src/learning-insight.js`** — P1 · Depends: LS-002 (INTEGRATED). **APPROVED** (HO-031, `0f122d8` on `feature/LS-004-learning-insight`, code `eb49dbf`, `npm test` 207/207). Submission HO-017. Runs **in parallel
+**LS-004 · `src/learning-insight.js`** — P1 · Depends: LS-002 (INTEGRATED). **INTEGRATED** (`1b2a2aa`; APPROVED in HO-031, `0f122d8` on `feature/LS-004-learning-insight`, code `eb49dbf`, `npm test` 207/207). Submission HO-017. Runs **in parallel
 with LS-003** (the earlier "not alongside" was the one-task rule; the files do not overlap).
 - Brief: pure module, same pattern; new files `src/learning-insight.js`, `test/learning-insight.test.js` only;
   reads spec §5.2, §5.3 and §4.3 categories. It must not import `mastery-model.js` (LS-003 runs at the same time);

@@ -126,8 +126,8 @@ Objectives:
 | LS-005 | Migration 2: learning tables | Claude B (lane 3) | INTEGRATED (`c7b1957`; APPROVED HO-020) |
 | PF-020 | Smoke-test flakes (gate G2) | Claude B (lane 1) | ASSIGNED 2026-11-23 |
 | LS-002 | Assessment model (pure) | Claude B (lane 2) | INTEGRATED (`419eac7`; APPROVED HO-019). LS-003 (HO-016), LS-004 (HO-017) and LS-006 (HO-021) are released |
-| LS-003 | Mastery model (pure) | Claude B | APPROVED (HO-030, `d290d0b`); awaiting merge by the orchestrator |
-| LS-004 | Learning insight (pure) | Claude B | APPROVED (HO-031, `0f122d8`); awaiting merge by the orchestrator |
+| LS-003 | Mastery model (pure) | Claude B | INTEGRATED (`88916d2`; APPROVED HO-030) |
+| LS-004 | Learning insight (pure) | Claude B | INTEGRATED (`1b2a2aa`; APPROVED HO-031) |
 | LS-001 | Learning System spec | Claude A | DONE: D1–D5 approved; ADR-004/005/008 ACCEPTED (2026-11-23); owner decisions D6–D17 recorded (HO-011) |
 
 Update this section whenever a task becomes active.
