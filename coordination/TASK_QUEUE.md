@@ -446,7 +446,7 @@ brief: "TASK: LS-005". Submission HO-018.
       rubric keywords anywhere in the payload (deep scan).
 - [ ] Test: renderer input with wrong types or oversize strings is rejected with a plain-language error.
 
-**LS-008 · Journey hub in the subject page (`src/learning-journey.js`)** — P1 · Depends: LS-007 (APPROVED), G2.
+**LS-008 · Journey hub in the subject page (`src/learning-journey.js`)** — P1 · Depends: LS-007 (INTEGRATED), G2. **Brief complete**; submission HO-023. Full brief: "TASK: LS-008" (its smoke step supersedes the line below: a journey starts at `material`).
 - [ ] Replaces the subject page placeholder blocks (`learning.js:156-160`) with: create journey (title, topic scope,
       optional target date), stage stepper, next-action card, journey list; `learning.js` change limited to mounting.
 - [ ] Reuses renderer helpers (`esc`, `toast`, `confirmDialog`, `announce`) through `init(H)`; no new copies.
@@ -931,6 +931,98 @@ No SQL in this file. No renderer change. No AI, no file I/O. Do not change `hand
 #### Deliverables
 Summary, files, channel table as built, test output with exit code, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-022**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-008 — Journey hub in the subject page (`src/learning-journey.js`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-007 is INTEGRATED and PF-020 is INTEGRATED (gate G2).
+**Renderer chain LS-008 → LS-009 → LS-010 → LS-011 is strictly sequential** (all four edit `index.html`, `learning.css`,
+`electron-smoke.js`; LS-008 and LS-009 also edit `learning.js`). Submission **HO-023**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Replace the placeholder blocks on the subject page with a journey hub: create a journey, see the stage stepper and the
+next action, list past journeys, and set up (create) the pre-test assessment.
+
+#### Context
+Placeholders to replace: `placeholders()` in `src/learning.js:156` (the "Mastery Statistics" skeleton) and the subject
+page's missing journey area. `learning.js` (1114 lines) is the Learning controller; sibling modules (`learning-study.js`,
+`learning-annotate.js`) are IIFEs attached to `window`, loaded by `<script defer>` in `index.html:21-24`, and started from
+`renderer.js:1740` (`LN.init({ icon, toast, confirmDialog, reduceMotion, view, refreshNav })`). Each module defines its own
+`esc`; `announce` lives in `renderer.js:1000` and is **not** passed today. Spec §2.2 (stages), §3.1, §3.6, D7
+(one stage unlocks at a time), D12 (UI parity). Stage keys are `JOURNEY_STAGES` from `src/learning-schema.js`
+(13 stored stages). A journey is created at stage `material` (HO-018 §5.2). The IPC methods are `window.learningData.journey*`,
+`questionsList`, `assessment*` from LS-007.
+
+#### Requirements
+- New `src/learning-journey.js` (IIFE → `window.PerflwJourney`; also `module.exports` for the pure parts, like
+  `topic-model.js`). Pure, unit-tested helpers: `stageSteps(journey)` → one entry per stage in order with state
+  `done | current | locked` and a label; `nextAction(journey, context)` → `{ title, text, action }`; `setupDefaults(topicCount)`
+  (2 per topic, max 40; spec stage 4); `bankMessage({ requested, available, topics })` (the §3.6 wording).
+  DOM code: `mount(container, { subject })`, `init(H)`.
+- Hub UI on the subject page: **Journey** block with (a) "Start a learning journey" form (title default `Cycle N`,
+  topic scope checkboxes default all, optional target date) → `journeyCreate`; (b) **stepper** for the 13 stages
+  (D7: done / current / locked; a locked stage is visible, not startable; notes, files and Ask stay available at every
+  stage); (c) **next-action card** for the current stage; (d) **journey list** (title, cycle, stage, status) with open /
+  archive.
+- Stages built in M-L1: `material` (shows file/topic status; "Continue" advances with `journeyUpdate`; allowed without
+  source text, with the §3.6 note), `pretest_setup` (**assessment setup sheet**: question count default 2 per topic max 40,
+  types, source = question bank; shows `bankMessage` when the bank is short; "Create pre-test" → `assessmentCreate` kind
+  `diagnostic`; then "Start pre-test" calls `H.startQuiz({ assessmentId })` if LS-010 has provided it, else is disabled
+  with the tooltip "The quiz panel arrives with the next update"), and the later stages shown as locked with the
+  tooltip "Coming in a later update". Do not invent behavior for `diagnostic` onward (LS-010/LS-011).
+- Empty states (§3.6): no topics → "Add topics or import a file to start a journey." with Import / Add topic buttons that
+  reuse the existing topic actions; topics without source text → the message in §3.6.
+- `learning.js`: mount only. Replace the `placeholders()` use for the journey area with `PerflwJourney.mount(...)`;
+  keep the "Mastery Statistics" skeleton until LS-011 (do not delete it here). No other `learning.js` change.
+- `renderer.js`: extend the `LN.init({...})` argument with `esc` and `announce` (one line); `learning.js` forwards `H` to
+  `PerflwJourney.init(H)`. Use these (no new copies of `esc`, `toast`, `confirmDialog`, `announce`).
+- `index.html`: one `<script src="learning-journey.js" defer>` after `learning.js`'s dependencies and before `learning.js`
+  consumers (order stated in HO-023). `learning.css`: only the rules the hub needs; each new rule named in HO-023.
+- Accessibility (S5): stepper is an ordered list with `aria-current="step"`; locked stages use `aria-disabled`; every action
+  reachable by keyboard; state changes announced with `announce`; motion through `reduceMotion()` (`renderer.js:66`);
+  works at 400 px.
+
+#### Relevant Files
+New: `src/learning-journey.js`, `test/learning-journey.test.js`. Edited: `src/learning.js` (mount only),
+`src/renderer.js` (one init line), `src/index.html` (one script tag), `src/learning.css` (named rules), `test/electron-smoke.js`
+(one new step). Read only: `src/learning-schema.js`, `src/topic-model.js`, `src/learning-study.js` (module pattern),
+`docs/ui-baseline/` (current pages).
+
+#### Dependencies
+LS-007 (INTEGRATED), PF-020 (INTEGRATED, G2).
+
+#### Restrictions
+No main-process change. No new CSS token, font or component library; no new dependency. Do not add quiz, bank or results
+UI. Do not remove the "Mastery Statistics" skeleton. Overlap check at release: nothing else touches `index.html`,
+`learning.js`, `learning.css`, `renderer.js` or `electron-smoke.js` while LS-008 runs (sequential chain; PF-021 edits
+`main.js` only).
+
+#### Acceptance Criteria
+- [ ] Unit tests: `stageSteps` for each of the 13 stages (exactly one `current`, earlier `done`, later `locked`);
+      `nextAction` per M-L1 stage; `setupDefaults` (2 per topic, capped at 40, minimum 1); `bankMessage` wording.
+- [ ] **Smoke step (S5):** on the fixture subject with topics, create a journey → stepper shows **Material** current and
+      the later stages locked → Continue → **Pre-test setup** current → create the pre-test → the draft assessment exists
+      (`assessmentList`) → "Start pre-test" is disabled with its tooltip (LS-010 not merged). (Supersedes the earlier wording
+      "see stage Pre-test": a journey now starts at `material`, HO-018 §5.2.) `npm run test:electron` exit 0.
+- [ ] Empty states: subject without topics and topics without source text show the §3.6 texts (rendered check).
+- [ ] D7: clicking a locked stage does nothing and announces why; notes, files and Ask remain usable.
+- [ ] **S7 UI parity (D12):** the hub reuses `styles.css`/`learning.css` tokens, cards, buttons, chips and motion; any new CSS
+      rule is listed in HO-023. Screenshots at 1280 px and 400 px of the hub, placed beside the baseline screenshots in
+      `docs/ui-baseline/` (subject page `03-*`), in HO-023 or a linked folder.
+- [ ] Keyboard-only path: create journey, advance, create pre-test, without a mouse; focus ring visible; no
+      `document`-level key capture added.
+- [ ] S1, S2, S3 (new module ≤ ~600 lines), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-023**.
 
 #### Review
 **Reviewed By:**  
