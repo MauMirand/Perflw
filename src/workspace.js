@@ -2,18 +2,19 @@ const { DatabaseSync } = require('node:sqlite');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createAutomationStore } = require('./automation/store');
-const { createConnectionStore } = require('./automation/connections');
-const { createSessionStore } = require('./automation/sessions');
+const { createAutomationStore, createAutomationSchema } = require('./automation/store');
+const { createConnectionStore, createConnectionSchema } = require('./automation/connections');
+const { createSessionStore, createSessionSchema } = require('./automation/sessions');
+const { migrate } = require('./db-migrate');
 
 const fail = message => { throw new Error(message); };
 const now = () => new Date().toISOString();
 
-function createWorkspace(root) {
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(path.join(root, 'workspace.sqlite'));
-  db.exec(`PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS projects (
+/* Migration 1 = the schema as it was before versioning (PF-006). It is the former startup bootstrap, unchanged in
+   effect and idempotent, so a new file and every older install (with any subset of the old columns) end at the same
+   version-1 shape. It runs inside the migration runner's transaction. */
+function workspaceSchemaV1(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
       created_at TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active',
       target_date TEXT, color TEXT NOT NULL DEFAULT '#8b5cf6', archived_at TEXT, updated_at TEXT NOT NULL DEFAULT ''
@@ -136,11 +137,11 @@ function createWorkspace(root) {
       role TEXT NOT NULL CHECK(role IN ('user','assistant','system')), content TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(user_id, chat_id, created_at);`);
-  // Existing databases: widen the kind CHECK so 'learning' items can be stored.
+  // Existing databases: widen the kind CHECK so 'learning' items can be stored. The rebuild runs inside the
+  // migration's transaction, so a failure part-way rolls back to the old table instead of leaving a transaction open.
   const plannerSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='planner_items'").get() || {}).sql || '';
   if (plannerSql && !plannerSql.includes("'learning'")) {
-    db.exec(`BEGIN;
-      ALTER TABLE planner_items RENAME TO planner_items_old;
+    db.exec(`ALTER TABLE planner_items RENAME TO planner_items_old;
       CREATE TABLE planner_items (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('plan','whim','routine','activity','learning')),
@@ -149,8 +150,7 @@ function createWorkspace(root) {
       );
       INSERT INTO planner_items SELECT id,user_id,kind,text,day,time,done_on,position,created_at,updated_at FROM planner_items_old;
       DROP TABLE planner_items_old;
-      CREATE INDEX IF NOT EXISTS planner_items_user_kind ON planner_items(user_id, kind, day);
-      COMMIT;`);
+      CREATE INDEX IF NOT EXISTS planner_items_user_kind ON planner_items(user_id, kind, day);`);
   }
   // Chat categories (Work / Learning / Personal) for the chat page tabs.
   if (!db.prepare("PRAGMA table_info(chat_sessions)").all().some(col => col.name === 'category'))
@@ -186,8 +186,26 @@ function createWorkspace(root) {
   // Viewer support: a topic's page in its file's PDF view; a file's PDF copy made by Office (Word/PowerPoint uploads).
   if (!db.prepare('PRAGMA table_info(subject_topics)').all().some(col => col.name === 'page'))
     db.exec('ALTER TABLE subject_topics ADD COLUMN page INTEGER');
-  if (!db.prepare('PRAGMA table_info(subject_files)').all().some(col => col.name === 'preview_name'))
-    db.exec("ALTER TABLE subject_files ADD COLUMN preview_name TEXT; ALTER TABLE subject_files ADD COLUMN preview_status TEXT NOT NULL DEFAULT 'none'");
+  // Each column is checked on its own: an install can have preview_name without preview_status.
+  const fileColumns = new Set(db.prepare('PRAGMA table_info(subject_files)').all().map(col => col.name));
+  if (!fileColumns.has('preview_name')) db.exec('ALTER TABLE subject_files ADD COLUMN preview_name TEXT');
+  if (!fileColumns.has('preview_status')) db.exec("ALTER TABLE subject_files ADD COLUMN preview_status TEXT NOT NULL DEFAULT 'none'");
+  // Tables owned by the automation modules share this database (same order as their former constructors ran).
+  createAutomationSchema(db);
+  createSessionSchema(db);
+  createConnectionSchema(db);
+}
+
+const WORKSPACE_MIGRATIONS = Object.freeze([{ version: 1, up: workspaceSchemaV1 }]);
+
+function createWorkspace(root, { migrations = WORKSPACE_MIGRATIONS } = {}) {
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const file = path.join(root, 'workspace.sqlite');
+  const db = new DatabaseSync(file);
+  try {
+    db.exec('PRAGMA foreign_keys = ON'); // per connection; a no-op inside a transaction, so set before migrating
+    migrate(db, { name: 'workspace', migrations, backup: file });
+  } catch (error) { db.close(); throw error; }
   const topicModel = require('./topic-model');
   const automation = createAutomationStore(db);
   const sessions = createSessionStore(db);
@@ -907,4 +925,4 @@ function createWorkspace(root) {
     close:()=>db.close() };
 }
 
-module.exports = { createWorkspace };
+module.exports = { createWorkspace, WORKSPACE_MIGRATIONS };

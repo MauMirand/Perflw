@@ -7,7 +7,8 @@ const { cleanGraph, emptyGraph, LIMITS } = require('./engine');
 const fail = message => { throw new Error(message); };
 const now = () => new Date().toISOString();
 
-function createAutomationStore(db) {
+/* Schema for agents and workflows. Called by workspace migration 1 (src/workspace.js), not by the store. */
+function createAutomationSchema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
       instructions TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -18,6 +19,9 @@ function createAutomationStore(db) {
       graph_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS workflows_user_updated ON workflows(user_id, updated_at);`);
+}
+
+function createAutomationStore(db) {
 
   function required(value, label, max) {
     if (typeof value !== 'string' || !value.trim() || value.trim().length > max) fail(`${label} must be 1–${max} characters.`);
@@ -115,4 +119,4 @@ function createAutomationStore(db) {
   return { listAgents, getAgent, saveAgent, mirrorAgent, deleteAgent, listWorkflows, getWorkflow, createWorkflow, updateWorkflow, duplicateWorkflow, deleteWorkflow };
 }
 
-module.exports = { createAutomationStore };
+module.exports = { createAutomationStore, createAutomationSchema };
