@@ -472,7 +472,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Smoke step: 4-question pre-test, leave mid-way, resume, submit, self-grade (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-011 · Results page** — P1 · Depends: LS-003, LS-004, LS-010 (APPROVED).
+**LS-011 · Results page** — P1 · Depends: LS-003, LS-004, LS-010 (INTEGRATED). **Brief complete**; submission HO-026. Full brief: "TASK: LS-011".
 - [ ] Score line, topic table with level chips and evidence counts, dimension bars with item counts, review answers.
 - [ ] A fixture assessment's displayed values equal `mastery-model`/`learning-insight` outputs (unit test of the view
       model + smoke screenshot).
@@ -1158,6 +1158,8 @@ right items already shuffled with the seed, HO-019 §4.6), `assessmentSaveAnswer
   choose an option, `T`/`F` true/false, `←`/`→` previous/next, `Ctrl+Enter` next/submit, `F` flag; letter keys are ignored while
   a text field has focus. Every control reachable with Tab, visible focus ring, `role="radiogroup"` for choices, a live region
   announces "Saved", "Not saved", question changes.
+- **Stage changes:** `H.startQuiz` on a `diagnostic` assessment with a journey calls `assessmentStart` then `journeyUpdate({ journeyId, stage: 'pretest' })`;
+  a successful submit of a `diagnostic` assessment calls `journeyUpdate({ journeyId, stage: 'diagnostic' })`. Resume does not change the stage.
 - **Motion:** card change 150 ms fade/slide through `reduceMotion()`; no animation under reduced motion.
 - **Files touched outside the new module:** `learning.js` (provide `H.startQuiz`, open the quiz from the hub, mount/unmount
   focus mode), `index.html` (script `learning-quiz.js`, link `learning-quiz.css`, script `assessment-model.js` if LS-009 has
@@ -1182,7 +1184,7 @@ Overlap check at release: nothing else edits `index.html`, `learning.js` or `ele
       `selfGradeVerdicts`.
 - [ ] **Smoke step (S5):** 4-question pre-test (one each: choice, true/false, matching, explain) → answer two → leave → resume
       (answers and position restored) → answer the rest → submit shows "N unanswered" only when some are blank → submit →
-      self-grade the explain answer → score line shown. `npm run test:electron` exit 0.
+      self-grade the explain answer → score line shown; the stepper shows **Pre-test** current during the quiz and **Diagnostic** current after submit. `npm run test:electron` exit 0.
 - [ ] Failed save test (unit or smoke with a forced rejection): "Not saved — Retry" appears, Submit disabled, retry succeeds.
 - [ ] **No answer key in the renderer** during the quiz: a smoke assertion reads the in-memory view (`PerflwQuiz` debug hook or
       a serialization of the assessment object it holds) and finds no `correct`, `modelAnswer`, `keywords`, `explanation` key in
@@ -1198,6 +1200,97 @@ Overlap check at release: nothing else edits `index.html`, `learning.js` or `ele
 #### Deliverables
 Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-025**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-011 — Results page (`src/learning-results.js`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-003, LS-004 and LS-010 are INTEGRATED (renderer chain is
+sequential). Submission **HO-026**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Show a submitted assessment's results the way spec §3.7 describes: score line, topic table with level chips and
+evidence counts, dimension bars, weak topics, and a read-only review of every answer, with "Not assessed" instead of a
+number when the evidence is too thin. It also replaces the "Mastery Statistics" skeleton on the subject page with computed
+evidence.
+
+#### Context
+Inputs: `window.learningData.assessmentResults({ assessmentId })` (full snapshots, answers with `score`, `max`,
+`grader`, `confidence`, `dontKnow`, `mistakeCategory`), `masteryJourney({ journeyId })` and `masterySubject({ subjectId })`
+(levels computed in main by `mastery-model.js`, one cycle only, D11). Pure models in the renderer through their dual-load
+globals (names as built by LS-003 and LS-004; check their wrapper lines): mastery rules in spec §5.4 (levels, cap rule,
+"Not assessed" below 3 graded items, no subject-wide percentage unless every topic has evidence), mistake categories §5.2
+(`categorize`), weak-topic ranking §5.3 (`rankWeakTopics`). Spec §3.7, §3.5 (self-grade chip, provisional chip), §3.9. Modules
+attach to `window` and take `H` from `learning.js`; LS-010 provides `H.openResults` hook usage.
+
+#### Requirements
+- New `src/learning-results.js` (IIFE → `window.PerflwResults`; `module.exports` for the pure parts). Pure, unit-tested
+  `buildResultsView({ results, mastery, insight })` returning the view model the DOM code renders: `scoreLine`
+  (`{ score, max, openPending, selfGraded }` and the text, e.g. "18 of 24 points · 3 open answers self-graded"),
+  `topics[]` (`{ topicId, title, items, correct, level, levelLabel, evidenceCount, mainMistake }`), `dimensions[]` (the four
+  dimensions, each `{ dimension, score|null, items }`, `null` → "No evidence"), `weak[]` (ranked weak topics), `answers[]`
+  (per item: prompt, student answer text, correct answer text, explanation, source link data, score/max, state chip text).
+  The view model contains only values computed by the models (no re-implemented rules).
+- **Results page** (opens from the quiz completion view via `H.openResults({ assessmentId })`, and from the journey hub for a
+  submitted diagnostic): header with title and kind; score line; **topic table**; **dimension bars** each with "n items"
+  underneath; **weak topics** list (ranked; "Generate targeted notes" is LS-016, show it disabled with the tooltip "Arrives in
+  a later update"); **Review answers** (read-only; one card per question with the student's answer, the correct answer, the
+  explanation, source reference, score, and the §3.5 state: Correct / Incorrect / Partial / Self-graded / Not answered /
+  I don't know). Every state has an icon and a word, never colour only.
+- **"Not assessed":** a topic with fewer than 3 graded items shows the "Not assessed" chip and no number; the dimension bar
+  without evidence says "No evidence"; no subject-wide percentage, only "n of m topics Proficient or better" when every
+  topic has evidence (§5.4 step 5).
+- **Subject page:** replace the "Mastery Statistics" skeleton (`learning.js` `placeholders()`) with a Mastery block from
+  `masterySubject` (per topic: level chip and "n items", "Not assessed" when thin; empty state "Take a pre-test to see where
+  you stand."). `learning.js` change limited to mounting this block and removing the skeleton markup. The old manual "mastery %"
+  is untouched here (ADR-006 handles it later).
+- Provisional/self-graded answers are counted as the models count them and labelled as spec §3.5 says; nothing here changes
+  a score.
+- Accessibility (S5): tables with header cells and captions, dimension bars have text values, the page has one `h1`, focus
+  moves to the page heading on open and back to the trigger on close, works at 400 px (table becomes stacked rows).
+
+#### Relevant Files
+New: `src/learning-results.js`, `test/learning-results.test.js`. Edited: `src/learning.js` (mastery block mount, skeleton
+removal, open-results hook), `src/index.html` (script tags: `mastery-model.js`, `learning-insight.js` if not yet loaded,
+`learning-results.js`), `src/learning.css` (named rules), `test/electron-smoke.js` (one step). Read only:
+`src/mastery-model.js`, `src/learning-insight.js`, `src/learning-quiz.js`, `docs/ui-baseline/`.
+
+#### Dependencies
+LS-003, LS-004 (INTEGRATED), LS-010 (INTEGRATED, sequential chain), LS-007 (INTEGRATED), PF-020 (G2).
+
+#### Restrictions
+No main-process change and no new IPC channel (report a missing field, for example dimension scores or item counts in the
+`mastery:*` result, instead of recomputing in the renderer). No targeted notes, practice, report comparison or history
+(LS-016, LS-013, LS-022, LS-023). No new dependency, token or visual language.
+Overlap check at release: nothing else edits `index.html`, `learning.js`, `learning.css` or `electron-smoke.js` while LS-011 runs.
+
+#### Acceptance Criteria
+- [ ] **View-model unit test:** for a fixture assessment, every displayed value in `buildResultsView` (levels, evidence
+      counts, dimension scores, weak ranking, mistake categories) equals the output of `mastery-model` and `learning-insight`
+      called directly on the same evidence; the test imports the real modules (no copies).
+- [ ] "Not assessed" cases tested: topic with 2 graded items → chip and no number; dimension with < 2 items → "No evidence";
+      subject-wide line absent until every topic has evidence.
+- [ ] Score line tested with open answers pending and self-graded.
+- [ ] **Smoke step (S5):** after the LS-010 four-question pre-test is submitted and self-graded, open the results: score line,
+      topic table, four dimension bars and the review list are present and match the view model; subject page Mastery block
+      shows the same level chips. `npm run test:electron` exit 0.
+- [ ] Review answers is read-only (no editable control present) and shows the correct answer and explanation for all five types
+      that can appear (the model supports essay even though M-L1 does not offer it).
+- [ ] **S7 UI parity (D12):** reuses `styles.css`/`learning.css` tokens, cards, chips, tables; new CSS rules named in HO-026;
+      screenshots at 1280 px and 400 px of the results page and the subject page Mastery block, beside the baseline
+      (`docs/ui-baseline/` `03-*`).
+- [ ] Keyboard-only path through the results page; reduced motion respected.
+- [ ] S1, S2, S3 (≤ ~600 lines per file), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-026**.
 
 #### Review
 **Reviewed By:**  
