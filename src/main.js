@@ -8,6 +8,7 @@ const { createAuth } = require('./auth');
 const { createWorkspace } = require('./workspace');
 const { startupMessage } = require('./startup-error');
 const { registerLearningIpc } = require('./learning-ipc');
+const { registerStudySessionIpc, closeOpenSessions } = require('./learning-session-ipc');
 const learningImport = require('./learning-import');
 const { runWorkflow, LIMITS: AUTOMATION_LIMITS } = require('./automation/engine');
 const { createOllamaRuntime } = require('./automation/ollama');
@@ -342,9 +343,13 @@ app.whenReady().then(() => {
   handle('learning:deleteSubject', id => {
     const user=requireUser();
     let fileIds = []; try { fileIds = workspace.listTopics(user.id, id).files.map(f => f.id); } catch { /* subject already gone */ }
+    let journeyIds = []; try { journeyIds = workspace.learningStore().listJourneys(user.id, { subjectId: id }).map(j => j.id); } catch { /* subject already gone */ }
     removeLearningFiles(user, workspace.deleteSubject(user.id,id)); removeAnnotations(user, fileIds); learningFlow.subjectRemoved(user.id, id);
+    for (const folder of [...journeyIds.map(j => path.join('journeys', j)), path.join('side-notes', String(id))]) { try { fs.rmSync(path.join(root, 'learning-files', user.id, folder), { recursive: true, force: true }); } catch { /* best effort */ } }
   });
   registerLearningIpc({ handle, requireUser, workspace });
+  registerStudySessionIpc({ handle, requireUser, workspace, dataDir: root });
+  try { closeOpenSessions({ workspace }); } catch (error) { console.error('study sessions', error.message); } // a crash can leave a session open: close it at its last activity
   handle('learning:topics', subjectId => workspace.listTopics(requireUser().id, subjectId));
   handle('learning:addTopic', (subjectId, details) => workspace.addTopic(requireUser().id, subjectId, details));
   handle('learning:renameTopic', (topicId, title) => workspace.renameTopic(requireUser().id, topicId, title));
@@ -710,4 +715,4 @@ if ($Kind -eq 'docx') {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { if (activeRun) activeRun.controller.abort(); if (chatEngine) chatEngine.cancelAll(); if (learningFlow) learningFlow.close(); if (workspace) workspace.close(); if (auth) auth.close(); });
+app.on('before-quit', () => { try { if (workspace) closeOpenSessions({ workspace }); } catch { /* quitting anyway */ } if (activeRun) activeRun.controller.abort(); if (chatEngine) chatEngine.cancelAll(); if (learningFlow) learningFlow.close(); if (workspace) workspace.close(); if (auth) auth.close(); });

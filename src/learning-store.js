@@ -452,9 +452,42 @@ function createLearningStore(db) {
     const a = args(input);
     const row = runningSession(userId, a.sessionId);
     const summary = cleanText(a.summary, 'Summary', LIMITS.summary);
-    const stamp = now();
-    run('UPDATE learning_sessions SET ended_at=?,summary=?,updated_at=? WHERE id=? AND user_id=?', stamp, summary, stamp, row.id, userId);
+    const stamp = a.endedAt ? cleanDate(a.endedAt, 'end time') : now();
+    let focusEntryId = null;
+    if (a.focusEntryId != null && a.focusEntryId !== '') focusEntryId = owned('focus_entries', 'Time entry', userId, a.focusEntryId).id;
+    run('UPDATE learning_sessions SET ended_at=?,summary=?,focus_entry_id=?,updated_at=? WHERE id=? AND user_id=?', stamp, summary, focusEntryId, stamp, row.id, userId);
     return sessionOut(one('SELECT * FROM learning_sessions WHERE id=?', row.id));
+  }
+  const sessionRow = (userId, id) => owned('learning_sessions', 'Session', userId, id);
+  const getSession = (userId, input) => sessionOut(sessionRow(userId, args(input).sessionId));
+  /* The account's open (not ended) study session, if any. */
+  function activeSession(userId) {
+    const row = one('SELECT * FROM learning_sessions WHERE user_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', userId);
+    return row ? sessionOut(row) : null;
+  }
+  /* Last activity = updated_at: every note, visit and heartbeat refreshes it. */
+  function touchSession(userId, input) {
+    const row = runningSession(userId, args(input).sessionId);
+    run('UPDATE learning_sessions SET updated_at=? WHERE id=? AND user_id=?', now(), row.id, userId);
+    return sessionOut(one('SELECT * FROM learning_sessions WHERE id=?', row.id));
+  }
+  /* A session that was just created and never used (its timer could not start). Refused once it has notes or has ended. */
+  function discardSession(userId, input) {
+    const row = runningSession(userId, args(input).sessionId);
+    if (one('SELECT 1 FROM learning_materials WHERE session_id=? LIMIT 1', row.id)) fail('This session already has notes.');
+    run('DELETE FROM learning_sessions WHERE id=? AND user_id=?', row.id, userId);
+    return { id: row.id, deleted: true };
+  }
+  function sessionMaterials(userId, input) {
+    const a = args(input); const row = sessionRow(userId, a.sessionId);
+    let sql = 'SELECT * FROM learning_materials WHERE user_id=? AND session_id=?'; const params = [userId, row.id];
+    if (a.kind != null) { sql += ' AND kind=?'; params.push(oneOf(a.kind, MATERIAL_KINDS, 'Material kind')); }
+    return all(`${sql} ORDER BY created_at, id`, ...params).map(materialOut);
+  }
+  /* System use only (quit and crash recovery in main.js): every open session of every account. Not an IPC channel. */
+  function listOpenSessions() {
+    return all('SELECT id, user_id, started_at, updated_at, subject_id FROM learning_sessions WHERE ended_at IS NULL')
+      .map(r => ({ id: r.id, userId: r.user_id, startedAt: r.started_at, updatedAt: r.updated_at, subjectId: r.subject_id }));
   }
   function markVisited(userId, input) {
     const a = args(input);
@@ -548,6 +581,7 @@ function createLearningStore(db) {
     createAssessment, startAssessment, getAssessment, assessmentOfItem, listAssessments, abandonAssessment,
     saveAnswer, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
+    getSession, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
     journeyEvidence,
   };
 }
