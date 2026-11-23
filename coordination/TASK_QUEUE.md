@@ -175,7 +175,7 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
 
 ### TASK: LS-005 — Migration 2: Learning System tables
 
-**Status:** **APPROVED** (HO-020, 2026-11-23, `4508711` on `claude/nifty-haslett-6c96fe`; code `e01d806`; `npm test` 163/163) · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
+**Status:** **INTEGRATED** (`c7b1957`, 2026-11-23; APPROVED in HO-020, `4508711`, `npm test` 163/163; smoke on merge result passed) · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
 **Submission:** HO-018 · **Created By:** Claude A
 
 #### Objective
@@ -427,7 +427,7 @@ brief: "TASK: LS-005". Submission HO-018.
       `learning_materials.parent_material_id`, kind `side_note_ai`, `learning_sessions.visited` (D13) (all inside
       migration 2, still additive).
 
-**LS-006 · `src/learning-store.js`** — P1 · Depends: LS-005, LS-002 (both APPROVED).
+**LS-006 · `src/learning-store.js`** — P1 · Depends: LS-005, LS-002 (both INTEGRATED). **RELEASED**; submission HO-021. Full brief: "TASK: LS-006".
 - [ ] CRUD for journeys (+topics), questions, assessments, items (with immutable `question_snapshot`), answers,
       sessions, materials; all SQL in this file.
 - [ ] Every function takes `(userId, {…})` and checks ownership down to the subject; cross-account access test
@@ -653,7 +653,7 @@ otherwise wait for a review.
 
 ### TASK: LS-002 — Assessment model (pure module)
 
-**Status:** **ASSIGNED** (lane 2, 2026-11-23; G3 waived by the owner: pure module, no PF-006 file). Submission HO-015. Branch from
+**Status:** **INTEGRATED** (`419eac7`, 2026-11-23; APPROVED in HO-019). Was ASSIGNED lane 2; G3 waived by the owner: pure module, no PF-006 file. Submission HO-015. Branch from
 the `main` that exists at release time  
 **Priority:** P1  
 **Assigned To:** Claude B  
@@ -718,6 +718,116 @@ Summary, files, test output with exit code, commit hash, any spec ambiguities fo
 #### Review
 **Reviewed By:**  
 **Decision:** **APPROVED** (HO-019, 2026-11-23), `1ab06db` on `claude/ls-002-assessment-model-9f8216` (code `613ee4d`). `npm test` 167/167 (EXIT=0).
+
+### TASK: LS-006 — Learning store (`src/learning-store.js`)
+
+**Status:** **RELEASED** (2026-11-23; LS-002 and LS-005 INTEGRATED). Takes the next free lane when PF-020 finishes (no file overlap with PF-020, LS-003, LS-004). Submission **HO-021**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+One main-process module that owns all SQL for the 10 Learning System tables, with ownership checks down to the
+subject, so LS-007's thin IPC handlers never touch SQL and no entity is reachable across accounts.
+
+#### Context
+Migration 2 exists (`src/learning-schema.js`, INTEGRATED `c7b1957`); the pure models exist (`src/assessment-model.js`,
+INTEGRATED `419eac7`). Follow the pattern of `createConnectionStore(db, …)` in `src/automation/connections.js`: a
+factory that takes the open `DatabaseSync`, exposed by `createWorkspace` (`workspace.js:924`). Ownership pattern:
+`SELECT … WHERE id=? AND user_id=?`, then `fail('… not found.')` (plain language, same message for "missing" and
+"someone else's", so ids cannot be probed). Spec §4.6 (lifecycle, snapshots), §5.4 (D11 one-cycle evidence), §6.2,
+§6.3, ADR-005 (one object argument, no SQL outside the store), ADR-007 (provenance kept as given).
+
+#### Requirements
+`createLearningStore(db)` returns an object whose methods all take `(userId, { … })` and return plain objects
+(JSON columns parsed defensively; an unreadable JSON value becomes its default, never a throw). Ids are
+`randomUUID()`, timestamps ISO-8601 (`now()` as in `workspace.js`). Multi-row writes run in one transaction
+(`BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`, as `db-migrate.js` does).
+
+- **Journeys.** `createJourney({ subjectId, title?, topicIds?, targetDate?, parentId? })` (title default `Cycle N`; `cycle` =
+  parent's cycle + 1, else 1; `topicIds` default = all topics of the subject; stage `material`);
+  `getJourney({ journeyId })` (with `topicIds`); `listJourneys({ subjectId })`; `updateJourney({ journeyId, stage?, title?,
+  topicIds?, targetDate?, status? })`. `stage` must be in `JOURNEY_STAGES`; `topicIds` must belong to the journey's
+  subject; `status: 'completed'` sets `completed_at`; `parentId` must be the same subject and account.
+- **Questions.** `saveQuestion({ question })` assigns an id when absent, runs `validateQuestion`, rejects with the
+  validator's plain-language errors joined, checks `subjectId`/`topicId` ownership (topic must belong to that subject),
+  enforces payload ≤ 32 KB (spec §6.2) and source ≤ 8 KB (cap chosen here), inserts or updates; an update never changes an existing
+  snapshot. `getQuestion`, `listQuestions({ subjectId, topicId?, status?, review? })`, `retireQuestion({ questionId })`
+  (status `retired`), `setReview({ questionId, review })` (sets `reviewed_at`; `approved`/`rejected` only).
+- **Assessments.** `createAssessment({ subjectId, journeyId?, kind, title?, config, questionIds })`: one transaction
+  creates the `draft` assessment and one `assessment_items` row per id, in the given order, each with
+  `question_snapshot` = the stored normalized question JSON (immutable; the store never updates that column),
+  `topic_id`, `dimension`, `max_score` = `points`. Rejects a question that is not the account's, not `active`, or
+  fails the D3 rule for the kind (the `selectItems` rule: only `approved` unless `practice`). `retake_of`/`attempt` are
+  accepted for finals (D10). `startAssessment` (`draft` → `in_progress`, sets `started_at`; no other transition),
+  `getAssessment({ assessmentId })` returns the assessment with items, snapshots and answers **unstripped** (LS-007
+  strips for the renderer), `listAssessments({ subjectId, journeyId?, kind?, status? })`, `abandonAssessment`.
+- **Answers.** `saveAnswer({ itemId, response })` upserts one row per item: the response is normalized by
+  `normalizeResponse` against the item's snapshot, ≤ 32 KB serialized; **rejected unless the assessment is
+  `in_progress`**. `submitAssessment({ assessmentId })` (`in_progress` → `submitted`): creates a row for every
+  unanswered item (`not_answered`), grades deterministic answers with `grade` (`grader:'auto'`, `grade_status:'final'`,
+  `mistake_category` only `not_known`/`not_answered`), leaves open answers `pending`, then sets the assessment `graded`
+  when no answer is `pending`, else `submitted`. `gradeOpenAnswer({ itemId, verdicts, grader })` with `grader` `self` or
+  `manual` only (AI grading is LS-017+): score from `scoreFromCriteria` (true/false adds the justification half to the
+  stored deterministic half), `grade_status:'final'`, `criteria` stored; moves the assessment to `graded` when the last
+  pending answer is done. Rejected unless the assessment is `submitted`.
+- **Sessions and materials.** `startSession({ subjectId, journeyId?, topicId?, kind })`, `endSession({ sessionId,
+  summary? })`, `markVisited({ sessionId, sections?, materials? })` (appends, de-duplicated, to `visited`),
+  `addMaterial({ subjectId, journeyId?, topicId?, sessionId?, kind, title?, bodyFile?, source?, origin?, provenance?,
+  parentMaterialId? })`, `getMaterial`, `listMaterials({ journeyId, topicId?, kind? })`. `side_note_ai` requires a parent.
+- **Evidence for mastery (D11).** `journeyEvidence({ journeyId })` returns one row per answered item of that journey's
+  assessments only: `{ assessmentId, kind, attempt, questionId, topicId, dimension, score, max, gradeStatus, grader,
+  confidence, dontKnow, mistakeCategory, answeredAt }`. Answers of an earlier cycle (another journey of the same
+  subject) are never returned; nothing is deleted when a new cycle starts. Rows with `grade_status:'pending'` are
+  returned with `score: null`.
+
+#### Relevant Files
+New: `src/learning-store.js` (≤ ~600 lines; split into `src/learning-store-*.js` only if it exceeds that, and say so),
+`test/learning-store.test.js`. Edited: `src/workspace.js` (one line: `learningStore: () => createLearningStore(db)` beside
+`connectionStore`). Read only: `src/learning-schema.js`, `src/assessment-model.js`, `src/automation/connections.js`,
+`src/db-migrate.js`, `test/learning-schema.test.js` (how the tests build a v2 database).
+
+#### Dependencies
+LS-005, LS-002 (both INTEGRATED).
+
+#### Restrictions
+- All SQL for the learning tables lives in this file. No IPC, preload, renderer, AI call or file I/O (Markdown note
+  bodies are written later with `writeFileAtomic`; this store holds only the `body_file` name).
+- No schema change (a missing column or constraint is reported in HO-021, not patched). No new dependency.
+- No `console.log` of answers, prompts or ids. Do not touch `main.js`, `preload.js`, `index.html` or any renderer file.
+- Overlap check at release: PF-020 (`test/electron-smoke.js`), LS-003 (`src/mastery-model.js`), LS-004
+  (`src/learning-insight.js`) share no file with this task; `workspace.js` is edited only here.
+
+#### Acceptance Criteria
+- [ ] All methods above exist with the stated argument shapes; every one takes `(userId, { … })` (S3).
+- [ ] Cross-account test: a second user gets "not found" from **every** method that takes an id (journey, question,
+      assessment, item, session, material), including ids nested inside valid-looking arguments (`topicIds`,
+      `questionIds`, `parentId`, `parentMaterialId`, `journeyId` of another subject).
+- [ ] Writing an answer to a `draft`, `submitted`, `graded` or `abandoned` assessment is rejected (test per status).
+- [ ] Editing or retiring a question leaves the snapshot of an existing assessment byte-identical (test).
+- [ ] Invalid questions are rejected with the field-named messages from `validateQuestion`; oversize payload/response
+      is rejected (test).
+- [ ] `createAssessment` rolls back completely when one question id is invalid (no assessment, no items) (test).
+- [ ] D3 rule enforced for diagnostic/final/retention (an `unreviewed` generated question is rejected) and allowed
+      for practice (test).
+- [ ] `submitAssessment`: unanswered items get `not_answered`; deterministic scores equal `grade()`; a pure-choice
+      assessment becomes `graded`, one with an `explain` item stays `submitted` until `gradeOpenAnswer` (test).
+- [ ] D11: evidence of cycle 1 is absent from cycle 2's `journeyEvidence`, and still present in the database after
+      cycle 2 starts (test).
+- [ ] Deleting a subject (through the existing workspace API) leaves no learning rows for it (test; relies on the
+      LS-005 cascades).
+- [ ] S1 `npm test > log 2>&1; echo EXIT=$?` exit 0, count reported; S2; S4 (branch from `main` at release; ref and
+      base stated in HO-021). `npm run test:electron` is required (workspace startup path changed): run once, report.
+      S5–S7 do not apply (no renderer, no handler).
+
+#### Deliverables
+Summary, files, the method list as built, test output with exit code, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-021**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
 
 ### TASK: PF-004 — Fix the failing Electron E2E smoke test
 
