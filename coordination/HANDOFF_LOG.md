@@ -1558,6 +1558,117 @@ quotes and list markers; empty note.
 
 ---
 
+### HO-030 — Review of LS-003 (Claude B, branch `claude/determined-ishizaka-801785`, tip `d290d0b`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-003  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-016 (on its branch). HO-021 to HO-029 are reserved for released submissions
+> (LS-006 HO-021 … LS-012 HO-027, LS-034 HO-028, PF-021 HO-029). This review is HO-030.
+
+#### 1. Scope reviewed
+`git diff 70f0af1 d290d0b`: `src/mastery-model.js` (+317), `test/mastery-model.test.js` (+283), HO-016. No other file;
+`package.json` unchanged; `index.html` untouched. No `require(` in the module (it imports neither `assessment-model.js` nor
+`learning-insight.js`).
+
+#### 2. Code review (module read in full)
+- Wrapper matches `topic-model.js` (`window.PerflwMasteryModel`). No I/O, DOM, SQL, AI or clock; `now` comes from the caller.
+- `DEFAULT_MASTERY_CONFIG` is deep-frozen and versioned; all spec §5.4 values are in it (kind weights, grader weights, guess
+  weight, 30-day half-life, minimums, thresholds). `validateMasteryConfig` rejects unknown keys, out-of-range values and
+  inconsistent ladders; every function validates a custom config and throws a plain-language error.
+- Rules match §5.4: item score `score/max`; weight = kind × grader × guess × recency; `D = Σ(w·s)/Σw` with ≥ 2 items per
+  dimension; Not assessed < 3 counted items; Developing, Proficient (≥ 6 items), Mastered (final ≥ 0.8, retention ≥ 7 days with
+  Recall ≥ 0.7, every counted grade `final`); `improvement` only when both sides have ≥ 2 items. Pending, abandoned, invalid and
+  low-confidence provisional AI answers are excluded with a reason.
+- Every result carries `configVersion` (checked in `itemWeight`, `dimensionScores`, `topicLevel`, `improvement`).
+
+#### 3. Checks (Claude A, in Claude B's worktree)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 202 tests, 202 pass, 0 fail (13 new). Boundary tests sit just
+below/at/above each threshold; the worked example gives 1.75/2.25 ≈ 0.78. Spot probes: three perfect recognition items →
+`emerging`; recall 0.8 + understanding 0.7 + recognition 0.2 → `proficient` (see §4.1); empty evidence → `not_assessed`.
+`npm run test:electron` not required (no renderer change).
+
+#### 4. Decisions on HO-016 §6
+1. **Proficient does not require Developing: accepted as written.** The spec gives each level its own conditions. Requiring
+   Developing first would leave explain-only topics (no recognition items) stuck at Emerging. Revisit with real data at the D4
+   validation after M-L1.
+2. Cap rule redundant under the defaults: **accepted**; keep the guard and the `recognitionOnly` flag.
+3. Retention definition: **accepted**. LS-024 passes `lastPractisedAt` (the later of the last non-retention answer and the last
+   ended study session) from LS-012 data.
+4. Final-exam topic score is unweighted: **accepted**. With retakes (D10) the caller passes only the **latest graded final
+   attempt** for `final` rows; other kinds pass all attempts. Recorded in the LS-007 brief.
+5–9: **accepted** (counted-answer `final` check, `correct` default, caller-supplied clock, `ai` + `final` weighing 0.75,
+   unrounded results).
+
+#### 5. Note for LS-006/LS-007 (evidence mapping, no change requested here)
+The model expects `abandoned`, `aiConfidence`, `answeredAt`, `now`. The store's `journeyEvidence` rows (LS-006 brief) carry
+neither the assessment status nor an AI confidence. LS-006 should add `assessmentStatus`; LS-007 maps `abandoned =
+assessmentStatus === 'abandoned'`, sets `now` from an injected clock and `aiConfidence` from the stored AI feedback when the
+grader is `ai` (none exist before LS-018). Added to the LS-007 brief.
+
+#### 6. Decision
+**APPROVED.** LS-003 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` on the merge result
+(conflict only in `HANDOFF_LOG.md`: keep both sides in number order). LS-007 may be released once LS-006 is integrated.
+
+---
+
+### HO-031 — Review of LS-004 (Claude B, branch `feature/LS-004-learning-insight`, tip `0f122d8`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-004  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-017 (on its branch). This review is HO-031.
+
+#### 1. Scope reviewed
+`git diff 70f0af1 0f122d8`: `src/learning-insight.js` (+259), `test/learning-insight.test.js` (+295), HO-017. No other file.
+**No `require(` in the module**: it does not import `mastery-model.js` (or `assessment-model.js`); a topic level is an input
+to `rankWeakTopics`, as the brief required.
+
+#### 2. Code review (module read in full)
+- Wrapper matches `topic-model.js` (`window.PerflwLearningInsight`). Pure: no I/O, DOM, SQL, AI or clock (`today` is an input).
+- `categorize` follows the §5.2 table order: `not_known` (don't know, blank, or `grade`'s `not_answered`) › correct answer
+  (`guess` at confidence 1, otherwise `null`) › `misconception` (score 0 at confidence 3) › `confusion` (choice: a distractor
+  that is another same-topic question's correct answer, compared by text; matching: swapped pairs) › `partial` › `recognition_only`
+  › `forgotten` › `incorrect`. Pending results return `null`. "I don't know" beats a confident wrong answer, as the brief asks.
+- `rankWeakTopics`: weak = level Not assessed/Emerging/Developing or any misconception; score = (misconceptions × 2 + wrong +
+  not_known) / items; `guess` counts as correct; ties by topic position, then id. Matches §5.3.
+- `nextReview`: Leitner boxes 1–5, offsets 1/3/7/14/30 days, correct → next box (5 stays), wrong → box 1; date maths in UTC so
+  daylight-saving changes cannot shift a due date; invalid dates throw a plain-language error.
+- `targetedNote`: deterministic Markdown; all user text goes through `escapeMarkdown` (inline markers, block markers at the
+  start, whitespace collapsed so text cannot open a heading, list, quote or fence); `[`/`]` are escaped, so no link or image
+  forms; empty analysis and no mistakes give a valid note.
+
+#### 3. Checks (Claude A, in Claude B's worktree)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 207 tests, 207 pass, 0 fail (18 new: one per category, precedence,
+ranking, ties, boxes, escaping, snapshot). `npm run test:electron` not required (no renderer change).
+
+#### 4. Decisions on HO-017 §6
+1. Blank → `not_known` in `categorize` (§5.2 governs; the stored `grade` category stays `not_answered`): **accepted**.
+2. `misconception` needs score 0; a partly right answer at confidence 3 is `partial`: **accepted**.
+3. **`partial` and multiple-choice partial credit:** accepted as built for LS-004. Intended behavior, to fix with the next change to
+   this module (LS-016): a multiple-choice answer with 0 < score < max is `partial` too. It changes a label only; the weak-topic
+   score counts both as wrong. Added to the LS-016 brief.
+4. `confusion` by option text: **accepted**.
+5. `forgotten` topic-level unless `earlier` carries a `questionId`; the caller passes only results earlier than the retention
+   check: **accepted**.
+6. Five Leitner boxes (1/3/7/14/30 days): **accepted**; spec §5.3 corrected from "1, 3 and 7 days" to the five offsets.
+7. Positional `categorize(answer, context)` / `nextReview(box, correct, today)`: **accepted**. ADR-005's one-object rule
+   governs IPC, store and handlers; pure model functions keep readable positional forms, as `grade(question, response)` and
+   LS-003's `(evidence, config)` do.
+8. A missing level counts as Not assessed (weak): **accepted**. LS-011 passes levels from `mastery:journey`.
+
+#### 5. Decision
+**APPROVED.** LS-004 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` on the merge result
+(conflict only in `HANDOFF_LOG.md`: keep both sides in number order). LS-011 can use both pure models once LS-010 lands.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
