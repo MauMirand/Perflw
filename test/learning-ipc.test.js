@@ -81,7 +81,7 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'journey:evaluation', 'learning:history', 'retention:status',
+    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
     'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due',
   ].sort());
@@ -498,4 +498,36 @@ test('retention: opens 7 days after a real final; recall and understanding items
   t.clock.now += 8 * 86400000;
   assert.equal(t.call('retention:status', { journeyId: journey.id }).eligible, true);
   assert.throws(() => t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'retention', config: { count: 3 } }), /No topic is Proficient yet/);
+});
+
+test('practice retry: one second try on a wrong deterministic answer, scored half; never twice, never for written answers', () => {
+  const t = setup(); seed(t);
+  const choice = t.call('questions:list', { subjectId: 's1' }).find(q => q.type === 'choice');
+  const { assessment } = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { only: [choice.id] } });
+  t.call('assessment:start', { assessmentId: assessment.id });
+  const item = assessment.items[0];
+  assert.throws(() => t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }), /Answer the question first|only for a wrong answer/);
+  t.call('assessment:saveAnswer', { itemId: item.id, response: { choice: ['a'] } });
+  const first = t.call('assessment:check', { assessmentId: assessment.id, itemId: item.id });
+  assert.equal(first.score, 0); assert.equal(first.retryable, true); assert.equal(first.attempt, 1);
+  assert.equal(t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }).attempt, 2);
+  assert.throws(() => t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }), /already used your second try/);
+  t.call('assessment:saveAnswer', { itemId: item.id, response: { choice: ['b'] } });
+  const second = t.call('assessment:check', { assessmentId: assessment.id, itemId: item.id });
+  assert.equal(second.attempt, 2); assert.equal(second.score, second.max / 2, 'a right answer on the second try counts half'); assert.equal(second.retryable, false);
+  t.call('assessment:submit', { assessmentId: assessment.id });
+  const stored = t.call('assessment:results', { assessmentId: assessment.id }).items[0].answer;
+  assert.equal(stored.score, stored.attempt === 2 ? 0.5 : stored.score); assert.equal(stored.score, 0.5);
+  // written answers and other kinds have no second try
+  const open = t.call('questions:list', { subjectId: 's1' }).find(q => q.type === 'explain');
+  const p2 = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { only: [open.id] } }).assessment;
+  t.call('assessment:start', { assessmentId: p2.id });
+  t.call('assessment:saveAnswer', { itemId: p2.items[0].id, response: { text: 'x' } });
+  assert.throws(() => t.call('assessment:retry', { assessmentId: p2.id, itemId: p2.items[0].id }), /only for choice, true\/false and matching/);
+  const diag = t.call('assessment:create', { subjectId: 's1', kind: 'diagnostic', config: { count: 1, types: ['choice'] } }).assessment;
+  t.call('assessment:start', { assessmentId: diag.id });
+  t.call('assessment:saveAnswer', { itemId: diag.items[0].id, response: { choice: ['a'] } });
+  assert.throws(() => t.call('assessment:retry', { assessmentId: diag.id, itemId: diag.items[0].id }), /only for a practice set/);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }), /not found/i);
 });

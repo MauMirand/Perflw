@@ -334,12 +334,24 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const response = (item.answer && item.answer.response) || {};
     const g = model.grade(item.snapshot, { ...response, questionId: item.snapshot.id });
     const p = item.snapshot.payload || {};
+    const attempt = (item.answer && item.answer.attempt) || 1;
+    if (attempt === 2 && g.status === 'graded') g.score = Math.round(g.score * 50) / 100; // a second try counts half
+    const retryable = attempt === 1 && g.status === 'graded' && g.score < g.max && ['choice', 'truefalse', 'matching'].includes(item.snapshot.type) && !(response && response.dontKnow);
     return {
-      itemId: item.id, score: g.score, max: g.max, status: g.status, category: g.category || null,
+      itemId: item.id, score: g.score, max: g.max, status: g.status, category: g.category || null, attempt, retryable,
       explanation: item.snapshot.explanation || '', source: item.snapshot.source || [],
       key: item.snapshot.type === 'choice' ? { correct: p.correct } : item.snapshot.type === 'truefalse' ? { correct: p.correct }
         : item.snapshot.type === 'matching' ? { pairs: p.pairs } : { modelAnswer: p.modelAnswer || '', rubric: p.rubric || [] },
     };
+  });
+  on('assessment:retry', ['assessmentId', 'itemId'], (u, a) => {
+    const owner = store().assessmentOfItem(u, { itemId: a.itemId });
+    if (String(owner.id) !== String(a.assessmentId)) fail('Item not found.');
+    const item = store().getAssessment(u, { assessmentId: owner.id }).items.find(i => i.id === a.itemId);
+    if (!['choice', 'truefalse', 'matching'].includes(item.snapshot.type)) fail('A second try is only for choice, true/false and matching questions.');
+    const answer = item.answer;
+    if (!answer || model.grade(item.snapshot, { ...answer.response, questionId: item.snapshot.id }).score >= item.maxScore) fail('A second try is only for a wrong answer.');
+    return { attempt: store().setAnswerAttempt(u, { itemId: a.itemId }).attempt };
   });
   on('assessment:results', ['assessmentId'], (u, a) => {
     const assessment = store().getAssessment(u, a);

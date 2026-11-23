@@ -289,6 +289,26 @@ async function main() {
   step('practice: feedback after Check, answer locked');
   await shoot('quiz-6-practice');
   await click('[data-qz="leave"]');
+  // Practice retry: a wrong answer, one second try that counts half.
+  const one = await evaluate(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.find(x => /NaCl-like 1[?]$/.test(x.prompt)).id)`);
+  await evaluate(`window.learningData.assessmentCreate({ subjectId: ${q(subjectId)}, kind: 'practice', title: 'Retry', config: { only: [${q(one)}] } })`);
+  await click('[data-qz="bank"]'); // leave and come back so the home screen reloads its list
+  await waitFor("!!document.querySelector('.qz-qlist')", 'bank');
+  await click('[data-qz="home"]');
+  await waitFor("[...document.querySelectorAll('[data-qz=\"resume\"]')].some(b => /Start/.test(b.textContent))", 'the draft practice set is listed');
+  await evaluate("[...document.querySelectorAll('[data-qz=\"resume\"]')].find(b => /Start/.test(b.textContent)).click()");
+  await waitFor("!!document.querySelector('.qz-card') && /Practice · Question 1 of 1/.test(document.querySelector('.qz-head').textContent)", 'retry practice opened');
+  await evaluate("(() => { const el = [...document.querySelectorAll('input[name=\"choice\"]')].find(i => i.nextElementSibling.textContent.includes('Covalent')); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  await click('[data-qz="check"]');
+  await waitFor("!!document.querySelector('[data-qz=\"retry\"]')", 'a wrong answer offers a second try');
+  await click('[data-qz="retry"]');
+  await waitFor("!document.querySelector('.qz-feedback')", 'the question unlocks');
+  await evaluate("(() => { const el = [...document.querySelectorAll('input[name=\"choice\"]')].find(i => i.nextElementSibling.textContent.includes('NaCl')); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  await click('[data-qz="check"]');
+  await waitFor("(document.querySelector('.qz-feedback') || {}).textContent && document.querySelector('.qz-feedback').textContent.includes('second try, counts half') && document.querySelector('.qz-feedback').textContent.includes('0.5/1')", 'a right second try counts half');
+  assert.ok(await evaluate("!document.querySelector('[data-qz=\"retry\"]')"), 'no third try');
+  step('practice retry: a second try after a wrong answer, scored half, only once');
+  await click('[data-qz="leave"]');
 
   // Final exam: a real one needs 50–100 questions; a test final does not; time options; pass mark; attempts table.
   await waitFor("!!document.querySelector('[data-qz=\"exam\"]') && !document.querySelector('[data-qz=\"exam\"]').disabled", 'exam enabled');

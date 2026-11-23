@@ -244,7 +244,7 @@
     else if (q.type === 'truefalse') key = f.key.correct ? 'True' : 'False';
     else if (q.type === 'matching') key = (f.key.pairs || []).map(([l, r]) => `${(p.left.find(x => x.id === l) || {}).text} → ${(p.right.find(x => x.id === r) || {}).text}`).join('; ');
     else key = [f.key.modelAnswer, (f.key.rubric || []).length ? `A good answer covers: ${f.key.rubric.map(c => c.criterion).join('; ')}` : ''].filter(Boolean).join(' ');
-    return `<div class="qz-feedback" role="status"><p><strong>${esc(state)}</strong>${f.status === 'graded' ? ` · ${f.score}/${f.max}` : ''}</p>${key ? `<p>${f.status === 'pending' ? 'Model' : 'Correct'}: ${esc(key)}</p>` : ''}${f.explanation ? `<p class="ln-soon">${esc(f.explanation)}</p>` : ''}</div>`;
+    return `<div class="qz-feedback" role="status"><p><strong>${esc(state)}</strong>${f.status === 'graded' ? ` · ${f.score}/${f.max}${f.attempt === 2 ? ' (second try, counts half)' : ''}` : ''}</p>${f.retryable ? `<p class="qz-row">${btn('retry', 'Try again (counts half)', `data-item="${esc(item.id)}"`)}</p>` : ''}${key ? `<p>${f.status === 'pending' ? 'Model' : 'Correct'}: ${esc(key)}</p>` : ''}${f.explanation ? `<p class="ln-soon">${esc(f.explanation)}</p>` : ''}</div>`;
   }
 
   function quizView(S) {
@@ -568,6 +568,11 @@
         if (!(await saveNow(S))) { paint(S); return; }
         const item = S.quiz.assessment.items[S.quiz.index];
         S.quiz.checked[item.id] = await D().assessmentCheck({ assessmentId: S.quiz.assessment.id, itemId: item.id }); paint(S);
+      }
+      else if (action === 'retry') {
+        const item = S.quiz.assessment.items[S.quiz.index];
+        await D().assessmentRetry({ assessmentId: S.quiz.assessment.id, itemId: item.id });
+        delete S.quiz.checked[item.id]; paint(S); say('Second try: it counts half.');
       }
       else if (action === 'leave') { stopTimer(S); await saveNow(S); await load(S); S.mode = 'home'; paint(S); }
       else if (action === 'back-quiz') { S.quiz.confirm = false; paint(S); }

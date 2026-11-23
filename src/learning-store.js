@@ -370,6 +370,17 @@ function createLearningStore(db) {
     randomUUID(), userId, item.id, text, response.confidence || null, response.dontKnow ? 1 : 0, stamp, stamp, stamp);
     return answerOut(one('SELECT * FROM assessment_answers WHERE item_id=? AND user_id=?', item.id, userId));
   }
+  /* Practice retry (spec §4.5): a second try at a deterministic question, scored x0.5. Only attempt 2 is allowed, once. */
+  function setAnswerAttempt(userId, input) {
+    const item = itemRow(userId, args(input).itemId);
+    const assessment = assessmentRow(userId, item.assessment_id);
+    if (assessment.kind !== 'practice' || assessment.status !== 'in_progress') fail('A second try is only for a practice set in progress.');
+    const answer = one('SELECT * FROM assessment_answers WHERE item_id=? AND user_id=?', item.id, userId);
+    if (!answer) fail('Answer the question first.');
+    if (answer.attempt >= 2) fail('You already used your second try on this question.');
+    run('UPDATE assessment_answers SET attempt=2,updated_at=? WHERE id=?', now(), answer.id);
+    return answerOut(one('SELECT * FROM assessment_answers WHERE id=?', answer.id));
+  }
   function finishIfGraded(userId, assessmentId, stamp) {
     const pending = one("SELECT count(*) AS n FROM assessment_answers n JOIN assessment_items i ON i.id=n.item_id WHERE i.assessment_id=? AND n.grade_status='pending'", assessmentId).n;
     if (!pending) run("UPDATE assessments SET status='graded',graded_at=?,updated_at=? WHERE id=? AND user_id=?", stamp, stamp, assessmentId, userId);
@@ -389,7 +400,8 @@ function createLearningStore(db) {
         const g = model.grade(question, parse(answer.response, {}));
         if (g.status === 'graded') {
           const category = ['not_known', 'not_answered'].includes(g.category) ? g.category : null;
-          run("UPDATE assessment_answers SET score=?,grade_status='final',grader='auto',mistake_category=?,graded_at=?,updated_at=? WHERE id=?", g.score, category, stamp, stamp, answer.id);
+          const score = answer.attempt === 2 ? Math.round(g.score * 50) / 100 : g.score; // a second try counts half (spec §4.5)
+          run("UPDATE assessment_answers SET score=?,grade_status='final',grader='auto',mistake_category=?,graded_at=?,updated_at=? WHERE id=?", score, category, stamp, stamp, answer.id);
         } else {
           // Open answer (score null) or true/false with a justification (the deterministic half is kept).
           run("UPDATE assessment_answers SET score=?,grade_status='pending',grader=NULL,mistake_category=NULL,graded_at=NULL,updated_at=? WHERE id=?",
@@ -613,7 +625,7 @@ function createLearningStore(db) {
     createJourney, getJourney, listJourneys, updateJourney,
     saveQuestion, getQuestion, listQuestions, retireQuestion, deleteQuestion, setReview,
     createAssessment, startAssessment, getAssessment, assessmentOfItem, listAssessments, abandonAssessment,
-    saveAnswer, submitAssessment, gradeOpenAnswer,
+    saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
     recordReview, getReview, dueReviews,
