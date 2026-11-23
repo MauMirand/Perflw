@@ -438,7 +438,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Mastery evidence query is scoped to one journey (D11 soft reset, spec §5.4): answers of an earlier cycle are
       not returned for the current cycle, and nothing is deleted when a new cycle starts (test).
 
-**LS-007 · IPC + preload for journeys, questions, assessments, mastery** — P1 · Depends: LS-006 (APPROVED).
+**LS-007 · IPC + preload for journeys, questions, assessments, mastery** — P1 · Depends: LS-006, LS-003 (INTEGRATED). **Brief complete**; submission HO-022. Full brief: "TASK: LS-007".
 - [ ] Channels from spec §6.3 for those four areas only, each through `handle()` with `requireUser()`; one object
       argument; new preload bridge `learningData` methods (no new bridge object).
 - [ ] Contract test: every new preload method has a matching `handle()` channel and vice versa.
@@ -751,10 +751,10 @@ factory that takes the open `DatabaseSync`, exposed by `createWorkspace` (`works
   topicIds?, targetDate?, status? })`. `stage` must be in `JOURNEY_STAGES`; `topicIds` must belong to the journey's
   subject; `status: 'completed'` sets `completed_at`; `parentId` must be the same subject and account.
 - **Questions.** `saveQuestion({ question })` assigns an id when absent, runs `validateQuestion`, rejects with the
-  validator's plain-language errors joined, checks `subjectId`/`topicId` ownership (topic must belong to that subject),
+  validator's plain-language errors joined with a newline (one `field: problem.` per line, text unchanged), checks `subjectId`/`topicId` ownership (topic must belong to that subject),
   enforces payload ≤ 32 KB (spec §6.2) and source ≤ 8 KB (cap chosen here), inserts or updates; an update never changes an existing
   snapshot. `getQuestion`, `listQuestions({ subjectId, topicId?, status?, review? })`, `retireQuestion({ questionId })`
-  (status `retired`), `setReview({ questionId, review })` (sets `reviewed_at`; `approved`/`rejected` only).
+  (status `retired`), `deleteQuestion({ questionId })` (only when no `assessment_items` row references it, else the error "This question was used in an assessment. Retire it instead."), `setReview({ questionId, review })` (sets `reviewed_at`; `approved`/`rejected` only).
 - **Assessments.** `createAssessment({ subjectId, journeyId?, kind, title?, config, questionIds })`: one transaction
   creates the `draft` assessment and one `assessment_items` row per id, in the given order, each with
   `question_snapshot` = the stored normalized question JSON (immutable; the store never updates that column),
@@ -824,6 +824,113 @@ LS-005, LS-002 (both INTEGRATED).
 #### Deliverables
 Summary, files, the method list as built, test output with exit code, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-021**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-007 — IPC and preload for journeys, questions, assessments, mastery
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-006 is INTEGRATED, LS-003 is INTEGRATED (the `mastery:*`
+channels call `mastery-model.js`; if LS-003 is not merged, drop the two `mastery:*` channels and move them to LS-011), and
+PF-021 is INTEGRATED or not running (both edit `src/main.js`). Submission **HO-022**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Expose the learning store to the renderer through thin, authenticated, validated IPC handlers and preload methods,
+so LS-008 to LS-011 can build screens without touching main-process code.
+
+#### Context
+Handler pattern: `handle(channel, action)` in `main.js:159` wraps every action in `assertSender` and returns
+`{ ok, value }` / `{ ok: false, error }`; `error` reaches the UI unchanged unless it matches
+`/SQLITE|EACCES|ENOENT|EPERM/` (`main.js:166`, PF-017), so every message written here must be plain language and
+must not contain those words. Preload pattern: `call(channel, …args)` and the frozen `learningData` object
+(`preload.js:80`). Spec §6.3 lists the channels; ADR-005: one object argument each, thin handlers, answer keys never
+in renderer memory during an exam. `main.js` is 698 lines, so the handlers live in a new module that can be loaded
+without Electron and therefore unit-tested.
+
+#### Requirements
+New `src/learning-ipc.js` exports `registerLearningIpc({ handle, requireUser, workspace })` (no `electron` import) and
+the pure helpers it uses. `main.js` gets one `require` and one call. Each handler: `const user = requireUser()` first,
+then input checks, then one store call (`workspace.learningStore()`); the argument is **one object**; unknown keys are
+dropped; wrong types, oversize strings (ids ≤ 100 chars, text ≤ the model limits) and missing required keys fail with
+a plain-language message naming the field.
+
+| Channel | Argument | Does |
+|---|---|---|
+| `journey:list` | `{ subjectId }` | `listJourneys` |
+| `journey:create` | `{ subjectId, title?, topicIds?, targetDate?, parentId? }` | `createJourney` |
+| `journey:get` | `{ journeyId }` | `getJourney` |
+| `journey:update` | `{ journeyId, stage?, title?, topicIds?, targetDate?, status? }` | `updateJourney` |
+| `questions:list` | `{ subjectId, topicId?, status?, review? }` | `listQuestions` |
+| `questions:save` | `{ question }` | `saveQuestion`; validator errors returned as one message, one `field: problem.` per line, text unchanged |
+| `questions:retire` | `{ questionId }` | `retireQuestion` |
+| `questions:delete` | `{ questionId }` | `deleteQuestion` (only when no assessment item uses it; otherwise "This question was used in an assessment. Retire it instead.") |
+| `assessment:create` | `{ subjectId, journeyId?, kind, config }` | selects questions with `selectItems` (kind, topic scope of the journey, `config.count/types/dimensions`, `config.seed` or a random seed generated here and stored in `config`), then `createAssessment`; returns the assessment plus `{ requested, available }` so the UI can show the §3.6 "only N questions are available" message; zero available → "No questions are available yet. Add questions in the Question bank." |
+| `assessment:start` | `{ assessmentId }` | `startAssessment` |
+| `assessment:list` | `{ subjectId, journeyId?, kind?, status? }` | `listAssessments` (summaries, no snapshots) |
+| `assessment:get` | `{ assessmentId }` | `getAssessment`, **student view while `draft`/`in_progress`** (below); full view once `submitted`/`graded`/`abandoned` |
+| `assessment:saveAnswer` | `{ itemId, response }` | `saveAnswer`; returns `{ savedAt }` only |
+| `assessment:submit` | `{ assessmentId }` | `submitAssessment` |
+| `assessment:abandon` | `{ assessmentId }` | `abandonAssessment` |
+| `assessment:grade` | `{ itemId, verdicts, grader? }` | `gradeOpenAnswer`, `grader` `self` or `manual` (default `self`) |
+| `assessment:results` | `{ assessmentId }` | full view; rejected unless `submitted`/`graded` ("Submit the assessment to see results.") |
+| `mastery:journey` | `{ journeyId }` | `journeyEvidence` → `mastery-model` (default config) |
+| `mastery:subject` | `{ subjectId }` | for each topic of the subject: the level from the subject's most recent non-archived journey's evidence (D11: one cycle), with that journey's id and cycle; no journey → `[]` |
+
+Not in this task: `questions:generate`/`templates`, `assessment:check`/`acceptGrade`/`regrade`, `study:*`,
+`materials:*`, `schedule:create`, `journey:evaluation`, `assessment:retakeStatus` (later tasks).
+
+**Student view** (pure `studentAssessment(assessment)`, exported and unit-tested): items carry
+`assessment-model.stripAnswerKey(snapshot)`; `choice` options and `matching` right items are **shuffled with the
+assessment seed** (`shuffle(list, seed + ':' + itemId)`) so authored order cannot leak the key (HO-019 §4.6); the
+student's own `response`, `confidence`, `dontKnow`, `savedAt` are kept; `score`, `criteria`, `feedback`,
+`mistakeCategory`, `grader` are omitted until the assessment is submitted. `config.seed` is never sent while in
+progress.
+
+**Preload** (`learningData`, flat names, no new bridge object): `journeyList`, `journeyCreate`, `journeyGet`,
+`journeyUpdate`, `questionsList`, `questionsSave`, `questionsRetire`, `questionsDelete`, `assessmentCreate`,
+`assessmentStart`, `assessmentList`, `assessmentGet`, `assessmentSaveAnswer`, `assessmentSubmit`, `assessmentAbandon`,
+`assessmentGrade`, `assessmentResults`, `masterySubject`, `masteryJourney`; each `arg => call('<channel>', arg)`.
+
+#### Relevant Files
+New: `src/learning-ipc.js`, `test/learning-ipc.test.js`. Edited: `src/main.js` (require + one registration call),
+`src/preload.js` (the methods above). Read only: `src/learning-store.js`, `src/assessment-model.js`,
+`src/mastery-model.js`, `src/workspace.js`.
+
+#### Dependencies
+LS-006 (INTEGRATED), LS-003 (INTEGRATED, for `mastery:*`).
+
+#### Restrictions
+No SQL in this file. No renderer change. No AI, no file I/O. Do not change `handle()`, `requireUser()` or
+`assertSender`. Do not add a bridge object. No new dependency. Overlap check at release: PF-021 edits only the
+`main.js` startup block, LS-008 (next) edits renderer files; if PF-021 is running, release LS-007 after it merges.
+
+#### Acceptance Criteria
+- [ ] **Contract test:** the set of channels registered by `registerLearningIpc` (fake `handle`) equals the set of
+      `call('…')` channels for the new methods found by parsing `src/preload.js`, and every new preload method name
+      maps to exactly one channel (both directions).
+- [ ] **S6:** with a `requireUser` that throws, every channel rejects before touching the store (spy); with two users,
+      user B gets "not found" for user A's journey, question, assessment and item ids through every id-taking channel.
+- [ ] **Answer key (deep scan):** `assessment:get` on an in-progress diagnostic **and** final returns no `correct`,
+      `pairs`, `modelAnswer`, `keywords`, `explanation`, `provenance`, `quote` key anywhere in `items[].question`
+      (deep key scan), for all five question types; the scan covers the question snapshots only, because the student's
+      own `response.pairs` is allowed. After submit the full snapshot is returned.
+- [ ] Shuffle: same seed → same option order across two `assessment:get` calls; different assessments differ.
+- [ ] Input: wrong types, unknown keys, oversize strings and a non-object argument each fail with a plain-language
+      error naming the field; no message contains `SQLITE`, `EACCES`, `ENOENT` or `EPERM`.
+- [ ] `assessment:create` returns `{ requested, available }`; with fewer questions than requested it still creates with
+      what exists; with none it fails with the message above.
+- [ ] `mastery:journey` shows no evidence from an earlier cycle's journey (D11).
+- [ ] S1 (`npm test > log 2>&1; echo EXIT=$?`, count reported), S2, S3 (one object argument; module ≤ ~600 lines), S4;
+      `npm run test:electron` exit 0 (main/preload changed), run once. S5 and S7 do not apply (no renderer).
+
+#### Deliverables
+Summary, files, channel table as built, test output with exit code, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-022**.
 
 #### Review
 **Reviewed By:**  
