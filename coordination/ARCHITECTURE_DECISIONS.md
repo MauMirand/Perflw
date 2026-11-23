@@ -207,6 +207,9 @@ Do not implement major proposed changes until they are approved.
   dependency.
 - **Recommendation**: A, with no new dependency. Version 1 equals today's schema and is idempotent, so
   existing installs pass through unchanged.
+- **Note (2026-11-23, HO-013):** a database with a newer `user_version` than the app knows is opened as is. This is safe
+  only while every migration is additive (ADR-004). A future migration that is not purely additive must also make
+  older app versions refuse the file (e.g. a minimum-version marker checked before migrating).
 - **Approval**: Project Owner: **ACCEPTED in principle 2026-11-23** (decision D1). Mandatory gate before any
   Learning System table (gate G1). Implementation: PF-006.
 

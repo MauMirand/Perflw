@@ -122,8 +122,10 @@ Objectives:
 | PF-001–003 | Baseline audit (architecture, features, risks) | Claude A | REVIEW (by owner) |
 | PF-004 | Fix the failing E2E smoke test | Claude B | INTEGRATED (`dfd1fbd`) |
 | PF-007 | Safe user-data file I/O (P0) | Claude B | INTEGRATED (`5664f56`, approved HO-010) |
-| PF-006 | Versioned migrations (gate G1) | Claude B | ASSIGNED (HO-009 released 2026-11-23); branch `refactor/PF-006-migrations` from `5664f56` |
-| LS-001 | Learning System spec | Claude A | DONE: D1–D5 approved; ADR-004/005/008 ACCEPTED (2026-11-23); diagram questions open (HO-011) |
+| PF-006 | Versioned migrations (gate G1) | Claude B | APPROVED (HO-013) — awaiting owner merge; follow-up PF-021 (startup error dialog) |
+| PF-020 | Smoke-test flakes (gate G2) | Claude B (lane 1) | ASSIGNED 2026-11-23 |
+| LS-002 | Assessment model (pure) | Claude B (lane 2) | ASSIGNED 2026-11-23; up to 3 parallel Claude B sessions (owner) |
+| LS-001 | Learning System spec | Claude A | DONE: D1–D5 approved; ADR-004/005/008 ACCEPTED (2026-11-23); owner decisions D6–D17 recorded (HO-011) |
 
 Update this section whenever a task becomes active.
 
