@@ -571,7 +571,7 @@ reviews only that delta (unit tests + one smoke run). Then the owner merges. PF-
 **From:** Claude A  
 **To:** Claude B  
 **Status:** **HELD**. Issued when PF-007 is APPROVED (after the HO-008 changes) and merged into `main`. One task
-at a time.
+at a time. *Update: PF-007 APPROVED in HO-010; still held until the merge into `main` is confirmed.*
 
 #### 1. Assignment
 Implement PF-006 exactly as specified in `coordination/TASK_QUEUE.md` → "TASK: PF-006". ADR-002 is accepted in
@@ -605,6 +605,106 @@ backup; second start is a no-op; backups pruned to 3; `npm test` and `npm run te
 Do not touch files outside `workspace.js`, `auth.js`, the automation store/session modules (only if their DDL
 moves into migration 1), the new runner and its tests/fixtures. Report anything else before changing it. Smoke
 flakes at `:620`, `:949`, `:1031` are known (PF-020); report them, do not fix them in PF-006.
+
+---
+
+### HO-010 — Delta re-review of PF-007 (commit `b545f18`, branch `fix/PF-007-safe-file-io`)
+
+**Date:** 2026-11-23  
+**Task ID:** PF-007  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's branch contains HO-001, HO-004 (from `main`) and HO-007 only; no HO-010 exists there. This
+> branch has HO-002, 003, 005, 006, 008, 009. HO-010 is free. See §6 for the merge conflict this file will have.
+
+#### 1. Scope reviewed (delta only, per HO-008 §5)
+`git diff 8475dcb..b545f18`: `src/learning-workflow.js` (+12/−4), `test/learning-state-io.test.js` (+42/−3),
+`coordination/HANDOFF_LOG.md` (HO-007 §8.2 correction, §11 revision). `package.json`/`package-lock.json` unchanged
+since `main` `dfd1fbd`.
+
+#### 2. Required changes (HO-008 §3)
+| # | Change | Result | Evidence (code read) |
+|---|---|---|---|
+| 1 | Stored `pending` re-queued when idle; no double queue | **Met** | `fileAnalysis` re-queues when `entry.status === 'pending' && idleFile(id)`. `idleFile` = `analyzing !== id && !queue.some(...)`. `analyzing = fileId` is set right after `queue.shift()` and `topicFile()` with **no `await` between them**, cleared before `emit` and in `finally`. No `await` before the `while` loop either, so a poll can never see the file as "neither queued nor running" while its job is live. The missing-entry, missing-doc and old-`ANALYSIS_VERSION` paths now use the same guard. Explicit re-queues (`reanalyze` `:406`, doc update `:438`) bypass `idleFile` on purpose (new content), as HO-007 §11 states. |
+| 2 | HO-007 §8 item 2 corrected | **Met** | The wrong "existing behavior" sentence is replaced and marked *Corrected after HO-008*. |
+
+Tests added: (5) a stored `pending` with a fresh workflow instance (a restart) ends `ready`; (6) 5 polls while
+the file is being read → exactly one finished `analysis` event. Both target the defect (Claude B reports 5 fails on
+`8475dcb` and 6 fails without the `analyzing` check; not re-run by Claude A, since the code read shows both guards).
+
+#### 3. Checks (Claude A, temporary detached worktree at `b545f18`, `node_modules` linked from the main checkout)
+| Check | Time (UTC) | Result |
+|---|---|---|
+| `node --test test/learning-state-io.test.js test/safe-file.test.js test/learning-workflow.test.js` | 04:32:43Z | **PASS**, EXIT=0, 37/37, 0 todo (tests 5 and 6 listed as `ok`) |
+| `npm test` | 04:34:22Z | **PASS**, EXIT=0, 141 tests, 141 pass, 0 fail, 0 todo |
+| `npm run test:electron`, run 1 | 04:34:29–04:35:31Z | **PASS**, EXIT=0 |
+| `npm run test:electron`, run 2 | 04:35:31–04:36:30Z | **PASS**, EXIT=0 |
+| `npm run test:electron`, run 3 | 04:36:30–04:37:27Z | **PASS**, EXIT=0 |
+| `git status` in the review worktree after the runs | — | clean |
+
+Exit codes were saved with `e=$?` right after each command (the HO-007 §11 pitfall does not apply).
+
+**Smoke stability:** 3/3 here. Together with HO-008 (6 runs, 2 fixed-wait failures) that makes 7 passes in 9 runs
+on this branch's code. 3 in a row does not prove the `:620`/`:949` flakes are gone; PF-020 stays open and stays a
+precondition for the first LS renderer task (gate G2).
+
+#### 4. Non-blocking notes
+None new. HO-008 §4 notes stand (PF-014, PF-020).
+
+#### 5. Decision
+**APPROVED.** PF-007 → APPROVED in `TASK_QUEUE.md`. Integration is the owner's (the desktop orchestrator session
+merges `fix/PF-007-safe-file-io` into local `main` with `--no-ff`, per the owner's decision of 2026-11-23). Status
+becomes INTEGRATED only after that merge is recorded. HO-009 (PF-006) is released after the merge, not before.
+
+#### 6. Merge note for `worktree-perflow-manager` (docs)
+Trial merges with `git merge-tree` (no refs changed): each branch merges cleanly into `main` alone; whichever is
+merged **second** conflicts in `coordination/HANDOFF_LOG.md` only (both branches insert entries after HO-001).
+The HO numbers do not clash. Resolution: keep both sides and order entries by number
+(HO-001 … HO-006, Claude B's HO-007, HO-008 …). Proposal: merge PF-007 first; then Claude A merges `main` into
+`worktree-perflow-manager`, resolves this one file, and commits. The owner's later merge of the docs branch is then
+conflict-free.
+
+---
+
+### HO-011 — Owner's learning-loop diagram mapped onto `docs/LEARNING_SYSTEM_SPEC.md`
+
+**Date:** 2026-11-23  
+**Task ID:** LS-001 (spec)  
+**From:** Claude A  
+**To:** Project Owner (through the desktop orchestrator session)  
+**Status:** OPEN: owner answers needed. The spec is not changed until they arrive.
+
+#### 1. Mapping (spec §2.1 flow, §2.2 stages)
+| Owner's diagram | Spec | Fit |
+|---|---|---|
+| Pre Test | Stages 4–5 (setup, pre-test; kind `diagnostic`) | Defined |
+| Analyze mistakes / weaknesses | Stage 6 Diagnostic (per topic and dimension, mistake categories, weak topics ranked) | Defined |
+| Targeted notes | Stage 7 (one note per weak topic, `learning_materials`) | Defined |
+| Side notes | Mentioned only inside stage 8 ("session bar … side notes"); no definition, storage or relation to annotations or saved notes | **Gap** |
+| Learn through main file | Stage 8 Main learning (existing viewer + session bar) | Defined |
+| "Quest and journey" (data showing whether the student really learns) | **"Quest" does not appear in the spec.** "Journey" is the whole cycle (stages 2–16), not a step. The closest evidence step is stage 9 Practice + stage 10 Mistake analysis | **Gap / naming conflict** |
+| Analyze | Stage 10 Mistake analysis | Defined |
+| Notes | Stage 11 Supplementary learning (extra notes, back to practice) | Defined |
+| Final Learning | Stage 12: optional review (targeted notes + flagged mistakes); one table row only | **Partly defined** |
+| Final Exam | Stage 13 + spec §4: kind `final`, parallel items, no feedback until submit, weight 1.0; "Mastered" needs final ≥ 0.8 and a retention check | **Partly defined**: no length, time limit, pass mark for the exam itself, retake or fail path |
+| Next cycle → Pre Test | Stage 16 → new journey (stage 2) pre-filled with unmastered topics → a new pre-test | Defined, but differs: see question 6 |
+| — (not in the diagram) | Stage 14 Mastery report, stage 15 Retention check (≥ 7 days) | Spec has extra steps |
+
+#### 2. Questions for the owner
+1. **Quest:** what is a quest? (a) a targeted practice set that produces graded evidence (the spec's Practice),
+   (b) a mission of study tasks per weak topic (read X, write a note, answer N questions), (c) a game layer
+   (streaks, XP, rewards), or something else?
+2. **Journey:** is "journey" the whole cycle (as in the spec) or a step after main learning?
+3. **Side notes:** are they the student's own notes beside the file while reading, AI notes, or both? Are they
+   separate from targeted notes and from PDF annotations?
+4. **Final Learning:** required or optional? What does it contain beyond targeted notes and flagged mistakes?
+5. **Final Exam:** how many questions, time limit or not, the pass mark, whether retakes are allowed, and what
+   happens on a fail (back to practice, or the cycle still closes)?
+6. **Next cycle:** does it start with a fresh Pre Test, or does the Final Exam result count as the next cycle's
+   pre-test? Which topics: only the unmastered ones (spec) or the student's choice?
+7. **Spec extras:** keep the Mastery report and the delayed Retention check (≥ 7 days) that are not in the diagram?
 
 ---
 

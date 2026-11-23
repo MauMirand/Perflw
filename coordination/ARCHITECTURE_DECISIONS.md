@@ -158,8 +158,11 @@ Accepted in principle by the project owner on 2026-11-23 (full text stays in §7
 | ADR-006 | Evidence-based mastery replaces manual mastery %; historical values preserved; thresholds configurable initial defaults | D2, D4 |
 | ADR-007 (part) | AI questions: practice immediately, human review before pre-tests/finals | D3 |
 | — (roadmap) | First Learning milestone = offline walking skeleton (M-L1) | D5 |
+| ADR-004 | Learning data in SQLite as additive migration 2; note bodies stay Markdown | Owner, 2026-11-23 (ACCEPTED; relayed by the desktop orchestrator session) |
+| ADR-005 | Learning module boundaries (pure models, one store, coach, thin handlers); one-object IPC arguments | Owner, 2026-11-23 (ACCEPTED; relayed) |
+| ADR-008 | Study sessions are focus entries; scheduled learning = calendar events + `learning_schedule` link | Owner, 2026-11-23 (ACCEPTED; relayed) |
 
-Still PROPOSED: ADR-001, ADR-004, ADR-005, ADR-007 (remainder), ADR-008.
+Still PROPOSED: ADR-001, ADR-007 (remainder).
 
 ---
 
@@ -242,7 +245,7 @@ Do not implement major proposed changes until they are approved.
 
 ### ADR-004 — Learning System data lives in SQLite (additive migration 2), note bodies stay Markdown
 
-**Date:** 2026-11-23 · **Status:** PROPOSED · **Author:** Claude A · **Related:** LS-005, LS-006, spec §6
+**Date:** 2026-11-23 · **Status:** ACCEPTED (owner, 2026-11-23) · **Author:** Claude A · **Related:** LS-005, LS-006, spec §6
 
 - **Context**: no assessment, journey or session data exists. Learning today mixes SQLite (subjects, topics,
   files) and JSON/Markdown files (analysis, saved notes in `intel/<subjectId>/state.json`).
@@ -254,11 +257,11 @@ Do not implement major proposed changes until they are approved.
 - **Constraints**: purely additive (`CREATE TABLE`/`INDEX` only, no change to existing tables) as **migration 2**
   of PF-006/ADR-002; upgrade test from a v1 fixture. Fallback only if ADR-002 is rejected: `IF NOT EXISTS` for these
   additive tables. No mastery table: mastery is computed (ADR-006).
-- **Approval**: Project Owner: Pending.
+- **Approval**: Project Owner: ACCEPTED 2026-11-23 (owner decision relayed by the desktop orchestrator session).
 
 ### ADR-005 — Learning module boundaries and object-argument IPC
 
-**Date:** 2026-11-23 · **Status:** PROPOSED · **Author:** Claude A · **Related:** LS-002–LS-007, spec §6.1, §6.3
+**Date:** 2026-11-23 · **Status:** ACCEPTED (owner, 2026-11-23) · **Author:** Claude A · **Related:** LS-002–LS-007, spec §6.1, §6.3
 
 - **Context**: existing channels use long positional arguments (`workspace:createTask` 12, `createEvent` 10;
   `src/preload.js:60,64`); renderer files are already large (R7).
@@ -267,7 +270,7 @@ Do not implement major proposed changes until they are approved.
   `ecosystem.runAgent`; thin handlers in `main.js`; new renderer modules per screen. Every new channel takes **one
   object argument**. Answer keys are never sent to the renderer for an in-progress diagnostic/final.
 - **Trade-off**: new channels differ in style from old ones; old ones are not rewritten (CLAUDE.md §7).
-- **Approval**: Project Owner: Pending.
+- **Approval**: Project Owner: ACCEPTED 2026-11-23 (owner decision relayed by the desktop orchestrator session).
 
 ### ADR-006 — Evidence-based mastery replaces the manual subject mastery %
 
@@ -302,13 +305,13 @@ Do not implement major proposed changes until they are approved.
 
 ### ADR-008 — Study sessions are focus entries; scheduled learning is calendar events plus a link table
 
-**Date:** 2026-11-23 · **Status:** PROPOSED · **Author:** Claude A · **Related:** LS-012, LS-026, spec §7
+**Date:** 2026-11-23 · **Status:** ACCEPTED (owner, 2026-11-23) · **Author:** Claude A · **Related:** LS-012, LS-026, spec §7
 
 - **Context**: `focus_entries`/`active_timers` and `events` already exist and are shown in the calendar and timer.
 - **Decision (proposed)**: a study session runs the existing timer with `source:'learning'` and links its
   `focus_entry_id`; scheduled sessions/checks are ordinary `events` rows plus a `learning_schedule` link
   (`event_id` FK CASCADE). Existing tables are not altered. Avoids a parallel time-tracking or calendar system.
-- **Approval**: Project Owner: Pending.
+- **Approval**: Project Owner: ACCEPTED 2026-11-23 (owner decision relayed by the desktop orchestrator session).
 
 ---
 

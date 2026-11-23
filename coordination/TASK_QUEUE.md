@@ -55,8 +55,8 @@ refer to `PROJECT_STATUS.md` §6.
 |---|---|---|---|---|---|
 | PF-004 | Fix the failing Electron E2E smoke test (Learning PDF stage) | P0 | **INTEGRATED** (`dfd1fbd`, 2026-11-23) | — | R2. Commits `3b8f738`, `f2006fa` on `fix/PF-004-smoke-pdf`. Independently re-verified: `npm test` 126 pass/0 fail/2 todo; smoke 3/3. Follow-ups: PF-007, PF-020. |
 | PF-005 | Upgrade Electron off EOL 38.x to a supported major | P0 | BACKLOG | PF-004; ADR-001 approval | R1, R5 |
-| PF-006 | Versioned, transactional schema migrations with a backup | P1 | READY — assignment written and HELD (HO-009) until PF-007 is merged | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
-| PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **REVISION (minor)** — `8475dcb` reviewed in HO-008: re-queue stored `pending`, correct HO-007 §8.2 | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
+| PF-006 | Versioned, transactional schema migrations with a backup | P1 | READY — assignment written and HELD (HO-009) until PF-007 is merged (PF-007 APPROVED, HO-010) | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
+| PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **APPROVED** (HO-010, 2026-11-23): `8475dcb` + revision `b545f18`; awaiting owner merge (not INTEGRATED) | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
 | PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | BACKLOG | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
 | PF-008 | `npm run verify` and Windows CI (GitHub Actions) | P1 | BACKLOG | PF-004; owner OK for Actions | R6 |
 | PF-009 | Owner decision: build expense tracking or remove the unused finance and ledger tables | P1 | BACKLOG | owner | R9; needs a decision, not code |
@@ -75,7 +75,7 @@ Parallel-safe now: PF-004 alone (Claude B). After that, PF-007 and PF-010 do not
 
 ### TASK: PF-007 — Safe user-data file I/O on Windows
 
-**Status:** READY when the owner approves ADR-003 (amended 2026-11-23)  
+**Status:** APPROVED (HO-010, 2026-11-23); awaiting owner merge  
 **Priority:** P0  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -115,23 +115,23 @@ PF-004 APPROVED; ADR-003 approval.
 - Do not touch `workspace.js`/`auth.js` (PF-006 owns them).
 
 #### Acceptance Criteria
-- [ ] `safe-file` unit tests: retry then success; retry exhausted → throws and leaves no `.tmp`; `ENOENT` →
+- [x] `safe-file` unit tests: retry then success; retry exhausted → throws and leaves no `.tmp`; `ENOENT` →
       fallback; busy read → throws, never fallback; invalid JSON → `.corrupt-*` file kept and fallback returned;
       written file mode is `0o600` where the platform reports it.
-- [ ] Both `learning-state-io` tests pass without `todo`.
-- [ ] New tests for preferences and the agent registry: a busy read does not wipe the file.
-- [ ] `npm test` exit 0 with 0 todo; `npm run test:electron` exit 0 (fresh `npm ci` in the worktree).
-- [ ] Committed on `fix/PF-007-safe-file-io`; HANDOFF_LOG entry.
+- [x] Both `learning-state-io` tests pass without `todo`.
+- [x] New tests for preferences and the agent registry: a busy read does not wipe the file.
+- [x] `npm test` exit 0 with 0 todo (141/141); `npm run test:electron` exit 0 (Claude A 3/3 at `b545f18`, HO-010).
+- [x] Committed on `fix/PF-007-safe-file-io` (`8475dcb`, `b545f18`); HANDOFF_LOG entry (HO-007).
 
 #### Review
 **Reviewed By:** Claude A  
-**Decision:** Pending
+**Decision:** APPROVED WITH MINOR CHANGES (HO-008) → revision **APPROVED** (HO-010, 2026-11-23). Not integrated.
 
 ---
 
 ### TASK: PF-006 — Versioned, transactional schema migrations with a backup
 
-**Status:** READY (assign after PF-007 is reviewed)  
+**Status:** READY (PF-007 reviewed and APPROVED, HO-010; assign after PF-007 is merged into `main`)  
 **Priority:** P1 (gate G1 for the Learning System)  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -225,10 +225,12 @@ task is assigned only after the previous one is reviewed by Claude A. No batches
 
 #### Phase 1 — Engine core (pure modules, no schema, no UI)
 
-**LS-001 · Owner approval of spec and decisions** — Owner · Depends: — · Status: D1–D5 APPROVED in principle;
-ADR-004/005/008 PENDING.
+**LS-001 · Owner approval of spec and decisions** — Owner · Depends: — · Status: **DONE** (2026-11-23). D1–D5
+APPROVED in principle; ADR-004/005/008 ACCEPTED by the owner (relayed by the desktop orchestrator session).
+Open product questions on the owner's learning-loop diagram are tracked in HO-011; they refine the spec but do not
+block LS-002.
 - [x] D1–D5 recorded in spec §9 and ADRs.
-- [ ] Owner confirms ADR-004, ADR-005, ADR-008.
+- [x] Owner confirms ADR-004, ADR-005, ADR-008.
 
 **LS-002 · `src/assessment-model.js`** — P1 · Depends: LS-001 (ADR-005 confirmed). Full spec below.
 
@@ -423,7 +425,7 @@ otherwise wait for a review.
 
 ### TASK: LS-002 — Assessment model (pure module)
 
-**Status:** BACKLOG (READY when the owner confirms ADR-005; assigned only after PF-006 is reviewed, per the one-task rule)  
+**Status:** READY (ADR-005 ACCEPTED 2026-11-23); assigned only after PF-006 is reviewed, per the one-task rule  
 **Priority:** P1  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -457,7 +459,7 @@ New: `src/assessment-model.js`, `test/assessment-model.test.js`. Read only: `src
 `test/topics.test.js` (conventions), `package.json` (test script glob).
 
 #### Dependencies
-LS-001 (D1–D5 approved ✔; ADR-005 confirmation pending).
+LS-001 (D1–D5 approved ✔; ADR-005 ACCEPTED ✔, 2026-11-23).
 
 #### D3 requirement
 Questions carry `review: 'approved' | 'unreviewed' | 'rejected'`. Manual and accepted template questions are
