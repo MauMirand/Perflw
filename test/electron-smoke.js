@@ -7,6 +7,17 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 
+// The renderer loads pdf.js by URL from <app>/node_modules (src/learning-pdf.js), not through Node's module lookup.
+// A git worktree without its own install still starts (Node finds a parent folder's node_modules for the main
+// process), but every PDF view then fails, so stop here with the fix instead of timing out in the Learning stage.
+if (!process.env.PERFLW_ELECTRON_EXE) {
+  const appDir = process.env.PERFLW_ELECTRON_APP_DIR || path.join(__dirname, '..');
+  if (!fs.existsSync(path.join(appDir, 'node_modules', 'pdfjs-dist', 'build', 'pdf.min.mjs'))) {
+    console.error(`Missing ${path.join(appDir, 'node_modules', 'pdfjs-dist')}. Run "npm ci" in ${appDir} first.`);
+    process.exit(1);
+  }
+}
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-electron-'));
 const imagePath = path.join(__dirname, '..', 'assets', 'icon.png');
 // Study file the Upload topics button reads (the dialog is skipped in tests): it becomes one topic, "Week 1 notes"
@@ -88,8 +99,10 @@ async function waitFor(expression, label = expression, timeout = 6000) {
     await sleep(50);
   }
   const seen = await evaluate("(document.querySelector('.ln-side')?.innerText || '').slice(0, 600)").catch(() => '');
+  const viewer = await evaluate("(document.querySelector('.ln-viewer .ln-doc-state')?.innerText || '').slice(0, 300)").catch(() => '');
   throw new Error(`UI condition did not become true: ${label}${seen ? `
-Side panel: ${seen}` : ''}`);
+Side panel: ${seen}` : ''}${viewer ? `
+Viewer: ${viewer}` : ''}`);
 }
 async function screenshot(name) {
   if (!screenshots) return;
