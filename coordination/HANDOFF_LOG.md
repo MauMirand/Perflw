@@ -848,7 +848,7 @@ conflict-free.
 **From:** Claude A  
 **To:** Project Owner (through the desktop orchestrator session)  
 **Status:** **ANSWERED** 2026-11-23 (§3). Folded into the spec as D6–D11, plus D12 (UI). 5 follow-up questions in
-spec §9.1.
+spec §9.1, answered 2026-11-23 as D13–D17.
 
 #### 1. Mapping (spec §2.1 flow, §2.2 stages)
 | Owner's diagram | Spec | Fit |

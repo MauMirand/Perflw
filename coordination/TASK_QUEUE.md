@@ -231,7 +231,7 @@ task is assigned only after the previous one is reviewed by Claude A. No batches
   named in the handoff). Screenshots at 1280 px and 400 px placed **side by side with the existing Learning pages**
   (subject page and topic viewer) in the handoff; Claude A compares them in review.
 
-**Owner decisions D6–D12 (2026-11-23)** are in spec §9; open follow-ups in spec §9.1. They change LS-005, LS-006,
+**Owner decisions D6–D17 (2026-11-23)** are in spec §9 and §9.1 (no open follow-ups; ADR-007 ACCEPTED). They change LS-005, LS-006,
 LS-008, LS-012, LS-013, LS-022 to LS-024 and add LS-031 to LS-033. LS-002 to LS-004 are unchanged.
 
 #### Phase 1 — Engine core (pure modules, no schema, no UI)
@@ -272,7 +272,8 @@ block LS-002.
 - [ ] Failure test: an injected error inside migration 2 rolls back to v1 and leaves the backup file in place.
 - [ ] FK cascade test: deleting a subject removes its journeys, questions, assessments, answers.
 - [ ] Includes the D8/D10 columns from spec §6.2: `assessments.attempt`, `assessments.retake_of`,
-      `learning_materials.parent_material_id`, kind `side_note_ai` (all inside migration 2, still additive).
+      `learning_materials.parent_material_id`, kind `side_note_ai`, `learning_sessions.visited` (D13) (all inside
+      migration 2, still additive).
 
 **LS-006 · `src/learning-store.js`** — P1 · Depends: LS-005, LS-002 (both APPROVED).
 - [ ] CRUD for journeys (+topics), questions, assessments, items (with immutable `question_snapshot`), answers,
@@ -333,6 +334,8 @@ block LS-002.
 - [ ] App quit with a running session closes it at the last activity time (test with injected clock).
 - [ ] Side notes stored as `learning_materials` kind `side_note`; the body is only the student's text (D8); they
       are listed separately from targeted notes and from PDF annotations.
+- [ ] The session records `visited` (sections opened in the viewer, materials opened) for the D13 retake check
+      (test: opening a section and a note while a session runs appends both, once each).
 - [ ] Smoke step: start session, add side note, end; calendar/timer shows the entry (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
@@ -341,8 +344,8 @@ block LS-002.
 
 #### Phase 2 — Quiz completeness
 
-**LS-013 · Practice mode ("Quest" in the UI, D6)** — P2 · Depends: LS-011 (APPROVED).
-- [ ] Student-facing label is "Quest" (pending spec §9.1 Q5; code keeps kind `practice`).
+**LS-013 · Practice mode (the Quest concept, D6)** — P2 · Depends: LS-011 (APPROVED).
+- [ ] Student-facing label stays **"Practice"** (D17); "Quest" is not shown in the UI; code keeps kind `practice`.
 - [ ] Check → immediate feedback with explanation and source link; one retry for deterministic types scored ×0.5.
 - [ ] Practice answers recorded as kind `practice` (weight 0.5 in mastery; test).
 - [ ] Smoke step: answer wrong, see feedback, retry.
@@ -368,7 +371,7 @@ block LS-002.
 - [ ] Works with no provider configured (smoke step with AI disabled).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-017 · Question Writer agent and generation job** — P2 · Depends: LS-015 (APPROVED), ADR-007 confirmed.
+**LS-017 · Question Writer agent and generation job** — P2 · Depends: LS-015 (APPROVED), ADR-007 ✔ (ACCEPTED 2026-11-23).
 - [ ] Agent + skill created via the `learning-agents.js` pattern; `learning-coach.js` job via `ecosystem.runAgent`,
       cancellable, one at a time.
 - [ ] Output rejected unless it passes `validateQuestion` and cites a source chunk present in the prompt (unit tests
@@ -390,7 +393,7 @@ block LS-002.
 - [ ] Explanation constrained to the note's cited excerpts; labelled with the model; omitted cleanly with AI off.
 - [ ] Unit test with fake `runAgent` covering success, NOT_IN_FILE-style refusal, and error.
 
-**LS-032 · Side-note AI help (D8)** — P3 · Depends: LS-012, LS-017 (APPROVED); ADR-007 remainder confirmed.
+**LS-032 · Side-note AI help (D8)** — P3 · Depends: LS-012, LS-017 (APPROVED); ADR-007 ✔ (ACCEPTED 2026-11-23).
 - [ ] "Check my note" runs a `learning-coach.js` job via `ecosystem.runAgent`; output = suggestions (gaps, unclear
       points, short explanation) grounded on the note and its cited pages.
 - [ ] Stored as a `side_note_ai` material linked by `parent_material_id`, with provenance; **never** written into
@@ -420,13 +423,16 @@ block LS-002.
 **LS-023 · Final exam with parallel items (D10)** — P2 · Depends: LS-010, LS-017, LS-033 (APPROVED).
 - [ ] Final selection excludes every item used in the journey's diagnostics and unreviewed AI items (test).
 - [ ] When too few items exist, the setup sheet says how many are missing per topic and offers bank/template/AI.
-- [ ] Item count 50–100 chosen by the student (validated; spec §4.9).
+- [ ] Item count 50–100 chosen by the student (validated; spec §4.9). Enforced from this task on (D15).
 - [ ] Pure `DEFAULT_EXAM_CONFIG` (frozen, versioned) + `examTimeLimit(items, config)` and `passMark(items, config)`
       per spec §4.9, with boundary tests (d̄ = 1 / 2 / 3 → 75 / 82.5 / 90%; the 50-item example → 50 min).
 - [ ] Timer with 5- and 1-minute warnings; time-out submits saved answers (test with an injected clock).
 - [ ] Result shows passed / not passed against the stored pass mark.
 - [ ] Retake: a new attempt (`attempt` + 1, `retake_of`) is allowed only when `assessment:retakeStatus` reports the
-      review complete (definition per spec §9.1 Q1); earlier attempts are never changed (test).
+      review complete (D13: every section of each failed topic's files opened in a `review` session after the
+      failed attempt, plus its targeted notes, read from `learning_sessions.visited`); earlier attempts are never
+      changed (test, incl. one missing section → retake refused, with the missing items listed).
+- [ ] Before starting: time ×1, ×1.5, ×2 or untimed (D16); stored in `config`; the attempt is labelled in results.
 - [ ] Unlocks only after Final learning (LS-033) is done (D9).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 

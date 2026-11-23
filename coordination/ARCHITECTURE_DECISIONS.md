@@ -156,13 +156,13 @@ Accepted in principle by the project owner on 2026-11-23 (full text stays in §7
 | ADR-002 | Versioned, transactional migrations with backup; mandatory gate before Learning System tables | D1 |
 | ADR-003 (amended) | Safe user-data file I/O: atomic write with bounded retry; busy reads throw, never "empty"; corrupt JSON moved aside | Owner in chat, 2026-11-23 (fully ACCEPTED) |
 | ADR-006 | Evidence-based mastery replaces manual mastery %; historical values preserved; thresholds configurable initial defaults | D2, D4 |
-| ADR-007 (part) | AI questions: practice immediately, human review before pre-tests/finals | D3 |
+| ADR-007 | AI is optional; AI output provisional, validated (code-computed scores) and attributed; AI questions in practice at once, human review before pre-tests/finals | D3; remainder owner 2026-11-23 (ACCEPTED; relayed) |
 | — (roadmap) | First Learning milestone = offline walking skeleton (M-L1) | D5 |
 | ADR-004 | Learning data in SQLite as additive migration 2; note bodies stay Markdown | Owner, 2026-11-23 (ACCEPTED; relayed by the desktop orchestrator session) |
 | ADR-005 | Learning module boundaries (pure models, one store, coach, thin handlers); one-object IPC arguments | Owner, 2026-11-23 (ACCEPTED; relayed) |
 | ADR-008 | Study sessions are focus entries; scheduled learning = calendar events + `learning_schedule` link | Owner, 2026-11-23 (ACCEPTED; relayed) |
 
-Still PROPOSED: ADR-001, ADR-007 (remainder).
+Still PROPOSED: ADR-001.
 
 ---
 
@@ -258,7 +258,8 @@ Do not implement major proposed changes until they are approved.
   of PF-006/ADR-002; upgrade test from a v1 fixture. Fallback only if ADR-002 is rejected: `IF NOT EXISTS` for these
   additive tables. No mastery table: mastery is computed (ADR-006).
 - **Note (2026-11-23, within the accepted scope):** owner decisions D8/D10 add `assessments.attempt`,
-  `assessments.retake_of` and `learning_materials.parent_material_id` + kind `side_note_ai` to migration 2. Still
+  `assessments.retake_of` and `learning_materials.parent_material_id` + kind `side_note_ai` to migration 2; D13 adds
+  `learning_sessions.visited`. Still
   `CREATE TABLE` only; no existing table changes. Spec §6.2.
 - **Approval**: Project Owner: ACCEPTED 2026-11-23 (owner decision relayed by the desktop orchestrator session).
 
@@ -293,7 +294,7 @@ Do not implement major proposed changes until they are approved.
 
 ### ADR-007 — AI is optional; AI output is provisional, validated and attributed
 
-**Date:** 2026-11-23 · **Status:** PROPOSED · **Author:** Claude A · **Related:** LS-015–LS-019, spec §4.4, §6.4, §6.6
+**Date:** 2026-11-23 · **Status:** ACCEPTED (owner, 2026-11-23) · **Author:** Claude A · **Related:** LS-015–LS-019, LS-032, spec §4.4, §6.4, §6.6
 
 - **Decision (proposed)**: every stage works without a model (manual + template questions, deterministic grading,
   rubric self-grading, deterministic targeted notes). AI questions must pass `validateQuestion` and cite a source
@@ -303,8 +304,8 @@ Do not implement major proposed changes until they are approved.
 - **D3 (accepted)**: generated questions are usable immediately in practice; they need human review
   (`review:'approved'`) before appearing in pre-tests, final exams or retention checks.
 - **Approval**: Project Owner: **D3 ACCEPTED in principle 2026-11-23**; D5 (offline walking skeleton first) accepted
-  and consistent with this ADR. The rest of the ADR (validation, code-computed scores, provenance): PROPOSED,
-  awaiting confirmation.
+  and consistent with this ADR. The rest of the ADR (validation, code-computed scores, provenance): **ACCEPTED
+  2026-11-23** (owner chose "Accept" in the desktop orchestrator session's question dialog).
 
 ### ADR-008 — Study sessions are focus entries; scheduled learning is calendar events plus a link table
 
