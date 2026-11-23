@@ -171,6 +171,27 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
 - [ ] Root cause stated for each named flake, or "not reproduced in N runs" with what was tried.
 - [ ] Committed on the session's branch (ref and base in HO-014); HANDOFF entry HO-014.
 
+#### Claude A review checklist (prepared 2026-11-23; LS-002 needed none, it was reviewed and integrated)
+1. **Scope:** `git diff --stat <base>..<tip>` lists `test/electron-smoke.js` and HO-014 only. Anything under `src/` is a defect
+   of the submission (report-only rule).
+2. **Remaining sleeps:** every `sleep(` left in the file is listed in HO-014 with a reason and is pacing input, not waiting for
+   layout, animation or async state.
+3. **Wait quality:** each new `waitFor` polls the *asserted* condition (not a proxy such as "element exists"), has a label, a
+   bounded timeout, and its failure message carries the last observed value.
+4. **No weakened assertions:** compare removed/changed `assert*` lines in the diff; tolerances, expected values and selectors are
+   unchanged, or the change is justified in HO-014.
+5. **Transitions:** steps that waited a duration now wait for `transitionend` or the final computed value.
+6. **Root causes:** the three named flakes (Home card drag, side-panel collapse, sidebar group collapse) each have a cause with
+   evidence (logged values or timings), or "not reproduced in N runs" with what was tried; any `src/` race is reported, not fixed.
+7. **Evidence:** 10 consecutive exit codes (each captured right after its command), before/after total time, `npm test` count.
+8. **Claude A re-run:** `npm ci` in a clean checkout of the tip, then `npm run test:electron` three times (exit codes
+   recorded) and `npm test`; compare duration with HO-014. Three green runs support the claim but do not prove it (flakes were
+   about 1 in 11).
+9. **Failure probe:** in a throwaway copy, flip one asserted condition and confirm the suite fails within the helper's timeout
+   with the label and last value (it must not hang or pass).
+10. **Decision:** APPROVED only when 1 to 9 hold; otherwise CHANGES REQUESTED with the failing item numbers. The orchestrator
+    merges after `npm test` and one `npm run test:electron` on the merge result (G2 opens when PF-020 is INTEGRATED).
+
 ---
 
 ### TASK: LS-005 — Migration 2: Learning System tables
