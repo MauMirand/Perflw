@@ -908,6 +908,123 @@ tasks. Unchanged: PF-006, LS-002 to LS-004.
 
 ---
 
+### HO-012 — PF-006: Versioned, transactional schema migrations with a backup
+
+**Date:** 2026-11-23  
+**Task ID:** PF-006  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED
+
+#### 1. Understanding (stated before coding)
+Replace the ad hoc schema bootstrap of `workspace.sqlite` and `accounts.sqlite` with one runner: version in
+`PRAGMA user_version`, ordered `{ version, up(db) }` list, each step in `BEGIN IMMEDIATE … COMMIT`, `ROLLBACK` plus a
+plain-language error on failure. Version 1 is today's schema exactly (the bootstrap moved, not changed), idempotent
+for every pre-PF-006 install (version 0, any subset of old columns), including the tables the automation, session
+and connection stores create. Inside v1 fix the two known defects (rebuild in the runner's transaction; each
+`subject_files` column guarded on its own). Back up with `VACUUM INTO` before the first pending step on a file that
+has tables, keep the newest 3, never touch the live file otherwise. No learning tables (LS-005), no other schema
+change, no new dependency, no user-visible change.
+
+#### 2. Summary of the implementation
+- **`src/db-migrate.js` (new, 110 lines)**: `migrate(db, { name, migrations, backup, keep = 3, now })` →
+  `{ from, to, backup }`. Validates the list (versions 1..n, `up` is a function). Re-reads `user_version` after
+  `BEGIN IMMEDIATE` so a step another process already applied is skipped. On error: `ROLLBACK` if
+  `db.isTransaction`, then throws "Perflw could not update its <name> data (step N of M). That step was undone, so
+  your data is as it was before it. A copy from before the update is at <path>. (<cause>)" with `cause` set.
+  A file whose version is newer than the list is left untouched (returns `from === to`, runs nothing).
+- **Backup** (`backupDatabase`): `VACUUM INTO <file>.bak-v<from>-<yyyymmddThhmmssmmmZ>.tmp`, open it read-only,
+  `PRAGMA quick_check` must be `ok`, then rename to the final name (a `-1`, `-2` … suffix if the name exists).
+  A failed backup throws "Perflw could not make a safety copy of its <name> data before updating it, so nothing was
+  changed. …" and no step runs. `pruneBackups` keeps the newest 3 by timestamp; only names matching
+  `^<base>\.bak-v\d+-\d{8}T\d{9}Z(-\d+)?$` are considered. The live file is never written by these helpers.
+- **`src/workspace.js`**: the bootstrap became `workspaceSchemaV1(db)` = `WORKSPACE_MIGRATIONS[0]`, statement for
+  statement the same, with: `PRAGMA foreign_keys = ON` moved before `migrate` (it is a no-op inside a transaction);
+  the `planner_items` rebuild without its own `BEGIN;`/`COMMIT;`; `preview_name` and `preview_status` each with
+  their own guard; then `createAutomationSchema`, `createSessionSchema`, `createConnectionSchema` in the order the
+  app ran them before. `createWorkspace(root, { migrations })` closes the DB and rethrows if migrating fails.
+- **`src/auth.js`**: same pattern, `accountsSchemaV1` = `ACCOUNT_MIGRATIONS[0]`.
+- **`src/automation/store.js`, `sessions.js`, `connections.js`**: DDL moved out of the store constructors into
+  exported `create*Schema(db)` functions called only by workspace migration 1. Store logic unchanged.
+
+**Tables in v1.** workspace (24): active_timers, agents, chat_defaults, chat_memory, chat_messages, chat_sessions,
+documents, events, finance_accounts, finance_categories, finance_transactions, focus_entries, goals,
+ledger_entries, milestones, planner_items, project_blocks, projects, provider_connections, subject_files,
+subject_topics, subjects, tasks, workflows (+ 26 indexes; full SQL and columns in
+`test/fixtures/schema/workspace-v1.json`). accounts (2): users, sessions (`accounts-v1.json`).
+
+#### 3. Modified files
+- `src/db-migrate.js` (new)
+- `src/workspace.js`, `src/auth.js`
+- `src/automation/store.js`, `src/automation/sessions.js`, `src/automation/connections.js` (DDL moved into v1)
+- `test/db-migrate.test.js` (new, 13 tests)
+- `test/fixtures/schema/generate.js` (new; regenerates the v1 fixtures from any `src/` tree)
+- `test/fixtures/schema/workspace-v1.json`, `accounts-v1.json` (generated from `main` at `5664f56`, before the change)
+- `test/fixtures/schema/workspace-pre-learning-kind.sql`, `workspace-pre-preview-name.sql`,
+  `workspace-preview-name-only.sql` (old-install fixtures, readable SQL instead of binary files)
+- `test/planner.test.js` (1 line, outside the HO-009 §5 list; reported here): its upgrade test rebuilt an old
+  `planner_items` inside a file already stamped `user_version = 1`, so migration 1 no longer ran. Real pre-PF-006
+  installs are at version 0; the fixture now sets `PRAGMA user_version = 0`. Assertions unchanged.
+- `docs/ARCHITECTURE.md` §2 updated.
+- `coordination/HANDOFF_LOG.md` (this entry).
+
+#### 4. Git information
+**Branch:** `claude/pf-006-migrations-3b8b79` (the orchestrator's worktree branch; HO-009 named
+`refactor/PF-006-migrations`, which was not created)  
+**Base:** `5664f56`, then fast-forwarded to `main` at `98f6453` (Claude A docs merge, docs only) before committing  
+**Commits:** `6e65b6a` refactor(db) runner + migration 1 · `806aedc` test(db) tests and fixtures ·
+`3a27d0e` docs(architecture) §2 · plus the commit adding this entry  
+`git diff main...HEAD --check`: clean.
+
+#### 5. Acceptance evidence
+| Criterion | Evidence | Result |
+|---|---|---|
+| `VACUUM INTO` works under `node:sqlite` | test 1 (Node 22.22.2 / SQLite 3.51.2); also checked under Electron's Node 22.22.0 / SQLite 3.50.4 with `ELECTRON_RUN_AS_NODE=1`: copy opens, rows and `user_version` equal, `isTransaction` available, `user_version` rolls back | PASS |
+| Fresh install → v1 both DBs, schema identical to `main` | test 2: `dumpSchema` (sqlite_master type/name/tbl_name/sql + `table_info`) deep-equals the fixtures generated from `5664f56`; also `generate.js` on the new `src/` gives byte-identical JSON | PASS |
+| 3 old-install fixtures → v1, all rows kept, both preview columns | tests 3–5: every old row and column equal after upgrade; tables, indexes and per-column definitions equal v1; backup `bak-v0-*` holds the old rows; `createPlannerItem(kind:'learning')` works | PASS |
+| Failure inside migration 1 rolls back the rebuild | test 6: old `planner_items` CHECK kept, no `planner_items_old`, rows equal, `user_version` 0; next start upgrades | PASS |
+| Injected failure in migration 2 → stays v1, no open transaction, backup exists and opens | test 7 (via `createWorkspace`): v1, `should_vanish` absent, ghost row absent, `bak-v1-*` passes `integrity_check`, app reopens; test 8 (runner): `db.isTransaction === false`, same connection usable | PASS |
+| Startup twice is a no-op | test 9: no new backup, schema equal, both DB files byte-identical (SHA-256) | PASS |
+| Backups pruned to newest 3 | test 10: 4 old + 1 new → newest 3 remain; unrelated look-alike files and the live DB untouched | PASS |
+| Same runner for `accounts.sqlite` | test 12 legacy accounts file → v1, rows kept, backup; existing `auth.test.js` legacy test still passes | PASS |
+| Backup failure stops the upgrade | test 11: plain message, version 0, no table added, no open transaction | PASS |
+
+#### 6. Testing (exit codes saved with `e=$?` right after each command)
+| Command | Time (UTC) | Result |
+|---|---|---|
+| `node --test test/db-migrate.test.js` | 04:56Z | PASS, 13/13 |
+| `npm test` | 04:58:01–04:59:36Z | **PASS**, EXIT=0, 154 tests, 154 pass, 0 fail, 0 cancelled, 0 todo (141 before + 13 new) |
+| `npm run test:electron`, run 1 | 04:59:36–05:00:36Z | **PASS**, EXIT=0 |
+| `npm run test:electron`, run 2 | 05:00:36–05:01:35Z | **PASS**, EXIT=0 |
+| `npm run test:electron`, run 3 | 05:01:35–05:02:33Z | **PASS**, EXIT=0 |
+
+`npm ci` was run first (EXIT=0). The runs used the working tree before the docs-only fast-forward to `98f6453`;
+the code under test is byte-identical to the commits. The first `npm test` run (before the `planner.test.js`
+fixture fix) had 1 failure, test 86, explained in §3. No PF-020 flake (`:620`, `:949`, `:1031`) occurred in these
+3 runs; 3 passes do not prove it is gone.
+
+#### 7. Limitations and open questions
+1. `UPDATE projects SET updated_at=created_at WHERE updated_at=''` used to run on every start; now it runs once, in
+   migration 1. No current writer inserts an empty `updated_at` (all inserts in `workspace.js` set it), so no
+   visible change is expected.
+2. A failed backup or migration now throws from `createWorkspace`/`createAuth` at startup. `main.js` does not catch
+   it, so the app fails to start with the error instead of opening a half-migrated DB. Showing that message in a
+   dialog is not in PF-006 scope; suggest a follow-up task.
+3. First start after this change on an existing install writes one `workspace.sqlite.bak-v0-*` and one
+   `accounts.sqlite.bak-v0-*` (full copies; disk use equals the DB size each).
+4. A DB with a newer `user_version` than the app knows is opened as is (no error). Decision needed from Claude A:
+   keep this (additive migrations, ADR-004) or refuse to open.
+5. Branch name differs from HO-009 (`refactor/PF-006-migrations`); the orchestrator assigned this worktree branch.
+
+#### 8. Required next action
+Claude A: review against "TASK: PF-006" and decide on §7 items 2 and 4.
+
+#### 9. Review result
+**Reviewer:** Claude A  
+**Decision:** PENDING
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
