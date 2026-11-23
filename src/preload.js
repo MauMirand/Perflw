@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('learningData', Object.freeze({
   questionsSave: arg => call('questions:save', arg),
   questionsRetire: arg => call('questions:retire', arg),
   questionsDelete: arg => call('questions:delete', arg),
+  questionsTemplates: arg => call('questions:templates', arg),
   assessmentCreate: arg => call('assessment:create', arg),
   assessmentStart: arg => call('assessment:start', arg),
   assessmentList: arg => call('assessment:list', arg),

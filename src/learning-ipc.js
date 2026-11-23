@@ -13,6 +13,7 @@ const model = require('./assessment-model');
 const mastery = require('./mastery-model');
 const exam = require('./exam-model');
 const insight = require('./learning-insight');
+const templates = require('./question-templates');
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -60,7 +61,7 @@ const totals = assessment => assessment.items.reduce((t, i) => ({
   pending: t.pending + (i.answer && i.answer.gradeStatus === 'pending' ? 1 : 0),
 }), { score: 0, max: 0, pending: 0 });
 
-function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, now = () => Date.now() }) {
+function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, analysisOf = null, now = () => Date.now() }) {
   const store = () => workspace.learningStore();
   const on = (channel, keys, work) => handle(channel, arg => {
     const user = requireUser();
@@ -92,6 +93,18 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, n
   on('questions:save', ['question'], (u, a) => store().saveQuestion(u, a));
   on('questions:retire', ['questionId'], (u, a) => store().retireQuestion(u, a));
   on('questions:delete', ['questionId'], (u, a) => store().deleteQuestion(u, a));
+  /* Template drafts from the analysed files (spec §4.8.2). Nothing is stored; the student accepts the ones they want. */
+  on('questions:templates', ['subjectId'], (u, a) => {
+    const subject = store().listQuestions(u, { subjectId: a.subjectId }) && a.subjectId; // ownership check through the store
+    const rows = workspace.listTopics(u, subject).rows.filter(r => r.kind === 'topic' && r.fileId);
+    const files = {};
+    for (const fileId of new Set(rows.map(r => r.fileId))) {
+      try { const analysis = analysisOf ? analysisOf(u, fileId) : null; if (analysis && analysis.status === 'ready') files[fileId] = analysis; } catch { /* a file that cannot be read gives no drafts */ }
+    }
+    const taken = new Set(store().listQuestions(u, { subjectId: subject }).map(q => q.id));
+    const drafts = templates.templateQuestions({ subjectId: subject, topics: rows.map(r => ({ id: r.id, title: r.title, fileId: r.fileId })), files }).filter(d => !taken.has(d.id));
+    return { drafts, analysed: Object.keys(files).length, files: new Set(rows.map(r => r.fileId)).size };
+  });
 
   // ───────── choosing the questions of an assessment (shared by create and the exam preview)
   function select(u, a) {

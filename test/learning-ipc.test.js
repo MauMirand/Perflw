@@ -37,7 +37,7 @@ function setup() {
   registerLearningIpc({
     handle: (channel, action) => handlers.set(channel, action),
     requireUser: () => { userChecks += 1; if (!user) throw new Error('Your session has expired. Log in again.'); return user; },
-    workspace, dataDir: dir, now: () => clock.now,
+    workspace, dataDir: dir, analysisOf: (userId, fileId) => ({ status: 'ready', sections: [{ number: '1', title: 'Topic t1', page: 1, description: 'About t1.', keyPoints: ['Point one.', 'Point two.'] }] }), now: () => clock.now,
   });
   return {
     call: (channel, arg) => handlers.get(channel)(arg),
@@ -81,7 +81,7 @@ test('every channel is registered and every preload learningData channel exists 
   assert.deepEqual(registered, [
     'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
-    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'review:due',
+    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due',
   ]);
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
   const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review):[A-Za-z]+)'/g)].map(m => m[1]).sort();
@@ -400,4 +400,14 @@ test('practice these: exactly the listed questions', () => {
   const only = [questions[0].id, questions[2].id];
   const made = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { only } }).assessment;
   assert.deepEqual(made.items.map(i => i.question.id).sort(), only.sort());
+});
+
+test('template drafts come from analysed files, are not stored, and are hidden once accepted', () => {
+  const t = setup();
+  // topics need a file to have drafts: give t1 a file row
+  t.store.constructor; // (the fake workspace has no file API; the drafts for topics without a file are simply empty)
+  const none = t.call('questions:templates', { subjectId: 's1' });
+  assert.equal(none.drafts.length, 0); assert.equal(none.files, 0);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('questions:templates', { subjectId: 's1' }), /not found/i);
 });

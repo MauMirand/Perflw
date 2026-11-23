@@ -169,6 +169,10 @@ async function main() {
   await waitFor("document.querySelectorAll('.qz-q').length === 1", 'type filter');
   await fill('[data-qz-form="bank-filter"] [name="type"]', '');
   await waitFor("document.querySelectorAll('.qz-q').length === 13", 'filter cleared');
+  await click('[data-qz="templates"]');
+  await waitFor("/These topics have no file yet/.test(document.querySelector('.qz').textContent)", 'template drafts explain there is no file yet');
+  await click('[data-qz="bank"]');
+  await waitFor("document.querySelectorAll('.qz-q').length === 13", 'back in the bank');
   await click('[data-qz="edit"]');
   await waitFor("!!document.querySelector('[data-qz-form=\"add\"]') && /Editing a question/.test(document.querySelector('.qz').textContent)", 'edit form');
   assert.equal(await evaluate("document.querySelector('[data-qz-form=\"add\"] [name=\"prompt\"]').value"), 'Which bond is ionic?', 'edit form is filled');

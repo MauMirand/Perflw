@@ -56,7 +56,7 @@
 
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
-  const VIEWS = { notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  const VIEWS = { templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
@@ -139,7 +139,16 @@
       <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired questions</label></form>
       <p class="ln-soon" role="status">${list.length} question${list.length === 1 ? '' : 's'}.</p>
       ${rows ? `<ul class="qz-qlist">${rows}</ul>` : '<p class="ln-soon">No questions match. Write your first one with Add question.</p>'}
-      <div class="qz-row">${btn('add', 'Add question')}${ghost('home', 'Back', 'data-qz-focus')}</div>`;
+      <div class="qz-row">${btn('add', 'Add question')}${ghost('templates', 'Template drafts', 'title="Draft questions built from your analysed files, no AI"')}${ghost('home', 'Back', 'data-qz-focus')}</div>`;
+  }
+
+  function templatesView(S) {
+    const T = S.templates || { drafts: [], analysed: 0, files: 0 };
+    const rows = T.drafts.map(d => `<li class="qz-q"><p class="qz-q-prompt">${esc(d.prompt)}</p><p class="ln-soon">${esc(TYPES[d.type] || d.type)} · from "${esc((d.source[0] || {}).section || '')}" · “${esc((d.source[0] || {}).quote || '')}”</p>
+      <span class="qz-row">${btn('tpl-accept', 'Accept', `data-id="${esc(d.id)}"`)}${ghost('tpl-skip', 'Skip', `data-id="${esc(d.id)}"`)}</span></li>`).join('');
+    const empty = !T.files ? 'These topics have no file yet. Upload a file as a topic and its analysis will give drafts here.' : !T.analysed ? 'Your files are still being analysed. Try again in a moment.' : 'No more drafts: everything useful is already in your bank.';
+    return `<p class="ln-soon" role="status">Drafts are built from your files' sections and key points, with no AI. Nothing is saved until you accept it.</p>
+      ${rows ? `<ul class="qz-qlist">${rows}</ul><div class="qz-row">${btn('tpl-all', `Accept all ${T.drafts.length}`)}${ghost('bank', 'Back')}</div>` : `<p class="ln-soon">${empty}</p><div class="qz-row">${ghost('bank', 'Back', 'data-qz-focus')}</div>`}`;
   }
 
   function addView(S) {
@@ -479,6 +488,13 @@
         S.study.summary = sum; S.study.active = null; S.study.notes = []; await load(S); paint(S); say('Study session saved.');
       }
       else if (action === 'bank') { S.editId = null; await load(S); S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); }
+      else if (action === 'templates') { S.templates = await D().questionsTemplates({ subjectId: S.subjectId }); S.mode = 'templates'; paint(S); }
+      else if (action === 'tpl-skip') { S.templates.drafts = S.templates.drafts.filter(d => d.id !== target.dataset.id); paint(S); }
+      else if (action === 'tpl-accept' || action === 'tpl-all') {
+        const picked = action === 'tpl-all' ? S.templates.drafts : S.templates.drafts.filter(d => d.id === target.dataset.id);
+        for (const draft of picked) await D().questionsSave({ question: draft });
+        S.templates.drafts = S.templates.drafts.filter(d => !picked.includes(d)); await load(S); paint(S); H.toast(`${picked.length} question${picked.length === 1 ? '' : 's'} added to your bank.`);
+      }
       else if (action === 'edit') { const x = S.allQuestions.find(y => y.id === target.dataset.id); S.editId = x.id; S.form = questionToForm(x); S.mode = 'add'; paint(S); }
       else if (action === 'retire' || action === 'restore') {
         const x = S.allQuestions.find(y => y.id === target.dataset.id);
