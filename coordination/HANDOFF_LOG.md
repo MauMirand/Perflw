@@ -1386,6 +1386,89 @@ LS-006 (store) may be released once LS-002 and LS-005 are merged; its brief is i
 
 ---
 
+### HO-021 — LS-006: Learning store (`src/learning-store.js`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-006  
+**From:** Claude B  
+**To:** Claude A  
+**Branch:** `claude/gracious-ellis-c78fac` (based on `main` at `46c8cd8`)  
+**Status:** SUBMITTED
+
+#### 1. Understanding
+One main-process module owns all SQL for the 10 learning tables. `createLearningStore(db)` takes the open
+`DatabaseSync` (pattern of `createConnectionStore`). Every method takes `(userId, { … })` and returns plain objects.
+Every id the caller passes, including nested ones, is checked with `SELECT … WHERE id=? AND user_id=?`. A missing
+row and another account's row give the same `"<Thing> not found."`. Rules come from `src/assessment-model.js`
+(`validateQuestion`, `normalizeResponse`, `grade`, `rubricOf`, `scoreFromCriteria`). No schema change, no new
+dependency, no IPC, file I/O, AI or logging.
+
+#### 2. Implementation
+- **`src/learning-store.js` (new, 541 lines; no split needed).** Methods as built:
+  - Journeys: `createJourney`, `getJourney`, `listJourneys`, `updateJourney`.
+  - Questions: `saveQuestion`, `getQuestion`, `listQuestions`, `retireQuestion`, `setReview`.
+  - Assessments: `createAssessment`, `startAssessment`, `getAssessment` (unstripped), `listAssessments`,
+    `abandonAssessment`.
+  - Answers: `saveAnswer`, `submitAssessment`, `gradeOpenAnswer`.
+  - Sessions and materials: `startSession`, `endSession`, `markVisited`, `addMaterial`, `getMaterial`,
+    `listMaterials`.
+  - Evidence: `journeyEvidence` (D11).
+  - Also exports `LIMITS` (payload/response 32 KB, source 8 KB, config 32 KB, provenance 8 KB, text lengths).
+- Multi-row writes (`createJourney`, `updateJourney` with topics, `createAssessment`, `submitAssessment`,
+  `gradeOpenAnswer`) run in `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`. JSON columns parse defensively (bad value →
+  default). Size caps count UTF-8 bytes of the serialized JSON.
+- `question_snapshot` is written only by `createAssessment` (the normalized stored question: id, subjectId,
+  topicId, type, prompt, dimension, difficulty, explanation, points, source, origin, provenance, status, review,
+  payload). No statement updates that column.
+- **`src/workspace.js`:** `learningStore: () => createLearningStore(db)` beside `connectionStore`, plus its
+  `require` line (2 lines, not 1).
+- **`test/learning-store.test.js` (new, 12 tests).**
+
+#### 3. Acceptance (evidence: unit tests on in-memory and on-disk `node:sqlite` databases; Electron smoke run once)
+| Criterion | Result | Test |
+|---|---|---|
+| All methods exist, each `(userId, { … })` | PASS | every test |
+| Cross-account "not found" for every id-taking method, incl. nested `topicIds`, `questionIds`, `parentId`, `parentMaterialId`, `retakeOf`, `sessionId`, `materials`, section `fileId`, `journeyId` of another subject (43 calls) | PASS | `cross-account…` |
+| Answer write rejected for `draft`, `submitted`, `graded`, `abandoned` | PASS | `saveAnswer…` |
+| Edit + retire leaves the snapshot byte-identical | PASS | `editing or retiring…` |
+| Field-named `validateQuestion` errors; oversize payload and response rejected | PASS | `questions…`, `saveAnswer…` |
+| `createAssessment` rolls back fully (invalid id before the transaction; CHECK failure inside it) | PASS | `createAssessment…` |
+| D3: `unreviewed` rejected for diagnostic/final/retention, allowed for practice; `rejected` refused everywhere | PASS | `createAssessment…` |
+| `submitAssessment`: `not_answered` rows, scores equal `grade()`, pure choice → `graded`, `explain` → `submitted` until `gradeOpenAnswer` | PASS | `submitAssessment…` |
+| D11: cycle 1 absent from cycle 2's evidence and still stored | PASS | `D11…` |
+| Subject delete through `workspace.deleteSubject` leaves no learning rows for it; other subject's rows kept | PASS | `deleting a subject…` |
+| `npm test > log 2>&1; echo EXIT=$?` | PASS: EXIT=0, 201 tests, 201 pass, 0 fail | — |
+| `npm ci` then `npm run test:electron`, run once | PASS: `npm ci` exit 0; smoke exit code 0, "Electron smoke test passed." | — |
+
+S4: branch from `main` at `46c8cd8`. S5–S7 do not apply.
+
+#### 4. Choices and open points for review (reported, not decided by the brief)
+1. **Default `topicIds`** = rows of the subject with `kind='topic'`; milestones are left out. Say if they belong.
+2. **`journeyEvidence`** returns answers of `submitted` and `graded` assessments only. Draft, in-progress and
+   abandoned attempts are excluded (spec §5.4 "graded, non-abandoned"). Assessments without a `journey_id` are not
+   attributed to the active journey (spec §5.4 says they should be); LS-003/LS-007 must decide where that happens.
+3. **True/false with justification** stores the deterministic half in `score` while `pending`; `journeyEvidence`
+   still returns `score: null` for it, as the brief says.
+4. **`saveQuestion`** rejects moving a question to another subject. `reviewed_at` is set when `review` changes to
+   `approved`/`rejected`, cleared when it becomes `unreviewed`, else kept. An edit without `review` lets
+   `validateQuestion` default it, so an edited generated question goes back to `unreviewed`.
+5. **`createAssessment`**: duplicate question ids rejected; a question of another subject of the same account is
+   "not found"; at most 200 questions (cap chosen here); `retakeOf` must be a final of the same subject;
+   `attempt` = previous + 1 unless given. `retakeOf`/`attempt` on a non-final is rejected.
+6. **`gradeOpenAnswer`** needs the answer to be `pending` (no regrade). A criterion without a valid verdict is
+   stored as `missing`. `mistake_category` stays NULL for open answers (left to LS-004).
+7. **`abandonAssessment`** allowed from `draft` and `in_progress` only. **`endSession`/`markVisited`** rejected on an
+   ended session. `markVisited` checks section `fileId` against `subject_files` of the session's subject.
+8. **`addMaterial`**: `origin` limited to `manual`/`template`/`generated` (the column has no CHECK); `bodyFile` must
+   be a plain file name (no `/`, `\`, `:`, leading `.`); `provenance` stored as given (ADR-007).
+9. Spec §4.6 snapshots "when it starts"; the brief (governs) snapshots at create. Implemented per the brief.
+
+#### 5. Commits
+`0376944 feat(learning): LS-006 learning store for all Learning System SQL`, then `docs(handoff): HO-021 LS-006
+submission`. Not pushed, not merged.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
