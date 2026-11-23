@@ -69,7 +69,7 @@ function registerStudySessionIpc({ handle, requireUser, workspace, dataDir, now 
     } catch (error) { store().discardSession(u, { sessionId: session.id }); throw error; } // no orphan session
     if (a.journeyId && a.kind === 'main') {
       const journey = store().getJourney(u, { journeyId: a.journeyId });
-      if (journey.stage === 'diagnostic') store().updateJourney(u, { journeyId: a.journeyId, stage: 'main_learning' });
+      if (['material', 'pretest_setup', 'pretest', 'diagnostic', 'targeted_notes'].includes(journey.stage)) store().updateJourney(u, { journeyId: a.journeyId, stage: 'main_learning' });
     }
     return { session, elapsedSeconds: 0 };
   });

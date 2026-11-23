@@ -16,17 +16,21 @@
   const STAGES = [
     ['material', 'Material', true, 'Add topics and write questions, then take the pre-test.'],
     ['pretest_setup', 'Pre-test setup', false], ['pretest', 'Pre-test', true, 'Finish your pre-test.'],
-    ['diagnostic', 'Diagnostic', true, 'See your results, study the weak topics, then practice or take the final.'],
-    ['targeted_notes', 'Targeted notes', false], ['main_learning', 'Main learning', true, 'Study, practice, then take the final exam.'],
-    ['practice', 'Practice', false], ['mistake_analysis', 'Mistake analysis', false], ['supplementary', 'Supplementary', false],
-    ['final_learning', 'Final learning', false], ['final_exam', 'Final exam', true, 'Finish or review your final exam.'],
-    ['report', 'Report', true, 'Open the report. Start the next cycle when you are ready.'], ['retention', 'Retention check', false],
+    ['diagnostic', 'Diagnostic', true, 'See your results and mistakes, then generate targeted notes.'],
+    ['targeted_notes', 'Targeted notes', true, 'Read your targeted notes, then start a study session.'],
+    ['main_learning', 'Main learning', true, 'Study, then practice your mistakes.'],
+    ['practice', 'Practice', true, 'Keep practising; mistakes that are due come first. Look at your final learning evaluation when ready.'],
+    ['mistake_analysis', 'Mistake analysis', true, 'Review your mistakes, then do the final learning.'],
+    ['supplementary', 'Supplementary', false],
+    ['final_learning', 'Final learning', true, 'Finish a Review study session, then take the final exam.'],
+    ['final_exam', 'Final exam', true, 'Finish or review your final exam.'],
+    ['report', 'Report', true, 'Open the report. Start the next cycle when you are ready.'], ['retention', 'Retention check', true, 'Your retention check result is in; start the next cycle when ready.'],
   ];
   let H = { toast: () => {}, announce: () => {} };
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], retention: null, due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -43,6 +47,7 @@
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
+    S.retention = S.journey && typeof D().retentionStatus === 'function' ? await D().retentionStatus({ journeyId: S.journey.id }) : null;
     if (typeof D().reviewDue === 'function') S.due = (await D().reviewDue({ subjectId: S.subjectId })).count;
     S.targeted = S.journey && typeof D().notesList === 'function' ? await D().notesList({ journeyId: S.journey.id, kind: 'targeted_note' }) : [];
     if (typeof D().studyActive === 'function') {
@@ -56,7 +61,7 @@
 
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
-  const VIEWS = { templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  const VIEWS = { history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
@@ -98,9 +103,13 @@
         ${btn('start', 'Pre-test', has ? '' : 'disabled title="Add at least one question first"')}
         ${btn('practice', S.due ? `Practice (${S.due} due)` : 'Practice', has ? 'title="Short set with feedback after each question; mistakes that are due come first"' : 'disabled title="Add at least one question first"')}
         ${btn('exam', 'Final exam', has ? 'title="Timed exam with a pass mark"' : 'disabled title="Add at least one question first"')}
+        ${hasDone && S.journey ? ghost('evaluation', 'Final learning', 'title="Your evidence for this cycle, and what to review before the final"') : ''}
+        ${S.assessments.length ? ghost('history', 'History') : ''}
+        ${S.retention && S.retention.eligible ? btn('retention', 'Retention check', 'title="A short recall check of what you should still know"') : ''}
         ${S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : ''}
         ${hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : ''}
         ${S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''}</div>
+      ${S.retention && !S.retention.eligible && S.retention.eligibleOn ? `<p class="ln-soon">${esc(S.retention.reason)}</p>` : ''}
       ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}
       ${studyView(S)}`;
   }
@@ -125,6 +134,24 @@
   async function visitNotes(S) {
     if (!S.study.active || !S.notesShown || !S.notesShown.length) return;
     try { await D().studyVisit({ sessionId: S.study.active.session.id, materials: S.notesShown.map(n => n.id) }); } catch { /* the notes stay readable */ }
+  }
+  function evaluationView(S) {
+    const E = S.evaluation;
+    const rows = E.topics.map(t => `<tr><th scope="row">${esc(t.title || t.topicId)}</th><td><span class="qz-chip">${esc(LEVELS[t.level] || t.level)}</span></td><td>${t.items} item${t.items === 1 ? '' : 's'}</td></tr>`).join('');
+    const weak = E.weak.map(w => `<li>${esc(w.title || w.topicId)} · ${esc(LEVELS[w.level] || w.level)}</li>`).join('');
+    return `<p class="qz-score" tabindex="-1" data-qz-focus>Final learning · cycle ${E.cycle}</p>
+      <p>${E.studySessions} study session${E.studySessions === 1 ? '' : 's'} · ${E.studyMinutes} minute${E.studyMinutes === 1 ? '' : 's'} · ${E.notes} note${E.notes === 1 ? '' : 's'} · evidence: ${Object.entries(E.evidenceByKind).map(([k, n]) => `${n} ${esc(KIND_LABEL[k] || k)}`).join(', ') || 'none yet'}</p>
+      <table class="qz-table"><caption>Where you stand now, by topic</caption><thead><tr><th scope="col">Topic</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${rows}</tbody></table>
+      ${weak ? `<p class="qz-journey-title"><strong>Weakest first</strong></p><ol class="qz-cats">${weak}</ol>` : ''}
+      <p class="${E.ready ? 'qz-pass' : 'ln-soon'}" role="status">${E.ready ? 'Final learning done: the final exam is open.' : 'To open the final exam: look through this evaluation, then run and end a Review study session (it records the sections and notes you open). A test final skips this step.'}</p>
+      <div class="qz-row">${E.ready ? btn('exam', 'Set up the final') : ''}${ghost('home', 'Back')}</div>`;
+  }
+  function historyView(S) {
+    const blocks = S.history.map(j => {
+      const rows = j.assessments.map(x => `<tr${x.excluded ? ' class="qz-excluded"' : ''}><th scope="row">${esc((x.submittedAt || x.startedAt || '').slice(0, 10) || '—')}</th><td>${esc(KIND_LABEL[x.kind] || x.kind)}${x.attempt > 1 ? ` (attempt ${x.attempt})` : ''}</td><td>${x.excluded ? `${esc(x.status.replace('_', ' '))} · not counted` : `${x.score} of ${x.max} (${x.percent}%)`}</td><td>${x.levels ? x.levels.map(l => `${esc(l.title || l.topicId)}: ${esc(LEVELS[l.level])}`).join(' · ') : '—'}</td></tr>`).join('');
+      return `<section aria-label="Cycle ${j.cycle}"><p class="qz-journey-title"><strong>Cycle ${j.cycle}</strong> · ${esc(j.title)} · ${esc(j.status)}</p>${rows ? `<table class="qz-table"><caption>Every assessment, with your levels right after it</caption><thead><tr><th scope="col">Date</th><th scope="col">What</th><th scope="col">Score</th><th scope="col">Levels after it</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="ln-soon">Nothing taken in this cycle yet.</p>'}</section>`;
+    }).join('');
+    return `<p class="qz-score" tabindex="-1" data-qz-focus>History</p>${blocks || '<p class="ln-soon">No journey yet.</p>'}<p class="ln-soon">Earlier cycles stay as they were; each cycle's statistics start at zero.</p><div class="qz-row">${ghost('home', 'Back')}</div>`;
   }
   function notesView(S) {
     const notes = S.notesShown || [];
@@ -480,6 +507,9 @@
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
+      else if (action === 'evaluation') { S.evaluation = await D().journeyEvaluation({ journeyId: S.journey.id }); S.mode = 'evaluation'; paint(S); }
+      else if (action === 'history') { S.history = await D().learningHistory({ subjectId: S.subjectId }); S.mode = 'history'; paint(S); }
+      else if (action === 'retention') { target.disabled = true; await begin(S, 'retention', 'Retention check', { count: 8 }); }
       else if (action === 'notes') { S.notesShown = S.targeted; S.mode = 'notes'; paint(S); await visitNotes(S); }
       else if (action === 'notes-make') {
         target.disabled = true;

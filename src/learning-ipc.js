@@ -115,6 +115,16 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const s = store();
     let topics = Array.isArray(c.topicIds) && c.topicIds.length ? c.topicIds : undefined;
     if (a.journeyId != null) topics = s.getJourney(u, { journeyId: a.journeyId }).topicIds;
+    let dimensions = c.dimensions;
+    if (kind === 'retention') {
+      // Spec §5.1: recall and understanding items only, on topics that reached Proficient (a short check of what should be known).
+      if (a.journeyId == null) fail('A retention check belongs to a journey.');
+      gateRetention(u, a.journeyId, c.test === true);
+      const strong = topicLevels(u, s.getJourney(u, { journeyId: a.journeyId })).filter(x => ['proficient', 'mastered'].includes(x.level)).map(x => x.topicId);
+      if (!strong.length && c.test !== true) fail('No topic is Proficient yet, so there is nothing to check. Study and practice first.');
+      if (strong.length) topics = strong;
+      dimensions = ['recall', 'understanding'];
+    }
     // A final never repeats a question of this journey's diagnostics (spec §4.1, parallel items); a retake prefers questions
     // no earlier final used.
     const used = kindFilter => {
@@ -136,7 +146,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
       due = s.dueReviews(u, { subjectId: a.subjectId, today: today() }).map(r => r.questionId);
       if (a.journeyId != null) weakTopics = topicLevels(u, s.getJourney(u, { journeyId: a.journeyId })).filter(t => insight.WEAK_LEVELS.includes(t.level)).map(t => t.topicId);
     }
-    const base = { questions, topics, types: c.types, dimensions: c.dimensions, seed, kind, due, weakTopics };
+    const base = { questions, topics, types: c.types, dimensions, seed, kind, due, weakTopics };
     const fresh = kind === 'final' && a.retakeOf != null ? exclude.concat(used('final')) : exclude;
     const available = model.selectItems({ ...base, exclude }).length;
     if (!available) fail('No questions are available yet. Add questions in the Question bank.');
@@ -175,12 +185,79 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
   }
   on('assessment:retakeStatus', ['assessmentId'], (u, a) => retakeStatus(u, a.assessmentId));
 
+  /* A real final needs the final-learning stage first (D9): a review session ended after the pre-test. */
+  function gateFinalLearning(u, journeyId, test) {
+    if (test) return;
+    const s = store(); const journey = s.getJourney(u, { journeyId });
+    const diag = s.listAssessments(u, { subjectId: journey.subjectId, journeyId, kind: 'diagnostic' }).filter(x => ['submitted', 'graded'].includes(x.status));
+    if (!diag.length) return; // no pre-test: nothing to review against
+    const since = diag[diag.length - 1].submittedAt;
+    const done = s.listSessions(u, { subjectId: journey.subjectId, kind: 'review', since }).filter(x => x.endedAt && x.journeyId === journeyId);
+    if (!done.length) fail('Final learning first: look at your evaluation, then finish a Review study session. After that the final exam opens.');
+  }
+  /* The retention check is for 7+ days after the final (spec §4.1, §5.1). */
+  function retentionStatus(u, journeyId) {
+    const s = store(); const journey = s.getJourney(u, { journeyId });
+    const finals = s.listAssessments(u, { subjectId: journey.subjectId, journeyId, kind: 'final' }).filter(x => ['submitted', 'graded'].includes(x.status) && !x.config.test);
+    const last = finals[finals.length - 1];
+    if (!last) return { eligible: false, eligibleOn: null, reason: 'Take a final exam first.' };
+    const eligibleOn = new Date(Date.parse(last.submittedAt) + 7 * 86400000).toISOString();
+    return { eligible: now() >= Date.parse(eligibleOn), eligibleOn, reason: now() >= Date.parse(eligibleOn) ? '' : `A retention check opens 7 days after the final (${eligibleOn.slice(0, 10)}).` };
+  }
+  function gateRetention(u, journeyId, test) {
+    if (test) return;
+    const st = retentionStatus(u, journeyId);
+    if (!st.eligible) fail(st.reason);
+  }
+  on('retention:status', ['journeyId'], (u, a) => retentionStatus(u, a.journeyId));
+
+  /* Final learning (D9, spec §5.6): the cycle's evidence, computed. Viewing it moves the journey to the final-learning stage. */
+  on('journey:evaluation', ['journeyId'], (u, a) => {
+    const s = store(); const journey = s.getJourney(u, { journeyId: a.journeyId });
+    const levels = topicLevels(u, journey);
+    const rows = s.journeyEvidence(u, { journeyId: journey.id });
+    const sessions = s.listSessions(u, { subjectId: journey.subjectId }).filter(x => x.journeyId === journey.id && x.endedAt);
+    const minutes = sessions.reduce((t, x) => t + Math.max(0, Math.round((Date.parse(x.endedAt) - Date.parse(x.startedAt)) / 60000)), 0);
+    const notes = s.listMaterials(u, { journeyId: journey.id });
+    const answers = rows.filter(r => r.score !== null).map(r => ({ topicId: String(r.topicId), category: r.mistakeCategory || (r.dontKnow ? 'not_known' : r.score < r.max ? 'incorrect' : null), pending: false }));
+    const weak = insight.rankWeakTopics({ topics: levels.map((l, position) => ({ id: String(l.topicId), position, level: l.level })), answers })
+      .map(w => ({ topicId: w.topicId, title: (levels.find(l => String(l.topicId) === String(w.topicId)) || {}).title || '', level: w.level, score: w.score }));
+    if (['diagnostic', 'main_learning'].includes(journey.stage)) s.updateJourney(u, { journeyId: journey.id, stage: 'final_learning' });
+    const byKind = {}; for (const r of rows) byKind[r.kind] = (byKind[r.kind] || 0) + 1;
+    return { journeyId: journey.id, cycle: journey.cycle, topics: levels, weak, evidenceByKind: byKind, studySessions: sessions.length, studyMinutes: minutes, notes: notes.length,
+      below: levels.filter(l => ['not_assessed', 'emerging', 'developing'].includes(l.level)).map(l => l.topicId), ready: sessions.some(x => x.kind === 'review') };
+  });
+
+  /* Journey history (spec §3.7, D11): every assessment with its date, kind, score and the levels right after it; abandoned ones are
+     shown but excluded; earlier cycles sit beside the current one. */
+  on('learning:history', ['subjectId'], (u, a) => {
+    const s = store(); const titles = topicTitles(u, a.subjectId);
+    return s.listJourneys(u, { subjectId: a.subjectId }).map(journey => {
+      const list = s.listAssessments(u, { subjectId: a.subjectId, journeyId: journey.id }).filter(x => x.status !== 'draft');
+      const rows = s.journeyEvidence(u, { journeyId: journey.id });
+      const kept = []; const assessments = [];
+      for (const x of list) {
+        const excluded = x.status === 'abandoned' || !['submitted', 'graded'].includes(x.status);
+        let score = null; let max = null; let levels = null;
+        if (!excluded) {
+          const full = s.getAssessment(u, { assessmentId: x.id }); const t = totals(full); score = t.score; max = t.max;
+          kept.push(x.id);
+          const upto = rows.filter(r => kept.includes(r.assessmentId));
+          levels = journey.topicIds.map(topicId => ({ topicId, title: titles.get(String(topicId)) || '', level: mastery.topicLevel({ items: evidenceItems(upto, topicId), now: now() }).level }));
+        }
+        assessments.push({ id: x.id, kind: x.kind, attempt: x.attempt, title: x.title, status: x.status, submittedAt: x.submittedAt, startedAt: x.startedAt, score, max, percent: max ? Math.round((score / max) * 1000) / 10 : null, excluded, levels });
+      }
+      return { id: journey.id, title: journey.title, cycle: journey.cycle, stage: journey.stage, status: journey.status, parentId: journey.parentId, assessments };
+    });
+  });
+
   // ───────── assessments
   on('assessment:create', ['subjectId', 'journeyId', 'kind', 'title', 'config', 'retakeOf'], (u, a) => {
     const picked = select(u, a);
     const { kind, c, topics, seed, requested, available, chosen } = picked;
     let config = { count: requested, types: c.types, dimensions: c.dimensions, topicIds: topics, seed };
     if (kind === 'final') {
+      if (a.journeyId != null && a.retakeOf == null) gateFinalLearning(u, a.journeyId, c.test === true);
       if (a.retakeOf != null) {
         const previous = store().getAssessment(u, { assessmentId: a.retakeOf });
         if (!['submitted', 'graded'].includes(previous.status) || previous.kind !== 'final') fail('Assessment not found.');
@@ -197,6 +274,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const created = store().createAssessment(u, {
       subjectId: a.subjectId, journeyId: a.journeyId, kind, title: a.title, config, retakeOf: a.retakeOf, questionIds: chosen.map(q => q.id),
     });
+    if (kind === 'retention' && a.journeyId != null) { try { store().updateJourney(u, { journeyId: a.journeyId, stage: 'retention' }); } catch { /* informational */ } }
     return { assessment: present(created), requested, available };
   });
   /* What a final would be, before it is created: how many questions are free, its time limit and pass mark. */
@@ -204,7 +282,10 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const { c, requested, available, chosen } = select(u, { ...a, kind: 'final' });
     const test = c.test === true;
     const out = { requested, available, count: chosen.length, test, min: exam.DEFAULT_EXAM_CONFIG.items.min, max: exam.DEFAULT_EXAM_CONFIG.items.max };
-    try { Object.assign(out, exam.examConfigFor(chosen, examOptions(c)), { ok: true }); } catch (error) { out.ok = false; out.problem = error.message; }
+    try {
+      Object.assign(out, exam.examConfigFor(chosen, examOptions(c)), { ok: true });
+      if (a.journeyId != null && a.retakeOf == null) gateFinalLearning(u, a.journeyId, test);
+    } catch (error) { out.ok = false; out.problem = error.message; }
     return out;
   });
   on('assessment:start', ['assessmentId'], (u, a) => present(store().startAssessment(u, a)));
@@ -215,9 +296,23 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     if (owner.status === 'in_progress' && enforceDeadline(u, owner) !== owner) fail('Time is up. Your saved answers were submitted.');
     return { savedAt: store().saveAnswer(u, a).savedAt };
   });
+  /* The journey moves on when a pre-test or a final is submitted (spec §2.2). Never backwards. */
+  const ORDER = ['material', 'pretest_setup', 'pretest', 'diagnostic', 'targeted_notes', 'main_learning', 'practice', 'mistake_analysis', 'supplementary', 'final_learning', 'final_exam', 'report', 'retention'];
+  function moveTo(u, journeyId, target) {
+    try {
+      const journey = store().getJourney(u, { journeyId });
+      if (ORDER.indexOf(journey.stage) < ORDER.indexOf(target)) store().updateJourney(u, { journeyId, stage: target });
+    } catch { /* the stage is informational */ }
+  }
+  function advanceStage(u, assessment) {
+    if (!assessment.journeyId) return;
+    const target = assessment.kind === 'diagnostic' ? 'diagnostic' : assessment.kind === 'final' ? 'report' : assessment.kind === 'practice' ? 'practice' : null;
+    if (target) moveTo(u, assessment.journeyId, target);
+  }
   on('assessment:submit', ['assessmentId'], (u, a) => {
     const submitted = store().submitAssessment(u, a);
     if (submitted.status === 'graded') updateReviews(u, submitted);
+    advanceStage(u, submitted);
     return submitted;
   });
   on('assessment:abandon', ['assessmentId'], (u, a) => present(store().abandonAssessment(u, a)));
@@ -351,6 +446,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
       assessment = s.getAssessment(u, { assessmentId: list[list.length - 1].id });
     }
     const analysis = analyze(u, assessment);
+    moveTo(u, journey.id, 'targeted_notes');
     const wanted = Array.isArray(a.topicIds) && a.topicIds.length ? new Set(a.topicIds.map(String)) : null;
     const weak = analysis.weak.filter(w => !wanted || wanted.has(String(w.topicId)));
     if (!weak.length) fail('No weak topics: nothing to write notes about.');

@@ -675,3 +675,5 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-analysis { margin: 12px 0; max-width: 760px; }
 .qz-cats { margin: 4px 0 8px 18px; padding: 0; font-size: 13px; }
 .qz-md { white-space: pre-wrap; font: inherit; font-size: 13px; margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--raised); overflow-x: auto; }
+
+.qz-excluded { opacity: .6; }

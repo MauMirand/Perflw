@@ -235,7 +235,7 @@ async function main() {
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice of the mistakes opened');
   await click('[data-qz="leave"]');
   step('practice these: a set of exactly the missed questions');
-  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'diagnostic', 'journey moved to the diagnostic stage after the pre-test is submitted');
+  assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'targeted_notes', 'the journey moved from the diagnostic to the targeted-notes stage when the notes were written');
 
   // Study session (LS-012): the account timer runs it, a side note is the student's own text, one focus entry with source learning.
   await waitFor("!!document.querySelector('[data-qz=\"study-start\"]')", 'study panel');
@@ -260,11 +260,25 @@ async function main() {
   step('study session: timer runs, side note kept, one learning focus entry, summary shown');
   await shoot('quiz-4b-study');
 
+  // Final learning (D9): the evaluation of the cycle so far, and what unlocks the final. History: every assessment so far.
+  await click('[data-qz="evaluation"]');
+  await waitFor("/Final learning · cycle 1/.test(document.querySelector('.qz').textContent)", 'final learning evaluation');
+  assert.ok(await evaluate("/1 study session/.test(document.querySelector('.qz').textContent) && /Where you stand now/.test(document.querySelector('.qz').textContent)"), 'evaluation shows the session and the levels');
+  assert.ok(await evaluate("/Review study session/.test(document.querySelector('.qz').textContent)"), 'it says what unlocks the final');
+  step('final learning: evaluation with study time, levels and what unlocks the final');
+  await shoot('quiz-4c-evaluation');
+  await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"history\"]')", 'history button');
+  await click('[data-qz="history"]');
+  await waitFor("/Cycle 1/.test(document.querySelector('.qz').textContent) && document.querySelectorAll('.qz-table tbody tr').length >= 1", 'history lists the pre-test');
+  step('history: every assessment with its score and levels');
+  await click('[data-qz="home"]');
+
   // Practice: feedback after Check, key shown only for that question (the study summary leaves us on the home screen).
   await waitFor("!!document.querySelector('.qz-stepper')", 'journey stepper on the home screen');
-  assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Main learning', 'stepper shows the current stage (a study session moves the journey on)');
-  assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 7"), 'unbuilt stages read later');
-  step('journey stepper: Main learning current, 7 stages marked for a later update');
+  assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Final learning', 'stepper shows the current stage (viewing the final learning evaluation moves the journey on)');
+  assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 2"), 'unbuilt stages read later');
+  step('journey stepper: Final learning current, 2 stages marked for a later update');
   await waitFor("!!document.querySelector('[data-qz=\"practice\"]') && !document.querySelector('[data-qz=\"practice\"]').disabled", 'practice enabled');
   await click('[data-qz="practice"]');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');

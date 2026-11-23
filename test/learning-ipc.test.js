@@ -81,12 +81,12 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus',
+    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'journey:evaluation', 'learning:history', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
     'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due',
-  ]);
+  ].sort());
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review):[A-Za-z]+)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review|retention):[A-Za-z]+|learning:history)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -443,4 +443,59 @@ test('the retake gate also needs every targeted note opened, and only review ses
   assert.equal(t.call('assessment:retakeStatus', { assessmentId: made.id }).ready, true);
   t.as({ id: 'v' });
   assert.throws(() => t.call('assessment:retakeStatus', { assessmentId: made.id }), /not found/i);
+});
+
+// ───────── final learning, history, retention (D9, spec §3.7, §5.1)
+test('a real final needs final learning first: a review session ended after the pre-test; the evaluation moves the stage', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  runDiagnostic(t, journey, wrongChoice, 4);
+  const evaluation = t.call('journey:evaluation', { journeyId: journey.id });
+  assert.equal(evaluation.cycle, 1); assert.ok(evaluation.weak.length >= 1); assert.equal(evaluation.ready, false);
+  assert.equal(t.call('journey:get', { journeyId: journey.id }).stage, 'final_learning');
+  // A real final is refused before final learning (the 50–100 rule would also refuse it, so check the gate through a direct call order):
+  const gateError = () => { try { t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: { count: 50 } }); return ''; } catch (error) { return error.message; } };
+  assert.match(gateError(), /Final learning first/);
+  const review = t.store.startSession('u', { subjectId: 's1', journeyId: journey.id, kind: 'review' });
+  assert.match(gateError(), /Final learning first/, 'a running session is not enough');
+  t.store.endSession('u', { sessionId: review.id });
+  assert.match(gateError(), /50–100 questions/, 'the gate is open; the exam size rule speaks next');
+  assert.equal(t.call('journey:evaluation', { journeyId: journey.id }).ready, true);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('journey:evaluation', { journeyId: journey.id }), /not found/i);
+});
+
+test('history lists every assessment with score and the levels right after it; abandoned ones are excluded; cycles sit side by side', () => {
+  const t = setup(); seed(t);
+  const one = t.call('journey:create', { subjectId: 's1' });
+  runDiagnostic(t, one, wrongChoice, 4);
+  const dropped = t.call('assessment:create', { subjectId: 's1', journeyId: one.id, kind: 'practice', config: { count: 2 } }).assessment;
+  t.call('assessment:start', { assessmentId: dropped.id }); t.call('assessment:abandon', { assessmentId: dropped.id });
+  const two = t.call('journey:create', { subjectId: 's1', parentId: one.id });
+  const history = t.call('learning:history', { subjectId: 's1' });
+  assert.deepEqual(history.map(h => h.cycle), [1, 2]);
+  const first = history[0].assessments;
+  assert.equal(first.length, 2);
+  assert.equal(first[0].kind, 'diagnostic'); assert.ok(first[0].score !== null && first[0].percent !== null && first[0].levels.length === 2 && !first[0].excluded);
+  assert.equal(first[1].excluded, true); assert.equal(first[1].score, null);
+  assert.equal(history[1].id, two.id); assert.deepEqual(history[1].assessments, []);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('learning:history', { subjectId: 's1' }), /not found/i);
+});
+
+test('retention: opens 7 days after a real final; recall and understanding items on Proficient topics only', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  assert.equal(t.call('retention:status', { journeyId: journey.id }).eligible, false);
+  assert.throws(() => t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'retention', config: { count: 3 } }), /Take a final exam first/);
+  // A test final does not open the retention check; seven days after a real one would. Simulate a real final row directly.
+  const pool = t.store.listQuestions('u', { subjectId: 's1' }).map(q => q.id);
+  const made = t.store.createAssessment('u', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: { test: false, passMark: 0.8, timeLimitSeconds: null }, questionIds: pool.slice(0, 2) });
+  t.store.startAssessment('u', { assessmentId: made.id });
+  t.store.submitAssessment('u', { assessmentId: made.id });
+  const before = t.call('retention:status', { journeyId: journey.id });
+  assert.equal(before.eligible, false); assert.match(before.reason, /opens 7 days after the final/);
+  t.clock.now += 8 * 86400000;
+  assert.equal(t.call('retention:status', { journeyId: journey.id }).eligible, true);
+  assert.throws(() => t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'retention', config: { count: 3 } }), /No topic is Proficient yet/);
 });
