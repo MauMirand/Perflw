@@ -500,7 +500,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] "Not assessed" shown instead of a number when evidence is insufficient.
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-012 · Study session (`src/learning-session.js`)** — P1 · Depends: LS-007 (APPROVED), ADR-008 confirmed, G2.
+**LS-012 · Study session (`src/learning-session.js`)** — P1 · Depends: LS-007, LS-011 (INTEGRATED), PF-021, ADR-008 ✔, G2. **Brief complete**; submission HO-027. Full brief: "TASK: LS-012" (corrections to the lines below: the timer has no `source` column, so the entry is saved with `source:'learning'` through a new `stopTimerAt`; `study:visit`, `study:active`, `study:touch`, `study:notes` are added).
 - [ ] `study:start`/`study:end`/`study:sideNote` handlers; start uses the existing active timer with
       `source:'learning'`; end saves one focus entry via `saveFocusEntry` and links it.
 - [ ] Refuses to start when another timer runs (plain message offering to stop it).
@@ -1312,6 +1312,135 @@ Overlap check at release: nothing else edits `index.html`, `learning.js`, `learn
 #### Deliverables
 Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-026**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-012 — Study session (`src/learning-session.js`, ADR-008, D8, D13)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-011 is INTEGRATED (renderer chain is sequential; it
+follows LS-011 and precedes LS-034) and PF-021 is INTEGRATED (three tasks edit `src/main.js`: PF-021, LS-007, this one).
+Submission **HO-027**  
+**Priority:** P1 (M-L1)  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+A student can run a timed study session inside the existing topic viewer, write side notes of their own, and end it; the
+time lands in the existing timer and calendar as one focus entry, and the session records which sections and materials were
+opened (D13) so a later retake gate can check them.
+
+#### Context
+ADR-008: a session uses the existing timer and links its `focus_entry_id`; existing tables are not altered. Facts from the
+code (checked 2026-11-23): `active_timers` has **no `source` column**, and `stopTimer` (`workspace.js:768`) saves the entry
+with `source:'timer'`; `startTimer` already refuses a second timer ("Stop the active timer before starting another.",
+`workspace.js:741`); `saveFocusEntry` accepts `source`; `workspace:startTimer`/`stopTimer` handlers exist (`main.js:528`).
+Learning files live under `userData/learning-files/<account>/` and `learning:deleteSubject` removes them
+(`main.js:328`); `before-quit` is at `main.js:698`. The topic viewer is in `learning.js` (`viewerView`, `openViewer`,
+`openTopicMatch`); the side panel (`learning-study.js`) has a Notes tab that holds notes saved from Ask answers, not the
+student's own notes, so side notes get their own small editor. Spec §3.8 (SessionBar, side notes), D8 (side notes are the
+student's own writing), D13 (`visited`), §6.2 (`learning_sessions`, `learning_materials`). `writeFileAtomic` is in
+`src/safe-file.js` (PF-007).
+
+#### Requirements
+**Main process (new `src/learning-session-ipc.js`, `registerStudySessionIpc({ handle, requireUser, workspace, dataDir })`,
+loadable without Electron):**
+- `study:start { subjectId, journeyId?, topicId?, kind }` (`kind` `main` | `supplementary` | `review`): checks ownership,
+  calls `workspace.startTimer(userId, 'Study: <topic or subject name>')`, then `learningStore.startSession(...)`, in that order;
+  if the second step fails the timer is stopped without saving an entry (no orphan timer). If a timer already runs the error
+  is "A timer is already running. Stop it first, then start the study session." and nothing changes. A journey at stage
+  `diagnostic` moves to `main_learning` (`journeyUpdate`) on the first `main` session.
+- `study:active {}`: the account's open session (or `null`) with elapsed seconds, for the SessionBar after a reload.
+- `study:touch { sessionId }`: sets last activity (`learning_sessions.updated_at`); the renderer calls it every 60 s while the
+  viewer is open and on every action.
+- `study:visit { sessionId, sections?, materials? }`: appends to `visited` (`{ sections: [{ fileId, section }], materials: [id] }`),
+  each entry once (D13). `section` is the section number from the analysis when it has one, else the topic title.
+- `study:sideNote { sessionId, text, page? }`: text 1–20,000 chars, `page` ≥ 1 optional; writes the Markdown body with
+  `writeFileAtomic` to `learning-files/<account>/journeys/<journeyId>/<materialId>.md` (`side-notes/<subjectId>/` when the
+  session has no journey), then `addMaterial` kind `side_note`, `origin:'manual'`, `source:[{ fileId, page }]`, `body_file` =
+  the path relative to the account folder; if the DB write fails the file is removed. The body is **only the student's text**
+  (D8): no heading, no AI text, no provenance.
+- `study:notes { sessionId? , journeyId?, topicId? }`: side notes (body read from the file; a missing file gives an empty body
+  and a note, not an error); listed separately from targeted notes and from PDF annotations.
+- `study:end { sessionId, summary? }`: stops the timer at now with `source:'learning'`, stores `focus_entry_id`, sets
+  `ended_at`, returns `{ durationSeconds, topics, notes }` for the 3-field summary. If the timer was already stopped elsewhere,
+  the session is closed at its last activity time with `focus_entry_id` NULL and the message "The timer was already stopped, so
+  this session was saved without a time entry."
+- **`workspace.js` (small, backward compatible):** add `stopTimerAt(userId, { endedAt, source })` (the existing `stopTimer`
+  becomes a call to it with `now()` and `'timer'`; all current timer tests pass unchanged). Seconds = `elapsed_seconds` + the
+  running segment up to `endedAt`; fewer than 1 s → the timer row is deleted and no entry is saved.
+- **Quit and crash:** on `before-quit`, and once at startup for sessions left open by a crash, every open session is closed at
+  its last activity time (`stopTimerAt` with `endedAt = updated_at`, `source:'learning'`). No ghost hours. A timer that is not
+  linked to a session is never touched.
+- **Subject deletion:** `learning:deleteSubject` removes `journeys/<id>` for each journey of the subject and
+  `side-notes/<subjectId>` after the database delete (the ids are read before it).
+- `learning-store.js` gains `activeSession`, `touchSession`, and an optional `endedAt` on `endSession` (LS-006 is integrated;
+  report the additions in HO-027). `preload.js` gains `studyStart`, `studyActive`, `studyTouch`, `studyVisit`,
+  `studySideNote`, `studyNotes`, `studyEnd` (flat names on `learningData`, one object argument each).
+
+**Renderer (new `src/learning-session.js`, IIFE → `window.PerflwSession`, `module.exports` for the pure parts):**
+- **SessionBar** above the document in the topic viewer: topic name, elapsed time (updates once a second, announced only at
+  start and end), "Side note", "End session". Before a session: a "Start studying" button in the viewer bar; with another timer
+  running it shows the main-process message and a "Stop that timer and start" action (explicit click).
+- **Side note editor:** a small popover/panel opened from the bar; textarea with a 20,000-character counter; Save adds the note
+  tagged with the current page; the session's notes are listed below it, newest first.
+- **End summary:** duration, topics studied, notes written; "Practice this topic now" is shown disabled with the tooltip
+  "Arrives in a later update" (LS-013).
+- **Visits (D13):** `learning.js` calls `PerflwSession.noteVisit({ fileId, section })` when a topic opens in the viewer and
+  when a section is chosen in Key points or the topic list; side notes opened call it with the material id. The renderer
+  batches visits and sends `study:visit` (debounced 2 s and on End).
+- Pure helpers, unit-tested: `formatElapsed(seconds)`, `visitKey(visit)` (the de-duplication key), `summaryText(summary)`,
+  `sessionLabel(state)`.
+- Motion through `reduceMotion()`; keyboard: every control reachable by Tab, `Esc` closes the note editor, no `document`-level
+  key capture; works at 400 px (the bar wraps; the editor becomes a bottom sheet).
+
+#### Relevant Files
+New: `src/learning-session.js`, `src/learning-session-ipc.js`, `test/learning-session.test.js`,
+`test/learning-session-ipc.test.js`. Edited: `src/main.js` (one registration call, `before-quit`, startup recovery,
+`learning:deleteSubject` cleanup), `src/preload.js`, `src/workspace.js` (`stopTimerAt`), `src/learning-store.js` (three
+additions), `src/learning.js` (SessionBar mount, visit calls), `src/index.html` (one script tag), `src/learning.css` (named
+rules), `test/electron-smoke.js` (one step). Read only: `src/safe-file.js`, `src/learning-study.js`, `test/workspace.test.js`
+(timer tests).
+
+#### Dependencies
+LS-011 (INTEGRATED, sequential chain), LS-007 (INTEGRATED), LS-006 (INTEGRATED), PF-021 (INTEGRATED), PF-020 (G2).
+
+#### Restrictions
+No new table, column or migration (`active_timers` stays as is). No AI call and no side-note AI help (LS-032). Do not change
+the Notes tab of the side panel, PDF annotations or the global timer UI. No new dependency. Overlap check at release: nothing
+else edits `main.js`, `index.html`, `learning.js`, `learning.css` or `electron-smoke.js` while LS-012 runs.
+
+#### Acceptance Criteria
+- [ ] **Timer link:** starting a session creates the active timer; ending it saves exactly one `focus_entries` row with
+      `source:'learning'` whose id is `learning_sessions.focus_entry_id`; the Calendar/timer views list it (smoke).
+- [ ] **One timer at a time:** with a manual timer running, `study:start` fails with the message above and creates no session
+      and no second timer (test).
+- [ ] **No orphan timer:** a failed session insert after the timer started stops the timer without saving an entry (test with an
+      injected failure).
+- [ ] **Quit and crash (injected clock):** an open session is closed at its last activity time on `before-quit` and on the next
+      startup; the entry's duration equals last activity minus start (minus pauses); a timer not linked to a session survives
+      (tests).
+- [ ] **Timer stopped elsewhere:** `study:end` closes the session without an entry and returns the message (test).
+- [ ] **Side notes:** body file equals the student's text byte for byte; stored as `learning_materials` kind `side_note`; listed
+      apart from targeted notes; a failed DB write leaves no file; a missing file reads as an empty body (tests).
+- [ ] **D13 `visited`:** opening a section and a note during a session appends both once each; repeating them adds nothing;
+      entries survive `study:end` (test).
+- [ ] **Subject deletion** removes the journey and side-note folders (test with a temp data dir).
+- [ ] **S6:** `requireUser()` first; user B gets "not found" on every session/material id; the contract test of LS-007 is
+      extended to the `study:` channels (both directions); no message contains `SQLITE`/`EACCES`/`ENOENT`/`EPERM`.
+- [ ] **Existing timer behavior unchanged:** all current timer/focus tests pass without edits; `npm test` count reported.
+- [ ] **Smoke step (S5):** from a topic open in the viewer: start session → open a section → add a side note → end → the
+      summary shows duration/topics/notes → the focus list has the entry with `source:'learning'` → `visited` holds the section.
+      `npm run test:electron` exit 0.
+- [ ] **S7 UI parity (D12):** SessionBar, editor and summary reuse existing viewer-bar buttons, chips and sheet patterns; new CSS
+      rules named in HO-027; screenshots at 1280 px and 400 px beside `docs/ui-baseline/` (`04-*`).
+- [ ] S1, S2, S3 (each file ≤ ~600 lines), S4.
+
+#### Deliverables
+Summary, files, channel table as built, the `stopTimerAt` diff, new CSS rules, screenshots, test output with exit codes, commit
+hash, ambiguities (report, do not decide). HANDOFF_LOG entry **HO-027**.
 
 #### Review
 **Reviewed By:**  
