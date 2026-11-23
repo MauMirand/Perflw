@@ -14,6 +14,7 @@
    being erased. Nothing here ever stores credentials. */
 const fs = require('node:fs');
 const path = require('node:path');
+const { writeFileAtomic } = require('../safe-file');
 
 const fail = message => { throw new Error(message); };
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -144,12 +145,8 @@ function keepHistory(dir, rel) {
   const versions = fs.readdirSync(history).filter(name => name.startsWith(`${stem}.`)).sort();
   for (const old of versions.slice(0, Math.max(0, versions.length - LIMITS.history))) fs.rmSync(path.join(history, old), { force: true });
 }
-function writeAtomic(file, content) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, content, { mode: 0o600 });
-  fs.renameSync(temp, file);
-}
+// Temp file then rename, retried while another program holds the file (src/safe-file.js).
+const writeAtomic = (file, content) => writeFileAtomic(file, content);
 /* File tree (no dot-folders): files first, then folders, each alphabetical. */
 function tree(dir) {
   const out = [];
