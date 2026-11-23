@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createAutomationStore, createAutomationSchema } = require('./automation/store');
 const { createConnectionStore, createConnectionSchema } = require('./automation/connections');
+const { createLearningStore } = require('./learning-store');
 const { createSessionStore, createSessionSchema } = require('./automation/sessions');
 const { migrate } = require('./db-migrate');
 
@@ -922,6 +923,7 @@ function createWorkspace(root, { migrations = WORKSPACE_MIGRATIONS } = {}) {
     ...sessions,
     // Provider connections share this database; the caller supplies the secret codec (safeStorage in the app).
     connectionStore: secrets => createConnectionStore(db, secrets),
+    learningStore: () => createLearningStore(db),
     close:()=>db.close() };
 }
 
