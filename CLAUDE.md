@@ -161,6 +161,8 @@ Never force-push or rewrite another agent's commits without explicit approval.
 - Do not commit credentials, API keys, tokens, or local secrets.
 - Do not force-push shared branches.
 - Do not merge unreviewed work into main.
+- Every worktree runs `npm ci` before `npm run test:electron` (the renderer loads pdf.js from the worktree's own
+  `node_modules`; see `docs/ARCHITECTURE.md` §3).
 
 Suggested branch naming:
 
