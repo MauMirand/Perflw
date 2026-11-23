@@ -175,7 +175,7 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
 
 ### TASK: LS-005 — Migration 2: Learning System tables
 
-**Status:** **ASSIGNED** (lane 3, 2026-11-23; G1 open: PF-006 integrated). Session started on `claude/nifty-haslett-6c96fe`; then REVIEW · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
+**Status:** **APPROVED** (HO-020, 2026-11-23, `4508711` on `claude/nifty-haslett-6c96fe`; code `e01d806`; `npm test` 163/163) · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
 **Submission:** HO-018 · **Created By:** Claude A
 
 #### Objective

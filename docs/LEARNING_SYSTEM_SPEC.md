@@ -148,7 +148,7 @@ only**: notes, files and Ask stay available at every stage *[interpretation of D
 |---|---|---|---|---|---|
 | 0 | **Learning dashboard** | Learning page | Sees subjects; each card shows the active journey stage and next action | — | Opens a subject |
 | 1 | **Subject** | Subject page | Creates/edits subject (existing), manages topics and files (existing) | existing tables | "Start a learning journey" |
-| 2 | **Create journey** | Subject page | Names it (default "Cycle N"), picks topics (default: all), optional target date | `learning_journeys`, `journey_topics` | Saved → stage `pretest` |
+| 2 | **Create journey** | Subject page | Names it (default "Cycle N"), picks topics (default: all), optional target date | `learning_journeys`, `journey_topics` | Saved → stage `material` |
 | 3 | **Material** | Journey hub | Confirms files are imported and analyzed (reuses upload + analysis status) | — | At least one topic has source text, or the student continues without (manual questions only) |
 | 4 | **Pre-test setup** | Hub | Picks question count (default 2 per topic, max 40), types, and source: question bank / template / reviewed AI questions (D3) | `assessments` (kind `diagnostic`, status `draft`) | "Start pre-test" |
 | 5 | **Pre-test** | Quiz panel | Answers; may mark "I don't know" and set confidence; may leave and resume | `assessment_answers` saved per answer | Submit → grading |
@@ -630,7 +630,7 @@ erDiagram
 
 | Table | Key columns (all have `id TEXT PK`, `user_id TEXT NOT NULL`, `created_at`, `updated_at`) |
 |---|---|
-| `learning_journeys` | `subject_id` FK→subjects CASCADE · `title` · `stage` CHECK(the 16 stage keys) · `status` CHECK(active, completed, archived) · `cycle` INT · `parent_journey_id` FK→self SET NULL · `target_date` · `completed_at` |
+| `learning_journeys` | `subject_id` FK→subjects CASCADE · `title` · `stage` CHECK(the 13 stage keys of §2.2 stages 3–15, `JOURNEY_STAGES`) · `status` CHECK(active, completed, archived) · `cycle` INT · `parent_journey_id` FK→self SET NULL · `target_date` · `completed_at` |
 | `journey_topics` | PK(`journey_id`,`topic_id`) · FKs CASCADE |
 | `question_items` | `subject_id` FK CASCADE · `topic_id` FK→subject_topics SET NULL · `type` CHECK(5) · `dimension` CHECK(4) · `difficulty` · `points` · `prompt` · `payload` JSON · `explanation` · `source` JSON · `origin` CHECK · `provenance` JSON · `status` CHECK(active, retired) · `review` CHECK(approved, unreviewed, rejected) · `reviewed_at` |
 | `assessments` | `subject_id` FK CASCADE · `journey_id` FK SET NULL · `kind` CHECK(diagnostic, practice, final, retention) · `title` · `config` JSON (count, types, feedback mode, time limit, seed; for finals also pass mark, `d̄`, exam config version) · `status` CHECK(draft, in_progress, submitted, graded, abandoned) · `attempt` INT DEFAULT 1 · `retake_of` FK→self SET NULL (D10) · `started_at` · `submitted_at` · `graded_at` |

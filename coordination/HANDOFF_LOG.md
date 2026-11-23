@@ -1144,6 +1144,58 @@ from the merged `main`.
 
 ---
 
+### HO-020 — Review of LS-005 (Claude B, branch `claude/nifty-haslett-6c96fe`, tip `4508711`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-005  
+**From:** Claude A  
+**To:** Claude B, Project Owner (desktop orchestrator session)  
+**Status:** COMPLETE (review) · **APPROVED**
+
+> Numbering: Claude B's submission is HO-018 (on its branch). This review is HO-020.
+
+#### 1. Scope reviewed
+`git diff 0dcc21b 4508711` (7 files, +3504/−10): new `src/learning-schema.js`, `test/learning-schema.test.js`,
+`test/fixtures/schema/workspace-v2.json`; one line in `src/workspace.js`; `test/db-migrate.test.js`,
+`test/planner.test.js`; HO-018. `package.json` unchanged.
+
+#### 2. Code review
+- DDL compared table by table with spec §6.2 and the brief: all 10 tables, columns, FKs, CHECK enums and the
+  composite keys (`journey_topics`, `question_review`) match. `assessments.attempt`/`retake_of` (D10),
+  `learning_materials.parent_material_id` and `side_note_ai` (D8), `learning_sessions.visited` (D13) are present.
+- Purely additive: `CREATE TABLE`/`CREATE INDEX` only; no v1 object touched. Plain `CREATE` (no `IF NOT EXISTS`) is the
+  right choice: a clash fails the step and the runner rolls it back.
+- Delete rules match §6.2: subject → cascade; topic → `topic_id` NULL on questions, items, sessions, materials and
+  removed from `journey_topics`; event → its schedule link; side note → its AI note.
+- `workspace.js`: one line, as allowed. The inline `require` inside the frozen list is a nit (a top-level `require`
+  matches the file's style); no change requested.
+- **Out-of-brief files** (`db-migrate.test.js`, `planner.test.js`), checked in the diff: only the constructor argument
+  changes (`{ migrations: V1 }`, with `V1 = WORKSPACE_MIGRATIONS.slice(0, 1)`), no assertion edited. Justified in HO-018
+  §3: these tests exercise the v1 path and break when "latest" becomes v2. **Accepted.**
+
+#### 3. Checks (Claude A, in Claude B's worktree, read-only)
+`npm test > log 2>&1; echo EXIT=$?` → **EXIT=0**, 163 tests, 163 pass, 0 fail. The worktree stayed clean.
+`npm run test:electron`: Claude B reports one PASS after `npm ci`; **not re-run by Claude A** (UNVERIFIED by me). The
+orchestrator runs it on the merge result before the merge is final, as for PF-006.
+
+#### 4. Decisions on HO-018 §5
+1. Extra FK-child indexes: **kept**. They cost little and keep cascades from scanning tables.
+2. Spec discrepancy: the brief and §2.2 govern (13 stages). Claude A corrected spec §6.2 ("the 16 stage keys" → 13) and
+   §2.2 stage 2's exit ("Saved → stage `pretest`" → `material`). The column default `'material'` stays.
+3. Looser constraints (`points > 0`, `max_score > 0`, free-text `learning_materials.origin` and `mistake_category`,
+   `json_valid` guards, `review` default `'unreviewed'`): **accepted**. The pure modules validate ranges (LS-002); a later
+   range change needs no table rebuild. Note: a new CHECK on an existing column needs a table rebuild, so if
+   `learning_materials.origin` should ever be an enum, decide before the first release.
+4. Non-idempotent migration: **accepted** (ADR-004: additive, rolled back on failure, no downgrade path writes
+   `user_version`).
+
+#### 5. Decision
+**APPROVED.** LS-005 → APPROVED in `TASK_QUEUE.md`. The orchestrator merges with `--no-ff` after `npm test` and
+`npm run test:electron` on the merge result (conflict only in `HANDOFF_LOG.md`, keep both sides in number order).
+LS-006 (store) may be released once LS-002 and LS-005 are merged; its brief is in preparation.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
