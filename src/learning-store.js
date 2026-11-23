@@ -331,6 +331,10 @@ function createLearningStore(db) {
       .map(item => itemOut(item, answers.get(item.id)));
     return { ...assessmentOut(row), items };
   }
+  /* The assessment (without items) an item belongs to: lets a handler check the deadline before it saves one answer. */
+  function assessmentOfItem(userId, input) {
+    return assessmentOut(assessmentRow(userId, itemRow(userId, args(input).itemId).assessment_id));
+  }
   function listAssessments(userId, input) {
     const { subjectId, journeyId, kind, status } = args(input);
     const subject = subjectOf(userId, subjectId);
@@ -541,7 +545,7 @@ function createLearningStore(db) {
   return {
     createJourney, getJourney, listJourneys, updateJourney,
     saveQuestion, getQuestion, listQuestions, retireQuestion, deleteQuestion, setReview,
-    createAssessment, startAssessment, getAssessment, listAssessments, abandonAssessment,
+    createAssessment, startAssessment, getAssessment, assessmentOfItem, listAssessments, abandonAssessment,
     saveAnswer, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     journeyEvidence,

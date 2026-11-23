@@ -29,16 +29,17 @@ function setup() {
   const workspace = { learningStore: () => store, listTopics: (userId, subjectId) => ({
     rows: db.prepare('SELECT id, title FROM subject_topics WHERE user_id=? AND subject_id=?').all(userId, subjectId) }) };
   const handlers = new Map();
+  const clock = { now: Date.now() }; // the store stamps real time, so the fake clock starts there
   let user = { id: 'u' };
   let userChecks = 0;
   registerLearningIpc({
     handle: (channel, action) => handlers.set(channel, action),
     requireUser: () => { userChecks += 1; if (!user) throw new Error('Your session has expired. Log in again.'); return user; },
-    workspace, now: () => Date.parse('2026-11-24T10:00:00.000Z'),
+    workspace, now: () => clock.now,
   });
   return {
     call: (channel, arg) => handlers.get(channel)(arg),
-    handlers, as: next => { user = next; }, checks: () => userChecks, store,
+    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock,
   };
 }
 
@@ -76,12 +77,12 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'assessment:abandon', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results',
-    'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
-    'mastery:journey', 'mastery:subject', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save',
+    'assessment:abandon', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results',
+    'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
+    'mastery:journey', 'mastery:report', 'mastery:subject', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save',
   ]);
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery):[A-Za-z]+)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam):[A-Za-z]+)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -155,7 +156,7 @@ test('a final never reuses a question from the journey diagnostics', () => {
   const journey = t.call('journey:create', { subjectId: 's1' });
   const diag = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'diagnostic', config: { count: 4 } }).assessment;
   const used = new Set(t.store.getAssessment('u', { assessmentId: diag.id }).items.map(i => i.questionId));
-  const final = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: { count: 20 } });
+  const final = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: { count: 20, test: true } });
   const reused = t.store.getAssessment('u', { assessmentId: final.assessment.id }).items.filter(i => used.has(i.questionId));
   assert.equal(reused.length, 0);
   assert.equal(final.available + used.size, 10, 'all 10 questions: 4 used by the diagnostic, the rest left for the final');
@@ -205,4 +206,121 @@ test('input errors are plain language and never carry database words', () => {
     assert.ok(message, `${channel} rejected`);
     assert.ok(!/SQLITE|EACCES|ENOENT|EPERM/i.test(message), `${channel}: ${message}`);
   }
+});
+
+// ───────── exams (spec §4.9)
+function answerAll(t, assessment, choose = 'b') {
+  for (const item of assessment.items) {
+    const type = item.question.type;
+    const response = type === 'choice' ? { choice: [choose] } : type === 'truefalse' ? { value: true } : type === 'explain' ? { text: 'An answer.' } : {};
+    t.call('assessment:saveAnswer', { itemId: item.id, response });
+  }
+}
+const finalConfig = extra => ({ test: true, count: 20, timeMultiplier: 1, ...extra });
+function gradeOpen(t, assessmentId, verdicts) {
+  for (const item of t.store.getAssessment('u', { assessmentId }).items) {
+    if (item.snapshot.type === 'explain' && item.answer.gradeStatus === 'pending') t.call('assessment:grade', { itemId: item.id, verdicts });
+  }
+}
+
+test('a real final needs 50–100 questions; a test final does not; the preview says what it would be', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const preview = t.call('exam:preview', { subjectId: 's1', journeyId: journey.id, config: { count: 6, test: false } });
+  assert.equal(preview.ok, false); assert.match(preview.problem, /50–100 questions/);
+  const test6 = t.call('exam:preview', { subjectId: 's1', journeyId: journey.id, config: finalConfig({ count: 6 }) });
+  assert.equal(test6.ok, true); assert.equal(test6.count, 6); assert.equal(test6.test, true);
+  assert.ok(test6.timeLimitSeconds >= 300 && test6.timeLimitSeconds % 300 === 0, 'limit is a multiple of 5 minutes');
+  assert.ok(test6.passMark >= 0.75 && test6.passMark <= 0.9);
+  assert.throws(() => t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: { count: 6 } }), /50–100 questions/);
+  const untimed = t.call('exam:preview', { subjectId: 's1', journeyId: journey.id, config: finalConfig({ count: 6, timeMultiplier: 0 }) });
+  assert.equal(untimed.timeLimitSeconds, null);
+});
+
+test('a timed final: the config stores limit and pass mark, seconds left count down, a late save submits what was saved', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: finalConfig({ count: 6 }) }).assessment;
+  assert.ok(made.config.timeLimitSeconds >= 300 && made.config.passMark > 0 && made.config.test === true);
+  assert.ok(!('seed' in made.config));
+  const limit = made.config.timeLimitSeconds;
+  const started = t.call('assessment:start', { assessmentId: made.id });
+  assert.ok([limit, limit + 1].includes(started.secondsLeft), 'the full limit at the start (clock jitter of one second)');
+  t.clock.now = Date.parse(started.startedAt);
+  t.clock.now += 100 * 1000;
+  assert.equal(t.call('assessment:get', { assessmentId: made.id }).secondsLeft, limit - 100);
+  const first = started.items[0];
+  t.call('assessment:saveAnswer', { itemId: first.id, response: first.question.type === 'choice' ? { choice: ['b'] } : { text: 'in time' } });
+  t.clock.now += (limit + 10) * 1000; // past the deadline and the grace period
+  assert.throws(() => t.call('assessment:saveAnswer', { itemId: first.id, response: { text: 'too late' } }), /Time is up/);
+  const after = t.call('assessment:get', { assessmentId: made.id });
+  assert.ok(['submitted', 'graded'].includes(after.status), `submitted by the deadline, not ${after.status}`);
+});
+
+test('an untimed final never expires; results carry the verdict; a failed attempt can be retaken', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: finalConfig({ count: 8, timeMultiplier: 0 }) }).assessment;
+  assert.equal(made.config.timeLimitSeconds, null);
+  t.call('assessment:start', { assessmentId: made.id });
+  t.clock.now += 99 * 3600 * 1000;
+  answerAll(t, made, 'a'); // wrong on purpose: option a is never the right one
+  t.call('assessment:submit', { assessmentId: made.id });
+  gradeOpen(t, made.id, { c1: 'missing', c2: 'missing' });
+  const results = t.call('assessment:results', { assessmentId: made.id });
+  assert.equal(results.exam.passed, false);
+  assert.equal(results.exam.test, true);
+  assert.equal(results.exam.passMarkPercent, Math.round(made.config.passMark * 1000) / 10);
+  const retake = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', retakeOf: made.id, config: finalConfig({ count: 6, timeMultiplier: 0 }) });
+  assert.equal(retake.assessment.attempt, 2); assert.equal(retake.assessment.retakeOf, made.id);
+  const attempts = t.call('exam:attempts', { subjectId: 's1', journeyId: journey.id });
+  assert.equal(attempts.length, 1, 'only submitted attempts are compared');
+  assert.equal(attempts[0].attempt, 1); assert.equal(attempts[0].result.passed, false);
+  assert.ok(attempts[0].topics.every(x => x.title.startsWith('Topic ')));
+});
+
+test('a passed final cannot be retaken', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: finalConfig({ count: 4, types: ['choice'], timeMultiplier: 0 }) }).assessment;
+  t.call('assessment:start', { assessmentId: made.id });
+  answerAll(t, made, 'b');
+  t.call('assessment:submit', { assessmentId: made.id });
+  assert.equal(t.call('assessment:results', { assessmentId: made.id }).exam.passed, true);
+  assert.throws(() => t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', retakeOf: made.id, config: finalConfig({ count: 2, types: ['choice'] }) }), /only for a final exam that was not passed/);
+});
+
+test('practice feedback: check reveals only that question key and only in an in-progress practice set', () => {
+  const t = setup(); seed(t);
+  const { assessment } = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { count: 3, types: ['choice'] } });
+  t.call('assessment:start', { assessmentId: assessment.id });
+  const [one, two] = assessment.items;
+  t.call('assessment:saveAnswer', { itemId: one.id, response: { choice: ['b'] } });
+  const right = t.call('assessment:check', { assessmentId: assessment.id, itemId: one.id });
+  assert.equal(right.score, right.max); assert.deepEqual(right.key.correct, ['b']); assert.match(right.explanation, /reasons/);
+  t.call('assessment:saveAnswer', { itemId: two.id, response: { choice: ['a'] } });
+  assert.equal(t.call('assessment:check', { assessmentId: assessment.id, itemId: two.id }).score, 0);
+  const diag = t.call('assessment:create', { subjectId: 's1', kind: 'diagnostic', config: { count: 2 } }).assessment;
+  t.call('assessment:start', { assessmentId: diag.id });
+  assert.throws(() => t.call('assessment:check', { assessmentId: diag.id, itemId: diag.items[0].id }), /only available in a practice set/);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('assessment:check', { assessmentId: assessment.id, itemId: one.id }), /not found/i);
+});
+
+test('mastery:report compares the pre-test with the whole cycle per topic', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const run = (kind, config) => {
+    const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind, config }).assessment;
+    t.call('assessment:start', { assessmentId: made.id }); answerAll(t, made, 'b'); t.call('assessment:submit', { assessmentId: made.id });
+    gradeOpen(t, made.id, { c1: 'met', c2: 'met' });
+  };
+  run('diagnostic', { count: 4, types: ['choice'] });
+  run('final', finalConfig({ count: 4, types: ['choice'], timeMultiplier: 0 }));
+  const report = t.call('mastery:report', { journeyId: journey.id });
+  assert.equal(report.cycle, 1);
+  const a = report.topics.find(x => x.topicId === 't1');
+  assert.ok(a.pre.items >= 1 && a.post.items >= a.pre.items, 'post includes the pre-test answers plus the final');
+  assert.deepEqual(Object.keys(a.improvement).sort(), ['application', 'recall', 'recognition', 'understanding']);
+  assert.equal(report.provisional, false);
 });
