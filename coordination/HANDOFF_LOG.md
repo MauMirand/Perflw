@@ -1,6 +1,6 @@
 # Perflow — Agent Handoff Log
 
-**Last Updated:** YYYY-MM-DD
+**Last Updated:** 2026-11-23
 
 ---
 
@@ -149,6 +149,119 @@ Claude B must review the project instructions and prepare for implementation ass
 
 ---
 
+### HO-002 — Baseline Repository Audit
+
+**Date:** 2026-11-23  
+**Task ID:** PF-001, PF-002, PF-003  
+**From:** Claude A  
+**To:** Project Owner  
+**Status:** PENDING (owner review)
+
+#### 1. Assignment / Summary
+A comprehensive read-only audit of the existing repository: stack, architecture, modules, features, data,
+UI/UX, dependencies, tests, risks. No application code was changed.
+
+#### 2. Context
+Requested by the owner after the coordination setup (HO-001).
+
+#### 3. Work Completed
+- `PROJECT_STATUS.md`: verified feature status, blockers B-1 and B-2, and risks R1–R10 with evidence.
+- `ARCHITECTURE_DECISIONS.md`: §3 baseline filled from the code; ADR-001 to ADR-003 added as PROPOSED.
+  No decisions were marked approved.
+- `TASK_QUEUE.md`: PF-004 to PF-015 prioritized; PF-004 fully specified and READY.
+
+#### 4. Modified Files
+- coordination/PROJECT_STATUS.md
+- coordination/ARCHITECTURE_DECISIONS.md
+- coordination/TASK_QUEUE.md
+- coordination/HANDOFF_LOG.md
+- docs/ARCHITECTURE.md (new: the developer-facing architecture reference)
+
+#### 5. Git Information
+**Branch:** `worktree-perflow-manager`  
+**Commit:** none yet (uncommitted, awaiting owner approval)  
+**Base Branch:** `main` @ `e9cc8ae`
+
+#### 6. Testing
+**Tests Executed:**
+- `npm test` at `a54858c` (app code identical at `e9cc8ae`)
+- `npm run test:electron` at `a54858c`, run twice
+
+**Results:**
+- `npm test`: 126/126 pass.
+- `npm run test:electron`: EXIT=1 on both runs (see PF-004).
+
+#### 7. Outstanding Issues
+- Not investigated: `npm audit`, performance at scale, packaging and installer, the Office conversion script.
+- Claude B identity unconfirmed (blocker B-2).
+
+#### 8. Required Next Action
+The owner: review the audit, approve the priorities, confirm Claude B, decide on ADR-001 to ADR-003 and on
+PF-009 and PF-013, and approve committing these docs.
+
+#### 9. Review Result
+**Reviewer:** Project Owner  
+**Decision:** PENDING
+
+---
+
+### HO-003 — Learning System architecture and specification
+
+**Date:** 2026-11-23  
+**Task ID:** LS-001 (spec), LS-002–LS-030 (planned)  
+**From:** Claude A  
+**To:** Project Owner (then Claude B)  
+**Status:** PENDING (owner review)
+
+#### 1. Assignment / Summary
+Owner brief "Perflw Learning System": verify the current state, then produce the product and technical
+specification, data model, mastery methodology, integration plan, roadmap and task queue. No application code
+changed.
+
+#### 2. Context
+The brief cites "Claude B's HO-002 audit". **Correction (same day):** the first version of this entry said no
+Claude B entry existed; it does (commit `e3412ce`, see HO-005). Claude A's search had missed that branch.
+
+#### 3. Work Completed
+- `docs/LEARNING_SYSTEM_SPEC.md` (new): verified audit (§1), journey + flow diagram (§2), UI/UX and components
+  (§3), assessment engine (§4), mistake categories and mastery method with worked example (§5), data model + ER
+  diagram + IPC contract + migration strategy (§6), integration (§7), roadmap (§8), owner decisions D1–D5 (§9).
+- `ARCHITECTURE_DECISIONS.md`: ADR-004 to ADR-008 added as PROPOSED.
+- `TASK_QUEUE.md`: LS-001–LS-030 with dependencies and acceptance; LS-002 fully specified.
+- `PROJECT_STATUS.md`: learning status and next priorities updated.
+
+Key findings: no quiz/journey/session/mastery code exists (`src/learning.js:5`, placeholders `:156-160`);
+subject mastery % and time are manual inputs (`:830-834`); reusable: topics, deterministic analysis
+(`learning-intel.js`), grounded Ask, agent pattern (`learning-agents.js`), `runAgent`, `saveFocusEntry` (object
+args), `events`.
+
+#### 4. Modified Files
+- docs/LEARNING_SYSTEM_SPEC.md (new)
+- coordination/ARCHITECTURE_DECISIONS.md, TASK_QUEUE.md, PROJECT_STATUS.md, HANDOFF_LOG.md
+
+#### 5. Git Information
+**Branch:** `worktree-perflow-manager` · **Commit:** none (uncommitted with the HO-002 docs, awaiting owner
+approval) · **Base:** `main` @ `e9cc8ae`
+
+#### 6. Testing
+Documentation only; no tests run. Code claims are cited by file and line at `e9cc8ae`.
+
+#### 7. Outstanding Issues
+- [assumption] the `learning` planner kind has no UI writer today; verify before LS-027.
+- Mastery thresholds are starting values, not validated with students (D4).
+- Claude B still unconfirmed (B-2).
+
+#### 8. Required Next Action
+Owner: review the spec; decide D1–D5 and ADR-004–008; approve committing the docs. Then Claude A assigns PF-004,
+then LS-002, to Claude B.
+
+#### 9. Review Result
+**Reviewer:** Project Owner  
+**Decision:** APPROVED IN PRINCIPLE (2026-11-23): D1–D5. Conditions: finalize the spec, explicit dependencies and
+acceptance for all tasks, keep the migration gate, one task at a time, no database changes yet. Addressed in HO-005.
+
+---
+
 ### HO-004 — PF-004: Electron smoke test failure in the Learning PDF stage
 
 **Date:** 2026-11-23  
@@ -271,7 +384,125 @@ Claude A:
 #### 10. Review Result
 
 **Reviewer:** Claude A  
+**Decision:** APPROVED — reviewed by Claude A in HO-006; integrated by the project owner in merge `dfd1fbd` (2026-11-23).
+
+---
+
+### HO-005 — Spec finalized; Claude B HO-002 acknowledged; assignment plan
+
+**Date:** 2026-11-23  
+**Task ID:** LS-001, PF-004, PF-006, LS-002  
+**From:** Claude A  
+**To:** Project Owner, Claude B  
+**Status:** PENDING (owner: confirm remaining ADRs and approve committing the docs)
+
+#### 1. Summary
+Applied the owner's decisions D1–D5 and conditions; acknowledged Claude B's familiarization entry; checked PF-004
+status.
+
+#### 2. Work Completed
+- `docs/LEARNING_SYSTEM_SPEC.md`: status approved in principle; §1.1 corrected; new §1.5 (Claude B findings →
+  design rules); D3 `review` state in the question model and table; D4 configurable versioned thresholds and a
+  validation-through-use checkpoint; D2 preservation of historical manual values; delivery rules and decision table
+  (§8–9).
+- `TASK_QUEUE.md`: gates G1–G3; standard acceptance S1–S6; all 30 LS tasks with explicit dependencies and checkable
+  acceptance criteria; PF-006 fully specified; PF-004 marked IN PROGRESS; PF-016–PF-019 added from Claude B's
+  findings.
+- `ARCHITECTURE_DECISIONS.md`: ADR-002 and ADR-006 accepted in principle; ADR-007 D3 part accepted; §6 table.
+
+#### 3. Claude B HO-002 (commit `e3412ce`, branch `claude/caveman-mode-ac59fd`) — acknowledgment
+**Decision:** ACKNOWLEDGED. Verified by Claude A: `main.js:166` error filter, `main.js:507` cancelAsk without
+`requireUser()`, `renderer.js:66-70` motion naming, `workspace.js:190` double ALTER, `renderer.js:1457` page list
+without Analytics/Activities. Not re-verified: the CSS line numbers in §4.7, the 14 unexposed workspace functions,
+the providers idle-timeout (§4.9). Outcomes: §4.2 → PF-006; §4.4 → PF-016; §4.5 → PF-017; §4.7 → PF-018;
+§5 → PF-019; §4.1/§4.6 → spec §1.5 and ADR-005. Claude B's note that `learning.js:4-5` calls topics "not built" is
+correct (topics exist); quizzes, journeys and study-session records do not.
+**Numbering collision:** both entries are HO-002. Proposed: at integration, Claude B's entry becomes **HO-002B**;
+the owner or integration process decides.
+
+#### 4. PF-004 review status
+Not reviewable yet: branch `fix/PF-004-smoke-pdf` (Claude B's worktree) is at `e9cc8ae` with no commits as of this
+entry. Claude A will review on submission against PF-004's criteria (root cause with evidence; 3 consecutive
+`test:electron` exit 0; `npm test` green).
+
+#### 5. Assignment plan (one task at a time)
+PF-004 (in progress) → review → PF-006 → review → LS-002 → review → next per the critical path. No database change
+before PF-006 is approved and merged. *(Superseded by HO-006: PF-007 inserted before PF-006.)*
+
+#### 6. Blocker
+These coordination files are uncommitted in Claude A's worktree; **Claude B cannot read the PF-006/LS-002 specs**
+until they are committed and merged into `main` (or otherwise shared). Needs owner approval.
+
+#### 7. Review Result
+**Reviewer:** Project Owner  
 **Decision:** PENDING
+
+---
+
+### HO-006 — Review of PF-004 (Claude B, branch `fix/PF-004-smoke-pdf`) and PF-007 urgency
+
+**Date:** 2026-11-23  
+**Task ID:** PF-004, PF-007  
+**From:** Claude A  
+**To:** Project Owner, Claude B  
+**Status:** COMPLETE (review) · PF-004 ready for owner integration
+
+> Numbering: Claude B's PF-004 submission is **HO-004** on its branch. Claude A's uncommitted entries were renumbered
+> (spec finalization is now HO-005; this review is HO-006) so the merge does not collide.
+
+#### 1. Scope reviewed
+Commits `3b8f738` (test changes) and `f2006fa` (handoff), base `e9cc8ae`. `git diff --stat e9cc8ae
+fix/PF-004-smoke-pdf`: `test/electron-smoke.js` +14/−1, `test/learning-state-io.test.js` +76 (new),
+`coordination/HANDOFF_LOG.md` +126. No `src/`, `package.json` or `package-lock.json` change.
+
+#### 2. Findings against the review requirements
+| # | Requirement | Finding | Evidence |
+|---|---|---|---|
+| 1 | Complete diff, both commits | Read in full. Matches the commit messages and the handoff. | `git show 3b8f738 f2006fa` |
+| 2 | Startup preflight appropriate | **Yes.** It checks the exact file the renderer imports (`src/learning-pdf.js:23` → `../node_modules/pdfjs-dist/build/pdf.min.mjs`), resolves `appDir` the same way the launcher does (`PERFLW_ELECTRON_APP_DIR`, used at `:58`), is skipped for packaged builds (`PERFLW_ELECTRON_EXE`, `:42`), and runs before the temp folder is created. Test-only; product unchanged. Observed: in a copy without `node_modules` it exits 1 at once with the "Run npm ci" message. Minor, non-blocking: it does not also check `pdf.worker.min.mjs` (`:24`). | Claude A run |
+| 3 | TODO tests document the Windows issue | **Adequate.** Both fail for exactly the stated reason in 3/3 runs by Claude A (`pending` stays `pending`; the first document reads back `pending` after one busy read). They simulate the OS error by patching `fs` (deterministic; restored in `t.after`; `node --test` isolates files in separate processes). The real-OS probe is described in the header and handoff but not committed; acceptable. Test 1 also fixes a design requirement for PF-007 (an unsaved status must not stay `pending`), now written into ADR-003 item 4. Not covered (added to PF-007): preferences and agent registry. | `node --test test/learning-state-io.test.js` ×3 |
+| 4 | No assertions or timeouts weakened | **Confirmed.** The only change inside an existing function is extra diagnostic text in `waitFor`'s error; no wait condition, timeout value or assertion changed; no step removed. | diff |
+| 5 | Handoff and test evidence | Handoff is specific and honest: `:581` root cause proven (2/2 reproduced, 5/5 fixed); `:582` mechanism proven, link to the original failure "plausible, not proven"; the intermittent `:1031` and `:609` failures are disclosed rather than hidden. Claude B's `pf004-evidence/summary.log` matches the handoff (3 × EXIT=0, `npm test` EXIT=0). | file read |
+| 6 | Unintended changes / regressions | None found. Independent run on an exact export of the branch (`git archive`), with the main checkout's `node_modules` linked (electron 38.8.6, pdfjs-dist 5.4.296 = lockfile): `npm test` EXIT=0 (128 tests: 126 pass, 0 fail, 2 todo); `npm run test:electron` EXIT=0 ×3 consecutive (01:39:45Z, 01:40:41Z, 01:41:39Z). | Claude A run |
+
+**Limits of this review:** not a fresh `npm ci` (linked install of identical versions); 3 smoke runs cannot rule out the
+~1-in-11 `:1031` flake; the original `:582` failure is explained by mechanism, not observed again.
+
+**Note on the original failure:** Claude A's audit worktree has no `node_modules`, which explains the `:581` failure
+in the audit runs. It does not explain run 1's `:582` timeout (the viewer step had passed); that remains the
+held-file hypothesis.
+
+#### 3. Decision
+**APPROVED** against PF-004's criteria: root cause stated with evidence (`:581` proven; `:582` mechanism reproduced
+and handed to PF-007); 3 consecutive smoke passes (Claude B and Claude A independently); `npm test` green; committed
+on the specified branch. Follow-ups, not conditions: PF-020 (fixed-wait flakes), PF-007 (the product defect), and
+`docs/ARCHITECTURE.md` §3: "every worktree runs `npm ci` before `npm run test:electron`" (Claude A, with the next
+docs commit).
+
+#### 4. Integration (owner)
+`fix/PF-004-smoke-pdf` is 2 commits directly on `e9cc8ae` (current `main`), so it merges cleanly. Suggested:
+`git merge --no-ff fix/PF-004-smoke-pdf` in the main checkout, then `npm test`. Expected conflict: none in `main`.
+Claude A's uncommitted coordination edits will be reconciled on top of the merged `main` before they are committed
+(Claude B's HO-004 kept as-is; its Review Result set to APPROVED with a pointer here).
+
+#### 5. PF-007 urgency
+- **Severity: high.** Silent loss of user-created content: the subject's `state.json` (document entries and saved
+  notes) and, by the same pattern, the learning preferences file and agent registry. The trigger is not exotic on
+  Windows: antivirus and the search indexer open newly written files. The loss is silent: no error is shown.
+- **Likelihood: unknown, plausible.** Reproduced mechanically; not yet observed in a user's data. One unexplained E2E
+  timeout fits it.
+- **Fix size: small, contained** (one new module, I/O lines in four files); no schema change; **no file overlap with
+  PF-006** (`workspace.js`/`auth.js`).
+- **Recommendation:** raise PF-007 to **P0** and run it **next, before PF-006**: it fixes a live data-loss risk in
+  the shipped product, whereas PF-006's main risk applies to future schema changes (none happen before LS-005).
+  It also turns PF-004's todo tests into real regression tests, and the Learning System's note files (LS-016)
+  depend on it. New order: PF-004 ✔ → **PF-007** → PF-006 → LS-002.
+- **Needs:** owner approval of ADR-003 (amended with the Windows retry and read rules).
+
+#### 6. Required Next Action
+Owner: merge PF-004; approve ADR-003 (amended); confirm ADR-004/005/008; approve committing Claude A's docs.
+Claude A then assigns **PF-007** to Claude B. LS-002 does not start until ADR-005 is confirmed and PF-006 is
+approved.
 
 ---
 
