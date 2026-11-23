@@ -1175,6 +1175,105 @@ needed, whitelist blocks unknown payload fields, copy independent.
 
 ---
 
+### HO-018 — LS-005: Migration 2, Learning System tables
+
+**Date:** 2026-11-23  
+**Task ID:** LS-005  
+**From:** Claude B (lane 3)  
+**To:** Claude A  
+**Branch:** `claude/nifty-haslett-6c96fe` (based on `main` at `0dcc21b`)  
+**Status:** SUBMITTED
+
+#### 1. Understanding (stated before coding)
+Add workspace migration 2 through PF-006's runner. It creates the 10 tables of spec §6.2 with their FKs, CHECKs
+and indexes, including the owner-decision columns: `assessments.attempt` and `assessments.retake_of` (D10),
+`learning_materials.parent_material_id` and the kind `side_note_ai` (D8), and `learning_sessions.visited` (D13).
+`learning_journeys.stage` accepts exactly the 13 keys of §2.2 stages 3–15, exported as a frozen `JOURNEY_STAGES`.
+The migration is purely additive (ADR-004): `CREATE TABLE`/`CREATE INDEX` only, no v1 object changed, no new
+dependency, no store, IPC or UI code. FKs reference `subjects(id)`, `subject_topics(id)`, `events(id)` and
+`focus_entries(id)`, all verified in `workspaceSchemaV1`.
+
+#### 2. Implementation
+- **`src/learning-schema.js` (new)** exports `learningSchemaV2(db)`, `JOURNEY_STAGES` (13 keys) and `LEARNING_TABLES`
+  (10 names). It uses plain `CREATE` without `IF NOT EXISTS` on purpose: a name clash is a bug and fails the step,
+  and the runner rolls it back.
+  - Every table has `user_id TEXT NOT NULL`, `created_at` and `updated_at`.
+  - `id TEXT PRIMARY KEY` everywhere except the two composite keys: `journey_topics` PK(`journey_id`,`topic_id`)
+    and `question_review` PK(`user_id`,`question_id`).
+- **Deletes (spec §6.2 notes):**
+  - Deleting a subject cascades to journeys, questions, assessments, items, answers, sessions, materials, schedule
+    links and review boxes.
+  - Deleting a topic sets `topic_id` NULL on `question_items`, `assessment_items`, `learning_sessions` and
+    `learning_materials`, and removes the topic from `journey_topics`.
+  - Deleting an `events` row removes its `learning_schedule` link (CASCADE).
+  - SET NULL is used for `focus_entry_id`, `question_id` on items, `journey_id` on assessments, sessions and
+    materials, `parent_journey_id` and `retake_of`.
+  - `parent_material_id` uses CASCADE (D8): deleting a side note removes its AI note.
+- **Indexes:**
+  - From the spec: `(user_id, subject_id)` on all 6 tables with `subject_id`, `(assessment_id, position)` (the
+    UNIQUE constraint's index), `(user_id, due_on)` on `question_review`, and `(user_id, topic_id)` on
+    `assessment_items`.
+  - Added: one index per FK child column (`journey_id`, `topic_id`, `question_id`, `parent_*`, `session_id`,
+    `focus_entry_id`, `retake_of`), so cascades and SET NULL do not scan whole tables. Report §5.1.
+- **`src/workspace.js`**: one line. `WORKSPACE_MIGRATIONS` now ends with
+  `{ version: 2, up: require('./learning-schema').learningSchemaV2 }`.
+- **`test/fixtures/schema/workspace-v2.json` (new)**: generated with `dumpSchema` from `generate.js`, using the
+  same startup as the v1 fixture (`createWorkspace` + `connectionStore`). It has 83 objects (v1: 50) and 10 new
+  tables. `generate.js` is unchanged (it still writes `*-v1.json` by name). The fixture came from a one-off
+  `node -e` that called its exported `dumpSchema`.
+- **`test/learning-schema.test.js` (new, 9 tests).**
+
+#### 3. Files outside the brief's list (test-only, needed for `npm test` exit 0)
+- `test/db-migrate.test.js` (PF-006): five tests assumed the latest workspace version is 1 (fresh install equals
+  the v1 fixture, old installs reach v1, `broken = [...WORKSPACE_MIGRATIONS, {version: 2}]`). They now pass
+  `{ migrations: V1 }` with `V1 = WORKSPACE_MIGRATIONS.slice(0, 1)`, so they still test the v1 path unchanged.
+  No assertion was changed.
+- `test/planner.test.js` "existing databases are upgraded to accept learning goals": it built a current database,
+  then set `user_version = 0` to fake a pre-PF-006 install. At v2 that fake database already holds the learning
+  tables, so migration 2 failed with "table learning_journeys already exists". It now builds the fake old install
+  with migration 1 only, which is what a pre-PF-006 install looks like. No assertion was changed.
+
+#### 4. Acceptance (evidence: unit tests on real SQLite files under `node:sqlite`; Electron smoke run once)
+| Criterion | Result | Test |
+|---|---|---|
+| Fresh install → `user_version` 2; schema equals `workspace-v2.json`; v1 objects (SQL and columns) equal `workspace-v1.json`; new objects are only the 10 tables and their indexes; no backup | PASS | `fresh install reaches user_version 2…` |
+| `learning-schema.js` contains no `ALTER`/`DROP`/`INSERT`/`UPDATE`/`DELETE FROM` | PASS | same |
+| Upgrade from v1 with rows in `subjects`, `subject_files`, `subject_topics`, `events`, `focus_entries`: every v1 table's rows identical, 10 new tables, exactly one `bak-v1-*` backup (at v1, without the learning tables) | PASS | `upgrade from v1…` |
+| Second start: no new backup, file byte-identical | PASS | same |
+| `PRAGMA foreign_key_check` empty after upgrade and after seeding every table | PASS | `upgrade from v1…`, cascade tests |
+| Injected failure inside migration 2 (real `learningSchemaV2` then throw): stays v1, no learning object left, one backup passes `integrity_check` with rows; next normal start reaches v2 | PASS | `injected failure inside migration 2…` |
+| Cascade: deleting a subject empties all 10 learning tables (events and focus entries kept); deleting a topic sets `topic_id` NULL on questions, items, sessions and materials | PASS | `cascade…`, `deleting a topic…`, `other deletes…` |
+| CHECK: an unknown `stage`, `kind` (assessment, session, material, schedule), `type`, `review`, `grade_status` is rejected, plus status, origin, dimension, difficulty, grader, confidence, box, JSON validity, and `side_note_ai` without a parent; UNIQUE and FK failures | PASS | `CHECK constraints reject…` |
+| `npm test` | PASS: 163 tests, 163 pass, 0 fail | — |
+| `npm run test:electron` (after `npm ci`), run once | PASS: exit code 0, "Electron smoke test passed." | — |
+
+#### 5. Choices and open points for review
+1. **Extra FK indexes** (§2): these go beyond the spec's list. They cost a little write time and protect the
+   cascades. Remove them if you want the spec's list only.
+2. **Spec discrepancy.** Spec §6.2 says `stage` CHECK uses "the 16 stage keys". The brief, which governs, and
+   §2.2 give 13 (stages 3–15). The brief was implemented; §6.2 should be corrected. §2.2 stage 2's exit
+   ("Saved → stage `pretest`") also disagrees with stage 3 = `material`. The column default is `'material'`.
+   LS-006 can set the stage explicitly.
+3. **Constraint choices the spec leaves open:**
+   - `points > 0` and `max_score > 0` instead of 1–20, so a later range change needs no table rebuild.
+     `difficulty IN (1,2,3)`. `confidence` NULL or 1–3. `dont_know` 0/1. `box` 1–5.
+   - `review` defaults to `'unreviewed'` (D3: the safer default).
+   - `question_items.origin` has a CHECK (`manual`, `template`, `generated`). `learning_materials.origin` is free
+     text with default `'manual'`, because the spec gives it no CHECK.
+   - `mistake_category` is free text (categories live in `learning-insight.js`).
+   - JSON columns have `json_valid` CHECKs as a last guard. `visited` defaults to `{"sections":[],"materials":[]}`.
+   - `assessment_items.dimension` has the same 4-value CHECK as questions.
+   - `learning_materials` has `CHECK(kind <> 'side_note_ai' OR parent_material_id IS NOT NULL)` (D8).
+4. **Non-idempotent by design.** A database at v0 that already has learning tables fails migration 2 and is
+   rolled back. This state needs `user_version` to be reset by hand. A pre-PF-006 app never writes
+   `user_version`, so a downgrade cannot cause it.
+
+#### 6. Commits
+`feat(learning): LS-005 migration 2 adds Learning System tables`, `docs(handoff): HO-018 LS-005 submission`.
+Not pushed, not merged.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED

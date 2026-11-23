@@ -11,6 +11,8 @@ const { migrate, backupDatabase, pruneBackups, listBackups, userVersion } = requ
 const { createWorkspace, WORKSPACE_MIGRATIONS } = require('../src/workspace');
 const { createAuth, ACCOUNT_MIGRATIONS } = require('../src/auth');
 const { dumpSchema } = require('./fixtures/schema/generate');
+// PF-006 tests pin the workspace to migration 1 so they keep testing the v1 upgrade path; migration 2 (LS-005) has its own tests.
+const V1 = WORKSPACE_MIGRATIONS.slice(0, 1);
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'schema');
 const expected = name => JSON.parse(fs.readFileSync(path.join(FIXTURES, `${name}-v1.json`), 'utf8'));
@@ -57,7 +59,7 @@ test('VACUUM INTO under node:sqlite writes a consistent, openable copy with the 
 test('fresh install: both databases reach user_version 1 with exactly the schema main created, and no backup', t => {
   const box = sandbox(t);
   const auth = box.track(createAuth(box.root));
-  const workspace = box.track(createWorkspace(box.root));
+  const workspace = box.track(createWorkspace(box.root, { migrations: V1 }));
   workspace.connectionStore(NO_SECRETS);
   workspace.close(); auth.close();
   for (const name of ['workspace', 'accounts']) {
@@ -86,7 +88,7 @@ for (const [fixture, check] of [
   test(`old install (${fixture}) upgrades to v1 with every row kept, both preview columns, and a backup`, t => {
     const box = sandbox(t);
     const before = seedFixture(box, fixture);
-    const workspace = box.track(createWorkspace(box.root));
+    const workspace = box.track(createWorkspace(box.root, { migrations: V1 }));
     workspace.connectionStore(NO_SECRETS);
     workspace.close();
 
@@ -118,7 +120,7 @@ for (const [fixture, check] of [
     for (const [table, oldRows] of Object.entries(before)) assert.deepEqual(rows(copy, table), oldRows, `backup ${table} equals the old rows`);
 
     // The upgraded database works through the app API (learning planner goals need the rebuilt CHECK).
-    const reopened = box.track(createWorkspace(box.root));
+    const reopened = box.track(createWorkspace(box.root, { migrations: V1 }));
     assert.equal(reopened.createPlannerItem('user-a', { kind: 'learning', text: 'Read chapter 2' }).kind, 'learning');
   });
 }
@@ -139,17 +141,17 @@ test('an error part-way through migration 1 rolls back the planner_items rebuild
   for (const [table, oldRows] of Object.entries(before)) assert.deepEqual(rows(db, table), oldRows);
   db.close();
   // The next normal start upgrades the same file.
-  box.track(createWorkspace(box.root)).close();
+  box.track(createWorkspace(box.root, { migrations: V1 })).close();
   const after = box.open(box.file('workspace.sqlite'), { readOnly: true });
   assert.equal(userVersion(after), 1);
 });
 
 test('injected failure in a migration 2: database stays at v1, no open transaction, usable, backup exists and opens', t => {
   const box = sandbox(t);
-  const first = box.track(createWorkspace(box.root));
+  const first = box.track(createWorkspace(box.root, { migrations: V1 }));
   first.createPlannerItem('user-a', { kind: 'whim', text: 'Keep me' });
   first.close();
-  const broken = [...WORKSPACE_MIGRATIONS, { version: 2, up: db => {
+  const broken = [...V1, { version: 2, up: db => {
     db.exec("CREATE TABLE should_vanish(id TEXT); INSERT INTO planner_items(id,user_id,kind,text,created_at,updated_at) VALUES ('x','user-a','plan','ghost','t','t')");
     throw new Error('simulated migration 2 failure');
   } }];
@@ -163,7 +165,7 @@ test('injected failure in a migration 2: database stays at v1, no open transacti
   assert.deepEqual(rows(copy, 'planner_items').map(r => r.text), ['Keep me']);
   copy.close();
 
-  const again = box.track(createWorkspace(box.root));
+  const again = box.track(createWorkspace(box.root, { migrations: V1 }));
   assert.deepEqual(again.listPlannerItems('user-a', 'whim').map(i => i.text), ['Keep me']);
   assert.deepEqual(again.listPlannerItems('user-a', 'plan'), [], 'the failed step left no row');
   again.close();

@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createWorkspace } = require('../src/workspace');
+const { createWorkspace, WORKSPACE_MIGRATIONS } = require('../src/workspace');
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-planner-'));
@@ -81,7 +81,8 @@ test('existing databases are upgraded to accept learning goals without losing it
   let second = null;
   // One hook: close the reopened database before removing its folder (Windows cannot delete an open file).
   t.after(() => { if (second) second.close(); fs.rmSync(root, { recursive: true, force: true }); });
-  const first = createWorkspace(root);
+  // A pre-PF-006 install has only the version-1 tables, so build it with migration 1 alone.
+  const first = createWorkspace(root, { migrations: WORKSPACE_MIGRATIONS.slice(0, 1) });
   first.createPlannerItem('user-a', { kind: 'whim', text: 'Keep me' });
   first.close();
   const file = fs.readdirSync(root).find(name => name.endsWith('.db') || name.endsWith('.sqlite'));

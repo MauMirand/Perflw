@@ -196,7 +196,7 @@ function workspaceSchemaV1(db) {
   createConnectionSchema(db);
 }
 
-const WORKSPACE_MIGRATIONS = Object.freeze([{ version: 1, up: workspaceSchemaV1 }]);
+const WORKSPACE_MIGRATIONS = Object.freeze([{ version: 1, up: workspaceSchemaV1 }, { version: 2, up: require('./learning-schema').learningSchemaV2 }]);
 
 function createWorkspace(root, { migrations = WORKSPACE_MIGRATIONS } = {}) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
