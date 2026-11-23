@@ -200,8 +200,11 @@ Summary, files, test outputs with exit codes, commit hash, the list of tables/co
 
 ### Learning System (LS) — spec `docs/LEARNING_SYSTEM_SPEC.md`
 
-**Owner decisions 2026-11-23:** D1–D5 approved in principle (see spec §9). ADR-004, ADR-005 and ADR-008 still
-await explicit owner confirmation; tasks that depend on them say so.
+**Owner decisions 2026-11-23:** D1–D5 approved in principle (see spec §9). ADR-004, ADR-005 and ADR-008
+ACCEPTED (2026-11-23). Open product questions on the learning loop: HO-011 (they do not block LS-002 to LS-004).
+
+**Branch names:** desktop sessions may create their own branch name (e.g. `claude/<name>-<id>`). That is
+acceptable; the HANDOFF entry must state the exact ref and the base commit.
 
 **Assignment rule (owner, 2026-11-23):** Claude B receives **one independently testable task at a time**. The next
 task is assigned only after the previous one is reviewed by Claude A. No batches.
@@ -426,7 +429,8 @@ otherwise wait for a review.
 
 ### TASK: LS-002 — Assessment model (pure module)
 
-**Status:** READY (ADR-005 ACCEPTED 2026-11-23); assigned only after PF-006 is reviewed, per the one-task rule  
+**Status:** READY (ADR-005 ACCEPTED 2026-11-23). Released by Claude A after PF-006 is reviewed (G3); branch from
+the `main` that exists at release time  
 **Priority:** P1  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -478,8 +482,11 @@ Test both.
 - [ ] Tests cover: each type valid/invalid; multiple-choice partial credit incl. floor at 0; matching partial;
       dontKnow and empty; seeded selection is deterministic and covers every topic before repeating; exclusion
       honored; `stripAnswerKey` leaves no key field (deep check).
-- [ ] `npm test` passes (126 + new), exit code captured as `npm test > log 2>&1; echo EXIT=$?`.
-- [ ] Committed on `feature/LS-002-assessment-model`; HANDOFF_LOG entry with results.
+- [ ] `npm test` passes (the base commit's count, 141 at `5664f56` plus whatever PF-006 adds, + new), exit code
+      captured as `npm test > log 2>&1; echo EXIT=$?` (nothing between the command and `$?`).
+- [ ] Committed on `feature/LS-002-assessment-model` (or the session's generated branch, stated in the handoff);
+      HANDOFF_LOG entry with results, using the next free HO number.
+- [ ] No `npm run test:electron` needed (no renderer change); if run, report the result.
 
 #### Deliverables
 Summary, files, test output with exit code, commit hash, any spec ambiguities found (report, don't decide).
