@@ -22,13 +22,14 @@
   <script src="learning-study.js" defer></script>
   <script src="learning-annotate.js" defer></script>
   <script src="learning.js" defer></script>
+  <script src="home-layout.js" defer></script>
   <script src="renderer.js" defer></script>
 </head>
 <body class="is-auth">
   <div class="shell">
     <!-- Icon rail -->
     <aside class="rail" aria-label="Quick actions">
-      <img class="rail-logo" src="../assets/icon.png" alt="Perflw" width="37" height="37">
+      <img class="rail-logo" src="../assets/brand/perflw-icon.png" alt="Perflw" width="37" height="37">
       <div class="rail-anchor">
         <button class="icon-btn rail-btn" id="rail-account" type="button" aria-label="Account" aria-haspopup="menu" aria-expanded="false" data-tip="Account">
           <span class="rail-avatar" id="rail-avatar"></span>
@@ -77,7 +78,7 @@
       <section id="login-page" class="auth-scene" hidden>
         <div class="auth-shell">
           <aside class="auth-brand" aria-hidden="true">
-            <div class="auth-brand-mark"><img src="../assets/icon.png" alt="" width="28" height="28"><span>Perflw</span></div>
+            <div class="auth-brand-mark"><img src="../assets/brand/perflw-icon.png" alt="" width="28" height="28"><span>Perflw</span></div>
             <div class="auth-brand-copy">
               <h2>Plan, study and automate in one quiet place.</h2>
               <ul class="auth-points">
@@ -112,7 +113,7 @@
       <section id="register-page" class="auth-scene" hidden>
         <div class="auth-shell">
           <aside class="auth-brand" aria-hidden="true">
-            <div class="auth-brand-mark"><img src="../assets/icon.png" alt="" width="28" height="28"><span>Perflw</span></div>
+            <div class="auth-brand-mark"><img src="../assets/brand/perflw-icon.png" alt="" width="28" height="28"><span>Perflw</span></div>
             <div class="auth-brand-copy">
               <h2>Plan, study and automate in one quiet place.</h2>
               <ul class="auth-points">
@@ -206,5 +207,6 @@
     </div>
   </div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 </body>
 </html>

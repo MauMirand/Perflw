@@ -385,7 +385,8 @@ async function run() {
   const fake = await fakeEndpoint();
   const secret = 'sk-e2e-secret-0123456789abcdef';
   await go('agents', "document.querySelector('.page-head h1')?.textContent === 'Agents'");
-  await click('[data-eco="providers"]');
+  // The LLM APIs button is a toggle and the Agents page remembers the open pane: open it only when it is closed.
+  if (await evaluate("document.querySelector('.btn[data-eco=\"providers\"]')?.getAttribute('aria-pressed') !== 'true'")) await click('.btn[data-eco="providers"]');
   await waitFor("document.querySelector('.eco-pane .chat-title')?.textContent === 'LLM APIs'");
   await click('[data-eco="new-provider"]');
   await choose('[data-eco-form="provider"] [name=type]', 'openai-compatible');

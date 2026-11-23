@@ -121,8 +121,9 @@ async function stop() {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ id: ++nextId, method: 'Runtime.evaluate', params: { expression: 'window.windowControls && window.windowControls.close()' } }));
     }
-    const graceful = await Promise.race([exited.then(() => true), sleep(10000).then(() => false)]);
-    if (!graceful) { proc.kill(); await exited; }
+    // A busy machine can take more than 10 s to quit; a hard kill then loses localStorage writes (project tabs, prefs).
+    const graceful = await Promise.race([exited.then(() => true), sleep(25000).then(() => false)]);
+    if (!graceful) { console.warn('App did not quit within 25 s; killed it (unsaved localStorage may be lost).'); proc.kill(); await exited; }
   }
   if (socket) socket.close();
 }
@@ -816,6 +817,56 @@ async function run() {
   await evaluate("document.querySelector('[data-form=\"profile\"] [name=displayName]').value = 'Smoke Pilot'");
   await submit('[data-form="profile"]');
   await waitFor("document.querySelector('.profile-name')?.textContent === 'Smoke Pilot'", 'profile renamed');
+  await waitFor("document.activeElement?.id === 'profile-edit-btn'", 'focus returns to the edit pencil after saving');
+  // Profile header layout: tall banner, avatar overlapping its bottom edge, name and greeting below it
+  const head = await evaluate(`(() => {
+    const r = s => { const el = document.querySelector(s); if (!el) return null; const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, width: b.width, height: b.height }; };
+    const pencil = document.querySelector('#profile-edit-btn');
+    return { wide: innerWidth >= 860, cover: r('.cover'), avatar: r('.profile-avatar'), name: r('.profile-name'), hello: r('.today-hello'), card: r('.profile-card'),
+      bio: (document.querySelector('.profile-bio')?.textContent || '').trim(), pencilTitle: pencil?.title, pencilOpacity: pencil ? getComputedStyle(pencil).opacity : null,
+      coverImage: !!document.querySelector('.cover [data-action="cover-image"]'), coverPosition: !!document.querySelector('.cover [data-action="cover-position"]'), hasImage: document.querySelector('.cover').classList.contains('has-image') };
+  })()`);
+  assert.ok(head.name.top >= head.cover.bottom - 0.5, 'name sits below the banner');
+  assert.ok(head.hello.top >= head.cover.bottom - 0.5, 'greeting sits below the banner');
+  assert.ok(head.avatar.top < head.cover.bottom && head.cover.bottom < head.avatar.bottom, 'avatar overlaps the banner bottom edge');
+  if (head.wide) { assert.ok(head.avatar.width >= 100, `avatar is large (${head.avatar.width}px)`); assert.ok(head.cover.height >= 190, `banner is tall (${head.cover.height}px)`); }
+  assert.equal(head.bio, 'Testing the planner', 'bio line shows only the bio (no date)');
+  assert.equal(head.pencilTitle, 'Edit profile');
+  assert.equal(head.pencilOpacity, '1', 'edit pencil is always visible');
+  assert.ok(head.coverImage, 'banner offers Change banner');
+  assert.equal(head.coverPosition, head.hasImage, 'Reposition only when a banner image is set');
+  const nameFits = "(() => { const n = document.querySelector('.profile-name'); return { fits: n.scrollWidth <= n.clientWidth, w: n.clientWidth, sw: n.scrollWidth }; })()";
+  const fitWide = await evaluate(nameFits);
+  assert.ok(fitWide.fits, `name not truncated at the smoke window width (${fitWide.sw} > ${fitWide.w})`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 960, height: 760, deviceScaleFactor: 1, mobile: false });
+  await sleep(120);
+  const fitMin = await evaluate(nameFits);
+  // A long name still fits at the minimum window width; then restore 'Smoke Pilot' for later checks
+  const renameTo = async name => {
+    await click('#profile-edit-btn');
+    await waitFor("!!document.querySelector('[data-form=\"profile\"] [name=displayName]')", 'profile edit mode');
+    await evaluate(`document.querySelector('[data-form="profile"] [name=displayName]').value = ${q(name)}`);
+    await submit('[data-form="profile"]');
+    await waitFor(`document.querySelector('.profile-name')?.textContent === ${q(name)}`, `profile renamed to ${name}`);
+  };
+  await renameTo('Alexandria Montgomery');
+  await sleep(120);
+  const fitLong = await evaluate(nameFits);
+  await renameTo('Smoke Pilot');
+  await cdp('Emulation.clearDeviceMetricsOverride', {});
+  assert.ok(fitLong.fits, `long name not truncated at 960px (${fitLong.sw} > ${fitLong.w})`);
+  await sleep(120);
+  assert.ok(fitMin.fits, `name not truncated at the 960px minimum window width (${fitMin.sw} > ${fitMin.w})`);
+  // Edit mode keeps the header steady, focuses the name, locks photo/banner changes; Escape returns focus to the pencil
+  await click('#profile-edit-btn');
+  await waitFor("!!document.querySelector('[data-form=\"profile\"]')", 'profile edit mode');
+  const editState = await evaluate(`({ height: document.querySelector('.profile-card').getBoundingClientRect().height, focus: document.activeElement?.name, avatarDisabled: document.querySelector('.profile-avatar').disabled, tools: !!document.querySelector('.cover-tools') })`);
+  assert.ok(Math.abs(editState.height - head.card.height) <= 2, `header height steady in edit mode (${head.card.height} -> ${editState.height})`);
+  assert.equal(editState.focus, 'displayName', 'name field focused in edit mode');
+  assert.ok(editState.avatarDisabled, 'avatar disabled while editing');
+  assert.ok(!editState.tools, 'banner tools hidden while editing');
+  await press('[data-form="profile"] [name=displayName]', { key: 'Escape' });
+  await waitFor("!document.querySelector('[data-form=\"profile\"]') && document.activeElement?.id === 'profile-edit-btn'", 'Escape leaves edit mode and focuses the pencil');
   // Today page: the four pillars, today's to-do added and ticked in place
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.today-main .t-pillar')].map(e => e.textContent.trim())"), ['Plan', 'Learn', 'Create', 'Automate'], 'four pillars on Today');
   assert.equal(await count('.hm-day.today'), 1, 'month at a glance marks today');
@@ -829,8 +880,77 @@ async function run() {
   // Leave the plan counts of the later restart check as they were
   await evaluate("(async () => { const row = [...document.querySelectorAll('.today-side .t-todo')].find(r => r.textContent.includes('Review chapter 3')); await window.plannerData.remove(row.dataset.id); return true; })()");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.nav-expanded .nav-label')].slice(0, 4).map(e => e.textContent.trim())"), ['Plan', 'Learn', 'Create', 'Automate'], 'sidebar grouped by pillar');
+  // Today cards move: arrow keys on the grip, Reset layout with Undo, and a pointer drag of the card header
+  const pillars = "JSON.stringify([...document.querySelectorAll('.today-main .t-pillar')].map(e => e.textContent.trim()))";
+  const sideCards = "JSON.stringify([...document.querySelectorAll('.today-side [data-card]')].map(e => e.dataset.card))";
+  assert.equal(await count('.today [data-card] .t-grip'), 6, 'every Today card has a grip');
+  await press('.t-grip[data-id="learn"]', { key: 'ArrowUp' });
+  await waitFor(`${pillars} === '["Learn","Plan","Create","Automate"]'`, 'ArrowUp moves Learn above Plan');
+  assert.equal(await evaluate("document.activeElement?.matches('.t-grip[data-id=\"learn\"]')"), true, 'focus stays on the moved grip');
+  await waitFor("document.getElementById('sr-live').textContent.includes('Learn card moved to position 1 in main column')", 'keyboard move announced');
+  await press('.t-grip[data-id="todo"]', { key: 'ArrowLeft' });
+  await waitFor("!!document.querySelector('.today-main [data-card=\"todo\"]')", 'ArrowLeft moves the to-do card into the main column');
+  assert.equal(await evaluate("document.activeElement?.dataset.id"), 'todo', 'focus follows the to-do grip');
+  await press('.t-grip[data-id="todo"]', { key: 'ArrowRight' });
+  await waitFor(`${sideCards} === '["routine","todo"]'`, 'ArrowRight returns it to the end of the side column');
+  await waitFor("!!document.querySelector('.today-meta [data-action=\"home-reset\"]')", 'Reset layout offered once the order changed');
+  await click('[data-action="home-reset"]');
+  await waitFor(`${pillars} === '["Plan","Learn","Create","Automate"]' && ${sideCards} === '["todo","routine"]' && !document.querySelector('[data-action="home-reset"]')`, 'Reset restores the default order');
+  await evaluate("[...document.querySelectorAll('.toast')].reverse().find(t => t.textContent.includes('Layout reset.')).querySelector('button').click()");
+  await waitFor(`${pillars} === '["Learn","Plan","Create","Automate"]' && ${sideCards} === '["routine","todo"]'`, 'Undo brings the moved layout back');
+  await click('[data-action="home-reset"]');
+  await waitFor(`${pillars} === '["Plan","Learn","Create","Automate"]' && ${sideCards} === '["todo","routine"]'`, 'Reset again');
+  // Pointer drag: hold the Create header, move over the left half of Learn, release
+  const holdCard = (id, overId) => evaluate(`(async () => {
+    document.querySelector('[data-card="${overId}"]').scrollIntoView({ block: 'center' });
+    await new Promise(r => setTimeout(r, 60));
+    const grab = document.querySelector('[data-card="${id}"] .t-pillar, [data-card="${id}"] .t-note-title');
+    const a = grab.getBoundingClientRect(); const over = document.querySelector('[data-card="${overId}"]').getBoundingClientRect();
+    const at = (x, y) => ({ clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0, buttons: 1, pointerId: 7, isPrimary: true, pointerType: 'mouse' });
+    const x0 = a.left + 8, y0 = a.top + a.height / 2, x1 = over.left + 24, y1 = over.top + 14;
+    grab.dispatchEvent(new PointerEvent('pointerdown', at(x0, y0)));
+    for (let i = 1; i <= 12; i++) { document.dispatchEvent(new PointerEvent('pointermove', at(x0 + (x1 - x0) * i / 12, y0 + (y1 - y0) * i / 12))); await new Promise(r => requestAnimationFrame(r)); }
+    window.__homeDropAt = [x1, y1];
+    return { lifted: !!document.querySelector('.t-card.t-lifted'), ph: !!document.querySelector('.today-main .t-ph') };
+  })()`);
+  assert.deepEqual(await holdCard('create', 'learn'), { lifted: true, ph: true }, 'header drag lifts the card and leaves a placeholder');
+  await screenshot('10b-home-drag');
+  await evaluate("(() => { const [x, y] = window.__homeDropAt; document.dispatchEvent(new PointerEvent('pointerup', { clientX: x, clientY: y, bubbles: true, button: 0, pointerId: 7, isPrimary: true, pointerType: 'mouse' })); return true; })()");
+  await waitFor("!document.querySelector('.t-lifted, .t-ph, .t-zone-empty') && !document.body.classList.contains('home-dragging')", 'card settles after the drop');
+  assert.equal(await evaluate(pillars), '["Plan","Create","Learn","Automate"]', 'drag puts Create above Learn');
+  await waitFor("document.getElementById('sr-live').textContent.includes('Create card moved to position 2 in main column')", 'drop announced');
+  assert.equal(await evaluate("[...document.querySelectorAll('.t-card')].flatMap(c => c.getAnimations()).filter(a => a.animationName === 'tIn').length"), 0, 'no card replays its entrance after a drop');
+  assert.ok(await evaluate("JSON.parse(localStorage.getItem('perflw-ui-v2')).homeLayout.main.join() === 'plan,create,learn,automate'"), 'dropped order saved');
+  // Esc while holding a card puts it back where it started and saves nothing
+  assert.deepEqual(await holdCard('automate', 'plan'), { lifted: true, ph: true }, 'second drag lifts Automate');
+  await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
+  await waitFor("!document.querySelector('.t-lifted, .t-ph, .t-zone-empty')", 'Esc settles the held card');
+  assert.equal(await evaluate(pillars), '["Plan","Create","Learn","Automate"]', 'Esc keeps the previous order');
+  assert.ok(await evaluate("JSON.parse(localStorage.getItem('perflw-ui-v2')).homeLayout.main.join() === 'plan,create,learn,automate'"), 'Esc saves nothing');
+  await evaluate("document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 7, isPrimary: true, pointerType: 'mouse' }))");
+  // Sidebar groups fold under their label and open again; label text stays the same
+  await click('.nav-label[data-id="plan"]');
+  assert.equal(await evaluate("document.querySelector('.nav-label[data-id=\"plan\"]').getAttribute('aria-expanded')"), 'false', 'Plan label reports collapsed');
+  await sleep(250);
+  const navVis = "(() => { const vis = s => document.querySelector(s).getClientRects().length > 0; return { expanded: document.querySelector('.nav-label[data-id=\"plan\"]').getAttribute('aria-expanded'), hidden: document.getElementById('nav-g-plan').hidden, calendar: vis('.nav-expanded [data-go=\"calendar\"]'), date: vis('.nav-expanded .date-card'), routine: vis('.nav-expanded [data-go=\"routine\"]'), learning: vis('.nav-expanded [data-go=\"learning\"]') }; })()";
+  assert.deepEqual(await evaluate(navVis), { expanded: 'false', hidden: true, calendar: false, date: false, routine: false, learning: true }, 'Plan group hides Calendar, the date card and Routine only');
+  await screenshot('10c-nav-collapsed');
+  await click('.nav-label[data-id="plan"]');
+  await sleep(250);
+  // Folding a group that holds keyboard focus moves focus to its label, not to the page
+  assert.ok(await evaluate("!document.getElementById('nav-g-plan').hidden && (document.querySelector('#nav-g-plan [data-go=\"calendar\"]').focus(), document.activeElement.matches('#nav-g-plan [data-go=\"calendar\"]'))"), 'Calendar nav item focused');
+  await evaluate("document.querySelector('.nav-label[data-id=\"plan\"]').click()");
+  assert.equal(await evaluate("document.activeElement?.matches('.nav-label[data-id=\"plan\"]')"), true, 'focus moves to the Plan label when its group folds');
+  await sleep(250);
+  await click('.nav-label[data-id="plan"]');
+  await sleep(250);
+  assert.deepEqual(await evaluate(navVis), { expanded: 'true', hidden: false, calendar: true, date: true, routine: true, learning: true }, 'Plan group opens again');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.nav-expanded .nav-label')].slice(0, 4).map(e => e.textContent.trim())"), ['Plan', 'Learn', 'Create', 'Automate'], 'group labels unchanged after toggling');
   await sleep(450);
   await screenshot('10-home');
+  // A link in a card header still works as a link, not a drag handle
+  await evaluate("(() => { const link = document.querySelector('[data-card=\"plan\"] .t-link[data-go=\"calendar\"]'); const r = link.getBoundingClientRect(); const at = { clientX: r.left + 5, clientY: r.top + 5, bubbles: true, button: 0, pointerId: 8, isPrimary: true, pointerType: 'mouse' }; link.dispatchEvent(new PointerEvent('pointerdown', at)); document.dispatchEvent(new PointerEvent('pointermove', { ...at, clientX: at.clientX + 10 })); document.dispatchEvent(new PointerEvent('pointerup', at)); link.click(); return true; })()");
+  await waitFor(`!document.querySelector('#stage').classList.contains('view-out') && ${viewCheck('calendar')}`, 'Plan card Calendar link navigates');
 
   // Settings
   await view('settings');
@@ -863,17 +983,60 @@ async function run() {
   await click('#account-menu [data-go="settings"]');
   await waitFor(viewCheck('settings'));
 
-  // Sidebar collapse
+  // Sidebar collapse (the Plan group is folded first: the collapsed rail is not grouped and still lists everything)
+  await click('.nav-label[data-id="plan"]');
+  await waitFor("document.getElementById('nav-g-plan').hidden", 'Plan group folded before restart');
+  assert.equal(await evaluate("document.querySelector('.nav-label[data-id=\"plan\"]').classList.contains('has-active')"), false, 'no current-page mark when the page is outside the folded group');
   await click('#sidebar-toggle');
   await waitFor("document.getElementById('sidebar').classList.contains('collapsed') && !!document.querySelector('.nav-collapsed')");
+  assert.ok(await evaluate("!!document.querySelector('.nav-collapsed [data-go=\"calendar\"]') && !!document.querySelector('.nav-collapsed [data-go=\"routine\"]') && !!document.querySelector('.nav-collapsed .date-card')"), 'collapsed rail still shows Calendar, the date and Routine');
   await screenshot('14-collapsed');
   await click('#sidebar-toggle');
   await waitFor("!document.getElementById('sidebar').classList.contains('collapsed') && !!document.querySelector('.nav-expanded')");
+  assert.equal(await evaluate("document.getElementById('nav-g-plan').hidden"), true, 'Plan group stays folded after the sidebar opens again');
 
   // Restart: session and data persist
   await stop();
   await launch();
   await waitFor("!document.getElementById('main-page').hidden", 'session restored');
+  await waitFor("!!document.querySelector('.nav-label[data-id=\"plan\"]')", 'sidebar ready after restart');
+  assert.deepEqual(await evaluate("({ expanded: document.querySelector('.nav-label[data-id=\"plan\"]').getAttribute('aria-expanded'), hidden: document.getElementById('nav-g-plan').hidden })"), { expanded: 'false', hidden: true }, 'folded Plan group persisted');
+  await view('calendar');
+  await waitFor("document.querySelector('.nav-label[data-id=\"plan\"]').getAttribute('aria-expanded') === 'true' && !document.getElementById('nav-g-plan').hidden && JSON.parse(localStorage.getItem('perflw-ui-v2')).navGroups.plan === true", 'going to Calendar opens its folded group and saves it');
+  await click('.nav-label[data-id="plan"]');
+  await waitFor("document.querySelector('.nav-label[data-id=\"plan\"]').classList.contains('has-active')", 'folded group holding the current page is marked');
+  await click('.nav-label[data-id="plan"]');
+  await waitFor("!document.getElementById('nav-g-plan').hidden && !document.querySelector('.nav-label[data-id=\"plan\"]').classList.contains('has-active')", 'Plan group open again');
+  await view('home');
+  assert.equal(await evaluate(pillars), '["Plan","Create","Learn","Automate"]', 'Today card order persisted');
+  await click('[data-action="home-reset"]');
+  await waitFor(`${pillars} === '["Plan","Learn","Create","Automate"]'`, 'layout reset after restart');
+  // With the side column emptied, a held card still sees it as a target at the top right (level with the main column, or stuck to the top of the scrolled page), and can be dropped there
+  await press('.t-grip[data-id="todo"]', { key: 'ArrowLeft' });
+  await press('.t-grip[data-id="routine"]', { key: 'ArrowLeft' });
+  await waitFor("!document.querySelector('.today-side [data-card]') && document.querySelector('.today-grid').classList.contains('side-empty')", 'side column emptied');
+  const emptySide = await evaluate(`(async () => {
+    document.querySelector('[data-card="learn"]').scrollIntoView({ block: 'center' });
+    await new Promise(r => setTimeout(r, 60));
+    const grab = document.querySelector('[data-card="learn"] .t-pillar'); const a = grab.getBoundingClientRect();
+    const at = (x, y) => ({ clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0, buttons: 1, pointerId: 9, isPrimary: true, pointerType: 'mouse' });
+    grab.dispatchEvent(new PointerEvent('pointerdown', at(a.left + 8, a.top + 6)));
+    for (let i = 1; i <= 3; i++) { document.dispatchEvent(new PointerEvent('pointermove', at(a.left + 8 + i * 3, a.top + 6))); await new Promise(r => requestAnimationFrame(r)); }
+    await new Promise(r => setTimeout(r, 260));
+    const panel = document.getElementById('main-panel').getBoundingClientRect(); const side = document.querySelector('.today-side').getBoundingClientRect(); const main = document.querySelector('.today-main').getBoundingClientRect();
+    const target = document.querySelector('.today-side > .t-zone-empty.show').getBoundingClientRect();
+    const x = target.left + target.width / 2, y = target.top + target.height / 2;
+    for (let i = 1; i <= 8; i++) { document.dispatchEvent(new PointerEvent('pointermove', at(a.left + 17 + (x - a.left - 17) * i / 8, a.top + 6 + (y - a.top - 6) * i / 8))); await new Promise(r => requestAnimationFrame(r)); }
+    await new Promise(r => setTimeout(r, 260));
+    const lifted = document.querySelector('.t-lifted').getBoundingClientRect();
+    document.dispatchEvent(new PointerEvent('pointerup', at(x, y)));
+    return { besideMain: side.left > main.right - 1, topAligned: Math.abs(side.top - main.top) <= 40 || (side.top > main.top && Math.abs(side.top - panel.top) <= 40), sideTop: Math.round(side.top), mainTop: Math.round(main.top), panelTop: Math.round(panel.top), liftedWidth: Math.round(lifted.width), sideWidth: Math.round(side.width) };
+  })()`);
+  assert.ok(emptySide.besideMain && emptySide.topAligned, `empty side column stays beside the main column during a drag (${JSON.stringify(emptySide)})`);
+  assert.ok(Math.abs(emptySide.liftedWidth - emptySide.sideWidth) <= 12, `held card narrows to the side column (${JSON.stringify(emptySide)})`);
+  await waitFor("!!document.querySelector('.today-side [data-card=\"learn\"]') && !document.querySelector('.t-lifted, .t-ph')", 'card dropped into the empty side column');
+  await click('[data-action="home-reset"]');
+  await waitFor(`${pillars} === '["Plan","Learn","Create","Automate"]' && !document.querySelector('[data-action="home-reset"]')`, 'layout reset again');
   await view('calendar');
   await waitFor("document.querySelectorAll('.plan').length === 4", 'plans persisted');
   await waitFor("document.querySelectorAll('.linked-row:not([data-sb-open])').length === 1", 'linked task still on the calendar');

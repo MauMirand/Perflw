@@ -293,7 +293,7 @@
 .ln-pdfv-page .textLayer { position: absolute; inset: 0; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; z-index: 1; forced-color-adjust: none; }
 .ln-pdfv-page .textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0 0; }
 .ln-pdfv-page .textLayer span.markedContent { top: 0; height: 0; }
-.ln-pdfv-page .textLayer ::selection { background: rgba(98, 66, 183, .28); }
+.ln-pdfv-page .textLayer ::selection { background: rgba(109, 74, 255, .28); }
 .ln-pdfv-page .textLayer br::selection { background: transparent; }
 .ln-pdfv-page .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
 .ln-pdfv-hl { position: absolute; z-index: 2; pointer-events: none; border-radius: 4px; background: rgba(245, 197, 66, .38); box-shadow: 0 0 0 1px rgba(214, 160, 20, .45); animation: ln-hl-in 420ms cubic-bezier(.22, .8, .3, 1) both; }
@@ -558,7 +558,7 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .ann-comment, .ann-select { position: absolute; border-radius: 4px; }
 .ann-select { border: 2px dashed #7C5CFF; background: rgba(124, 92, 255, .1); }
 .ann-select.pending { border-style: solid; animation: annPulse 1.4s ease-in-out infinite; }
-@keyframes annPulse { 50% { background: rgba(98, 66, 183, .15); } }
+@keyframes annPulse { 50% { background: rgba(109, 74, 255, .15); } }
 /* A comment marks its area like a highlighter: tinted fill, a solid edge and a strong badge. */
 .ann-comment { border: 2px solid rgba(124, 92, 255, .85); background: rgba(124, 92, 255, .13); border-radius: 6px; box-shadow: 0 0 0 4px rgba(124, 92, 255, .12); transition: background 160ms ease, border-color 160ms ease, box-shadow 200ms ease; }
 .ann-comment::before { content: ''; position: absolute; left: -2px; top: -2px; bottom: -2px; width: 4px; border-radius: 6px 0 0 6px; background: #7C5CFF; }

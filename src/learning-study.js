@@ -39,7 +39,7 @@
   const A = new Map();   // fileId → analysis | { status: 'pending' | 'failed' } | { error }
   const N = new Map();   // subjectId → saved notes
   const C = new Map();   // subjectId → [{ id, question, status, answer, sources, notes, warning, stage, live, runs, mode, notice, agent }]
-  const S = { ctx: null, tab: 'points', busy: null, draft: new Map(), prefs: null };
+  const S = { ctx: null, tab: 'points', notesTab: 'points', busy: null, draft: new Map(), prefs: null };
 
   // ───────── data
   async function loadAnalysis(fileId, force = false) {
@@ -138,10 +138,11 @@
   }
   /* The Key points / Notes view; the Chat view keeps its own thread box (never rebuilt by a tab switch). */
   function notesBodyHtml() {
-    if (S.tab === 'notes') return notesListHtml();
+    if ((S.tab === 'chat' ? S.notesTab : S.tab) === 'notes') return notesListHtml();
     return S.ctx && S.ctx.fileId ? pointsHtml(A.get(S.ctx.fileId)) : '<p class="ls-empty">This topic has no file.</p>';
   }
-  function paintNotes() { paintTabs(); if (S.tab !== 'chat') paintNotesBody(); showView(); revealCurrent(); }
+  // The Key points / Notes view stays drawn (hidden) while Chat is open, so it is never empty when you come back.
+  function paintNotes() { paintTabs(); paintNotesBody(); showView(); revealCurrent(); }
   /* Shows the view of the current tab; the one that appears slides in, the thread scrolls to its latest turn. */
   function showView() {
     const chat = S.tab === 'chat';
@@ -154,6 +155,7 @@
   }
   function setTab(tab) {
     S.tab = tab === 'notes' || tab === 'chat' ? tab : 'points';
+    if (S.tab !== 'chat') S.notesTab = S.tab; // which of Key points / Notes the hidden view keeps
     if (S.ctx && S.tab === 'notes' && !N.has(S.ctx.subjectId)) loadNotes(S.ctx.subjectId);
     if (S.tab === 'notes' && !S.prefs) loadPrefs();
     paintNotes();
@@ -386,7 +388,7 @@
     return `<section class="ln-side-panel ls-panel" aria-label="Key points and chat">
         <div class="ls-bar" data-ls-tabs>${tabsHtml()}</div>
         <div class="ls-views">
-          <div class="ls-view" data-ls-view="notes"${chat ? ' hidden' : ''}><div class="ls-body" data-ls-notes-body>${chat ? '' : notesBodyHtml()}</div></div>
+          <div class="ls-view" data-ls-view="notes"${chat ? ' hidden' : ''}><div class="ls-body" data-ls-notes-body>${notesBodyHtml()}</div></div>
           <div class="ls-view" data-ls-view="chat"${chat ? '' : ' hidden'}><div class="ls-thread-box" data-ls-thread aria-live="polite">${threadHtml()}</div></div>
         </div>
         <div class="ls-compose">

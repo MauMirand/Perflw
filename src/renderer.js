@@ -37,7 +37,11 @@
     x: '<line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/>',
     left: '<polyline points="12,5 7,10 12,15"/>',
     right: '<polyline points="8,5 13,10 8,15"/>',
+    down: '<polyline points="5,8 10,13 15,8"/>',
+    grip: '<circle cx="7.5" cy="5" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.5" cy="5" r="1.3" fill="currentColor" stroke="none"/><circle cx="7.5" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.5" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="7.5" cy="15" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.5" cy="15" r="1.3" fill="currentColor" stroke="none"/>',
     edit: '<path d="M13.5 3.5a1.5 1.5 0 0 1 2 2L6 15l-3 .8.8-3L13.5 3.5z"/>',
+    image: '<rect x="3" y="4" width="14" height="12" rx="2"/><circle cx="7.5" cy="8.5" r="1.3"/><path d="m4 15 4-4 3 3 2-2 3 3"/>',
+    camera: '<path d="M3 7a1.5 1.5 0 0 1 1.5-1.5h2L8 3.5h4l1.5 2h2A1.5 1.5 0 0 1 17 7v7.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"/><circle cx="10" cy="10.5" r="2.8"/>',
     archive: '<path d="M3 4h14v4H3zM4.5 8v8h11V8M8.5 11h3"/>',
     trash: '<path d="M4 6h12M8 6V4h4v2M5.5 6l.8 10h7.4l.8-10"/>',
     send: '<path d="M3 10 17 3l-4 14-3-6z"/><path d="m10 11 7-8"/>',
@@ -54,9 +58,10 @@
   const icon = (name, extra = '') => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${PATH[name] || ''}</svg>`;
 
   // ───────────────────────── preferences
-  const DEFAULT_PREFS = { collapsed: false, calView: 'month', weekStart: 0, timeFormat: '12', motion: 'auto', view: 'calendar', chatCat: 'work', chatOutput: true };
+  const DEFAULT_PREFS = { collapsed: false, calView: 'month', weekStart: 0, timeFormat: '12', motion: 'auto', view: 'calendar', chatCat: 'work', chatOutput: true, homeLayout: null, navGroups: {} };
   let prefs = { ...DEFAULT_PREFS };
   try { prefs = { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { /* storage unavailable */ }
+  if (!prefs.navGroups || typeof prefs.navGroups !== 'object' || Array.isArray(prefs.navGroups)) prefs.navGroups = {};
   const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
   const reduceMotion = () => prefs.motion === 'on' || (prefs.motion === 'auto' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   function applyMotionPref() {
@@ -81,6 +86,8 @@
   const PJ = window.PerflwProjects || null;
   const SB = window.PerflwSchedules || null;
   const LN = window.PerflwLearning || null;
+  // Today page card order (pure layout rules) lives in home-layout.js.
+  const HL = window.PerflwHomeLayout;
 
   // ───────────────────────── state
   const now = new Date();
@@ -358,6 +365,7 @@
       return;
     }
     closeLayers();
+    cancelHomeDrag(true); // a Today card held mid-drag goes back without saving
     if (view === S.view && !focus) return;
     if (PJ && S.view === 'whim' && view !== 'whim') PJ.flush(); // project edits stay in their tab; this only saves them
     clearTimeout(swapTimer);
@@ -368,6 +376,7 @@
       prefs.view = view; savePrefs();
       if (view === 'calendar') S.scrollToMorning = true;
       renderAll(true);
+      revealNavGroupOf(view);
       $('#main-panel').scrollTop = 0;
       if (focus) focusLater(focus);
     };
@@ -447,22 +456,17 @@
         ${navIcon('chat', 'Chat sessions', 'chat')}
       </div>` : `
       <div class="nav-expanded${swoop}">
-        <div class="nav-label">Plan</div>
+        ${navGroup('plan', 'Plan', `
         ${navItem('calendar', 'Calendar', 'calendar')}
         <button class="date-card" type="button" data-action="date-card" aria-label="Selected date ${esc(longDate(S.selected))}. Open calendar">
           <span class="dc-day">${sel.getDate()}</span>
           <span class="dc-meta"><span class="dc-weekday">${DAYS[sel.getDay()]}</span><span class="dc-month">${MON3[sel.getMonth()]} ${sel.getFullYear()}</span></span>
         </button>
-        ${navItem('routine', 'Routine', 'routine')}
-        <div class="nav-label">Learn</div>
-        ${navItem('learning', 'Learning', 'learning', LN ? LN.profile() : '')}
-        <div class="nav-label">Create</div>
-        ${navItem('whim', 'Projects', 'folder')}
-        <div class="nav-label">Automate</div>
-        ${navItem('automation', 'Workflows', 'flow')}
-        ${navItem('agents', 'Agents', 'agent')}
-        ${navItem('skills', 'Skills', 'skill')}
-        <div class="nav-label">Chat sessions<span class="nav-tag">${esc(catLabel(chatCat()))}</span></div>
+        ${navItem('routine', 'Routine', 'routine')}`)}
+        ${navGroup('learn', 'Learn', navItem('learning', 'Learning', 'learning', LN ? LN.profile() : ''))}
+        ${navGroup('create', 'Create', navItem('whim', 'Projects', 'folder'))}
+        ${navGroup('automate', 'Automate', `${navItem('automation', 'Workflows', 'flow')}${navItem('agents', 'Agents', 'agent')}${navItem('skills', 'Skills', 'skill')}`)}
+        ${navGroup('chat', 'Chat sessions', `
         <button class="nav-item" type="button" data-action="new-chat">${icon('chatplus')}<span>New session</span></button>
         ${(() => {
           const pool = (S.showArchived ? S.archivedChats : S.chats).filter(c => catOf(c) === chatCat());
@@ -472,8 +476,54 @@
           const archivedCount = S.archivedChats.filter(c => catOf(c) === chatCat()).length;
           const toggle = S.showArchived || archivedCount ? `<button class="nav-item nav-sub" type="button" data-action="side-archived">${icon(S.showArchived ? 'unarchive' : 'archive')}<span>${S.showArchived ? 'Back to active' : `Archived (${archivedCount})`}</span></button>` : '';
           return rows + more + none + toggle;
-        })()}
+        })()}`, `<span class="nav-tag">${esc(catLabel(chatCat()))}</span>`)}
       </div>`;
+  }
+  // Expanded sidebar groups fold away under their label. Open or closed is saved per device; the collapsed rail is not grouped.
+  const NAV_GROUPS = { plan: ['calendar', 'routine'], learn: ['learning'], create: ['whim'], automate: ['automation', 'agents', 'skills'], chat: ['chat'] };
+  const navGroupOpen = id => prefs.navGroups[id] !== false;
+  function navGroup(id, label, items, extra = '') {
+    const open = navGroupOpen(id);
+    const hasActive = !open && NAV_GROUPS[id].includes(S.view);
+    return `<div class="nav-group" data-group="${id}"><button class="nav-label${hasActive ? ' has-active' : ''}" type="button" data-action="nav-group" data-id="${id}" aria-expanded="${open}" aria-controls="nav-g-${id}"${hasActive ? ' title="Current page is in this group"' : ''}>${esc(label)}${extra}${icon('down', 'class="nav-chev"')}</button><div class="nav-group-body" id="nav-g-${id}" role="group" aria-label="${esc(label)}"${open ? '' : ' hidden'}>${items}</div></div>`;
+  }
+  /* Opens or closes one group in place (no sidebar repaint), with the same swoop as the sidebar toggle. */
+  function setNavGroup(id, open, { save = true } = {}) {
+    if (!NAV_GROUPS[id]) return;
+    prefs.navGroups = { ...prefs.navGroups, [id]: open };
+    if (save) savePrefs();
+    const label = document.querySelector(`.nav-label[data-id="${id}"]`);
+    const body = document.getElementById(`nav-g-${id}`);
+    if (!label || !body) return;
+    label.setAttribute('aria-expanded', String(open));
+    const active = !open && NAV_GROUPS[id].includes(S.view);
+    label.classList.toggle('has-active', active);
+    if (active) label.title = 'Current page is in this group'; else label.removeAttribute('title');
+    const wasHidden = body.hidden;
+    const height = wasHidden ? 0 : body.getBoundingClientRect().height;
+    const opacity = wasHidden ? 0 : Number(getComputedStyle(body).opacity);
+    const margin = wasHidden ? '0px' : getComputedStyle(body).marginTop;
+    body.getAnimations().forEach(a => a.cancel());
+    body.classList.remove('anim');
+    if (!open && body.contains(document.activeElement)) label.focus({ preventScroll: true }); // focus must not fall to the page
+    if (reduceMotion()) { body.hidden = !open; return; }
+    body.classList.add('anim');
+    if (open) {
+      body.hidden = false;
+      const target = { height: `${body.scrollHeight}px`, marginTop: getComputedStyle(body).marginTop };
+      const run = body.animate([{ height: `${height}px`, opacity, marginTop: margin, transform: wasHidden ? 'translateX(-12px)' : 'none' }, { height: target.height, opacity: 1, marginTop: target.marginTop, transform: 'none' }], { duration: 160, easing: 'ease' });
+      run.onfinish = () => { body.classList.remove('anim'); };
+    } else {
+      if (wasHidden) { body.classList.remove('anim'); return; }
+      const run = body.animate([{ height: `${height}px`, opacity, marginTop: margin, transform: 'none' }, { height: '0px', opacity: 0, marginTop: '0px', transform: 'translateX(-16px)' }], { duration: 120, easing: 'ease-in', fill: 'forwards' });
+      run.onfinish = () => { body.hidden = true; run.cancel(); body.classList.remove('anim'); };
+    }
+  }
+  /* Going to a page inside a folded group opens that group so the current page is visible. */
+  function revealNavGroupOf(view) {
+    if (prefs.collapsed) return;
+    const id = Object.keys(NAV_GROUPS).find(g => NAV_GROUPS[g].includes(view));
+    if (id && !navGroupOpen(id)) setNavGroup(id, true);
   }
   let sidebarTimer = null;
   function toggleSidebar() {
@@ -500,6 +550,8 @@
   function renderStage(animate) {
     const stage = $('#stage');
     const view = VIEWS[S.view] || VIEWS.calendar;
+    // A Today card is held or settling: repaint after the drop instead of pulling the page out from under it.
+    if (homeDrag && homeDrag.lifted && S.view === 'home') { homeDrag.dirty = true; return; }
     stage.className = `stage${animate && !reduceMotion() ? ' view-in' : ''}`;
     stage.innerHTML = view.render();
     if (view.mount) view.mount(stage);
@@ -841,15 +893,22 @@
     const today = todayISO();
     const plans = plansFor(today); const pDone = plans.filter(p => p.doneOn).length;
     const routine = S.items.routine; const rDone = routine.filter(routineDone).length;
-    const profile = S.editingProfile ? `
+    const editing = S.editingProfile;
+    const profile = editing ? `
       <form class="profile-edit" data-form="profile">
-        <input class="field" name="displayName" maxlength="80" value="${esc(u.displayName)}" aria-label="Your name" data-autofocus required>
-        <input class="field" name="bio" maxlength="500" value="${esc(u.bio)}" aria-label="Your bio" placeholder="Add a short bio about yourself">
-        <div class="profile-edit-actions"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" data-action="cancel-profile">Cancel</button></div>
+        <input class="field profile-edit-name" name="displayName" maxlength="80" value="${esc(u.displayName)}" aria-label="Your name" data-autofocus required>
+        <div class="profile-edit-row">
+          <input class="field" name="bio" maxlength="500" value="${esc(u.bio)}" aria-label="Your bio" placeholder="Add a short bio about yourself">
+          <button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" data-action="cancel-profile">Cancel</button>
+        </div>
       </form>` : `
-      <p class="today-hello">${greeting()},</p>
-      <div class="profile-name-row"><span class="profile-name">${esc(u.displayName)}</span><button class="icon-btn sm" type="button" data-action="edit-profile" aria-label="Edit profile" title="Edit profile">${icon('edit')}</button></div>
-      <p class="profile-bio">${esc(longDate(today))}${u.bio ? ` · ${esc(u.bio)}` : ''}</p>`;
+      <div class="profile-name-row"><h1 class="profile-name" title="${esc(u.displayName)}">${esc(u.displayName)}</h1><button class="icon-btn" id="profile-edit-btn" type="button" data-action="edit-profile" aria-label="Edit profile" title="Edit profile">${icon('edit')}</button></div>
+      ${u.bio ? `<p class="profile-bio" title="${esc(u.bio)}">${esc(u.bio)}</p>` : `<button class="link-btn profile-bio-add" type="button" data-action="edit-profile">Add a short bio</button>`}`;
+    const focusLabel = { 'center 20%': 'Top', 'center 52%': 'Middle', 'center 85%': 'Bottom' }[u.coverPosition || 'center 52%'] || 'Middle';
+    const coverTools = editing ? '' : `<div class="cover-tools">
+            <button class="cover-btn" id="cover-image-btn" type="button" data-action="cover-image" aria-label="Change banner" title="Change banner">${icon('image')}<span>Change banner</span></button>
+            ${u.coverImage ? `<button class="cover-btn" id="cover-position-btn" type="button" data-action="cover-position" aria-label="Reposition banner" title="Focus: ${focusLabel}"><span>Reposition</span></button>` : ''}
+          </div>`;
 
     const subjects = LN ? LN.list().slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, 4) : [];
     const learn = subjects.length ? `<ul class="t-list">${subjects.map(sub => `<li><button class="t-item" type="button" data-action="home-subject" data-id="${esc(sub.id)}">
@@ -879,45 +938,318 @@
         <input type="checkbox" class="check" data-action="toggle-routine" data-id="${r.id}" aria-label="Mark “${esc(r.text)}” done" ${routineDone(r) ? 'checked' : ''}>
         <span class="t-todo-text">${esc(r.text)}</span>
       </li>`).join('');
-    const card = (pillar, ic, title, action, body, cls = '') => `<section class="t-card ${cls}" aria-label="${esc(title)}">
-        <header class="t-card-head"><span class="t-pillar">${icon(ic)}${esc(pillar)}</span>${action}</header>${body}</section>`;
-
-    return `<div class="today">
-      <div class="profile-card today-head">
-        <div class="cover${u.coverImage ? ' has-image' : ''}" data-theme="${esc(u.coverTheme || 'aurora')}" ${u.coverImage ? `data-img="${esc(u.coverImage)}" data-bgpos="${esc(u.coverPosition || 'center 52%')}"` : ''}></div>
-        <div class="profile-body">
-          <button class="profile-avatar" type="button" data-action="change-photo" aria-label="Change profile photo" data-img="${esc(u.image || '')}">${u.image ? '' : esc(initials(u.displayName))}</button>
-          <div class="profile-info">${profile}</div>
-          <div class="today-stats" aria-label="Today">
-            <span><strong>${pDone}/${plans.length}</strong>plans</span><span><strong>${rDone}/${routine.length}</strong>routine</span>
-          </div>
-        </div>
-      </div>
-      <div class="today-grid">
-        <div class="today-main">
-          ${card('Plan', 'calendar', 'Plan', `<button class="t-link" type="button" data-go="calendar">Calendar${icon('right')}</button>`, `<div class="t-plan">${homeMonth(today)}${homeAgenda(today)}</div>`, 't-wide')}
-          ${card('Learn', 'learning', 'Learn', `<button class="t-link" type="button" data-go="learning">All subjects${icon('right')}</button>`, learn)}
-          ${card('Create', 'folder', 'Create', `<button class="t-link" type="button" data-action="new" data-value="whim">${icon('plus')}New</button>`, create)}
-          ${card('Automate', 'flow', 'Automate', '', `<div class="t-auto">${automate.map(([v, label, ic, sub]) => `<button class="t-auto-btn" type="button" data-go="${v}"><span class="t-auto-ic">${icon(ic)}</span><span class="t-main"><strong>${label}</strong><small>${sub}</small></span></button>`).join('')}</div>`, 't-wide')}
-        </div>
-        <aside class="today-side" aria-label="Today's to-do">
-          <section class="t-card t-note">
-            <header class="t-card-head"><h2 class="t-note-title">Today’s to-do</h2><span class="t-count">${pDone}/${plans.length}</span></header>
+    const grip = (id, title) => `<button class="t-grip" type="button" data-action="home-grip" data-id="${id}" aria-label="Move ${esc(title)} card" aria-describedby="home-move-hint">${icon('grip')}</button>`;
+    const card = (id, pillar, ic, title, action, body) => `<section class="t-card" data-card="${id}" aria-label="${esc(title)}">
+        <header class="t-card-head">${grip(id, title)}<span class="t-pillar">${icon(ic)}${esc(pillar)}</span>${action}</header>${body}</section>`;
+    const cards = {
+      plan: card('plan', 'Plan', 'calendar', 'Plan', `<button class="t-link" type="button" data-go="calendar">Calendar${icon('right')}</button>`, `<div class="t-plan">${homeMonth(today)}${homeAgenda(today)}</div>`),
+      learn: card('learn', 'Learn', 'learning', 'Learn', `<button class="t-link" type="button" data-go="learning">All subjects${icon('right')}</button>`, learn),
+      create: card('create', 'Create', 'folder', 'Create', `<button class="t-link" type="button" data-action="new" data-value="whim">${icon('plus')}New</button>`, create),
+      automate: card('automate', 'Automate', 'flow', 'Automate', '', `<div class="t-auto">${automate.map(([v, label, ic, sub]) => `<button class="t-auto-btn" type="button" data-go="${v}"><span class="t-auto-ic">${icon(ic)}</span><span class="t-main"><strong>${label}</strong><small>${sub}</small></span></button>`).join('')}</div>`),
+      todo: `<section class="t-card t-note" data-card="todo" aria-label="Today’s to-do">
+            <header class="t-card-head">${grip('todo', 'Today’s to-do')}<h2 class="t-note-title">Today’s to-do</h2><span class="t-count">${pDone}/${plans.length}</span></header>
             <div class="progress" aria-hidden="true"><div class="progress-track"><div class="progress-fill" data-w="${pct(pDone, plans.length)}%"></div></div></div>
             ${plans.length ? `<ul class="t-todos">${todo}</ul>` : '<p class="t-empty">Nothing planned yet. Add the first thing below.</p>'}
             <form class="t-add" data-form="home-plan" aria-label="Add a plan for today">
               <span class="t-add-ic" aria-hidden="true">${icon('plus')}</span>
               <input class="t-add-input" id="home-plan-input" name="text" maxlength="500" placeholder="Add to today… (Enter)" autocomplete="off" aria-label="Add a plan for today">
             </form>
-          </section>
-          <section class="t-card t-note">
-            <header class="t-card-head"><h2 class="t-note-title">Routine</h2><span class="t-count">${rDone}/${routine.length}</span></header>
+          </section>`,
+      routine: `<section class="t-card t-note" data-card="routine" aria-label="Routine">
+            <header class="t-card-head">${grip('routine', 'Routine')}<h2 class="t-note-title">Routine</h2><span class="t-count">${rDone}/${routine.length}</span></header>
             <div class="progress" aria-hidden="true"><div class="progress-track"><div class="progress-fill" data-w="${pct(rDone, routine.length)}%"></div></div></div>
             ${routine.length ? `<ul class="t-todos">${routineRows}</ul>` : `<p class="t-empty">No routine yet. <button class="link-btn" type="button" data-action="new" data-value="routine">Add a step</button></p>`}
-          </section>
-        </aside>
+          </section>`
+    };
+    const layout = HL.normalize(prefs.homeLayout);
+    const wide = HL.spans(layout.main);
+    const zoneHtml = zone => layout[zone].map(id => (zone === 'main' && wide.has(id) ? cards[id].replace('class="t-card', 'class="t-card t-wide') : cards[id])).join('');
+
+    return `<div class="today">
+      <div class="profile-card today-head">
+        <div class="cover${u.coverImage ? ' has-image' : ''}" data-theme="${esc(u.coverTheme || 'aurora')}" ${u.coverImage ? `data-img="${esc(u.coverImage)}" data-bgpos="${esc(u.coverPosition || 'center 52%')}"` : ''}>${coverTools}</div>
+        <div class="profile-body">
+          <button class="profile-avatar" id="profile-avatar-btn" type="button" data-action="change-photo" aria-label="Change photo" title="Change photo" data-img="${esc(u.image || '')}"${editing ? ' disabled' : ''}>${u.image ? '' : `<span class="profile-initials">${esc(initials(u.displayName))}</span>`}<span class="profile-avatar-scrim" aria-hidden="true">${icon('camera')}</span></button>
+          <div class="profile-info">${profile}</div>
+          <div class="today-meta">
+            <p class="today-hello">${greeting()} · ${esc(longDate(today))}</p>
+            <div class="today-stats" aria-label="Today">
+              ${HL.isDefault(prefs.homeLayout) ? '' : HOME_RESET}<span><strong>${pDone}/${plans.length}</strong>plans</span><span><strong>${rDone}/${routine.length}</strong>routine</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p id="home-move-hint" class="sr-only">Arrow up or down to reorder, left or right to change column. Moves save at once.</p>
+      <div class="${homeGridClass(layout)}">
+        <div class="today-main" data-zone="main">${zoneHtml('main')}</div>
+        <aside class="today-side" data-zone="side" aria-label="Side column">${zoneHtml('side')}</aside>
       </div>
     </div>`;
+  }
+
+  // ───────────────────────── Today card layout: pointer drag, keyboard moves, reset
+  // Cards are moved in place (no page repaint) and the new order is saved per device in prefs.homeLayout.
+  const HOME_RESET = '<button class="t-link today-reset" type="button" data-action="home-reset">Reset layout</button>';
+  const HOME_TITLES = { plan: 'Plan', learn: 'Learn', create: 'Create', automate: 'Automate', todo: 'Today’s to-do', routine: 'Routine' };
+  const HOME_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+  const HOME_SKIP = 'button:not(.t-grip), a, input, select, textarea, label, [contenteditable="true"]';
+  const homeGridClass = l => `today-grid${l.main.length ? '' : ' main-empty'}${l.side.length ? '' : ' side-empty'}`;
+  let homeDrag = null;
+  const homeRects = new WeakMap(); // settled layout boxes, read while siblings are still sliding
+
+  function announce(message) {
+    const live = $('#sr-live'); if (!live) return;
+    live.textContent = '';
+    setTimeout(() => { live.textContent = message; }, 40);
+  }
+  const zoneEl = zone => $(`.today [data-zone="${zone}"]`);
+  const isCard = el => !!(el && el.dataset && el.dataset.card && !el.classList.contains('t-lifted'));
+  const cardsIn = node => [...node.children].filter(isCard);
+  const idOf = el => (el.classList.contains('t-ph') ? (homeDrag && homeDrag.id) : isCard(el) ? el.dataset.card : null);
+  const zoneName = zone => (zone === 'main' ? 'main' : 'side');
+  function domLayout() {
+    const read = zone => { const node = zoneEl(zone); return node ? [...node.children].map(idOf).filter(Boolean) : []; };
+    return { main: read('main'), side: read('side') };
+  }
+  /* Keeps full-row spans, empty-column targets, the grid shape and the Reset link in step with the order on screen. */
+  function syncHomeChrome() {
+    const l = domLayout();
+    const wide = HL.spans(l.main);
+    for (const zone of HL.ZONES) {
+      const node = zoneEl(zone); if (!node) continue;
+      for (const el of node.children) { const id = idOf(el); if (id) el.classList.toggle('t-wide', zone === 'main' && wide.has(id)); }
+      const empty = node.querySelector(':scope > .t-zone-empty');
+      if (empty) empty.classList.toggle('show', !l[zone].length);
+    }
+    if (homeDrag) return; // the grid keeps its shape while a card is held
+    const grid = $('.today-grid'); if (grid) grid.className = homeGridClass(l);
+    const meta = $('.today-meta .today-stats'); if (!meta) return;
+    const link = meta.querySelector('[data-action="home-reset"]');
+    const plain = HL.isDefault(prefs.homeLayout);
+    if (plain && link) link.remove();
+    else if (!plain && !link) meta.insertAdjacentHTML('afterbegin', HOME_RESET);
+  }
+  /* FLIP: record boxes, change the order, then slide every card from its old box to its new one. */
+  function flipHome(mutate) {
+    const today = $('.today'); if (!today) { mutate(); return; }
+    const pick = () => $$('[data-card]:not(.t-lifted), .t-ph', today);
+    const first = new Map(pick().map(el => [el, el.getBoundingClientRect()]));
+    first.forEach((_, el) => el.getAnimations().forEach(a => { if (a.id === 'home-flip') a.cancel(); }));
+    mutate();
+    syncHomeChrome();
+    const scroll = $('#main-panel').scrollTop;
+    for (const el of pick()) {
+      const last = el.getBoundingClientRect();
+      homeRects.set(el, { rect: last, scroll });
+      const f = first.get(el);
+      if (!f || reduceMotion()) continue;
+      const dx = f.left - last.left; const dy = f.top - last.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 200, easing: HOME_EASE }).id = 'home-flip';
+    }
+  }
+  /* The box a card will rest in, ignoring a slide still in progress. */
+  function layoutRect(el) {
+    const sliding = el.getAnimations().some(a => a.id === 'home-flip' && a.playState === 'running');
+    const cached = homeRects.get(el);
+    if (!sliding || !cached) return el.getBoundingClientRect();
+    const dy = cached.scroll - $('#main-panel').scrollTop;
+    const r = cached.rect;
+    return { left: r.left, right: r.right, width: r.width, height: r.height, top: r.top + dy, bottom: r.bottom + dy };
+  }
+  const nextCard = el => { let n = el.nextElementSibling; while (n && !isCard(n)) n = n.nextElementSibling; return n; };
+  /* Where the held card would land under the pointer. 8px of slack stops the order flickering at a boundary. */
+  function homeTarget(x, y) {
+    const ph = homeDrag.ph;
+    const hit = document.elementFromPoint(x, y);
+    const node = hit && hit.closest ? hit.closest('.today [data-zone]') : null;
+    if (!node) return null;
+    const main = node.dataset.zone === 'main';
+    for (const sib of cardsIn(node)) {
+      const r = layoutRect(sib);
+      const slack = ph.parentElement === node && (ph.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING) ? 8 : -8;
+      if (y < r.top) return { node, before: sib };
+      if (y > r.bottom) continue;
+      if (main && !sib.classList.contains('t-wide')) { if (x < r.left + r.width / 2 + slack) return { node, before: sib }; continue; }
+      if (y < r.top + r.height / 2 + slack) return { node, before: sib };
+    }
+    return { node, before: null };
+  }
+  function retargetHome() {
+    const d = homeDrag; if (!d || !d.lifted || d.settling) return;
+    const t = homeTarget(d.x, d.y); if (!t) return;
+    if (d.ph.parentElement === t.node && nextCard(d.ph) === t.before) return;
+    flipHome(() => t.node.insertBefore(d.ph, t.before || t.node.querySelector(':scope > .t-zone-empty')));
+    fitLifted();
+  }
+  /* The held card heads for the width of the slot under it: the side column, or its span in the main grid. */
+  function fitLifted() {
+    const d = homeDrag; if (!d || !d.ph.isConnected) return;
+    d.tw = Math.max(160, Math.min(d.ph.getBoundingClientRect().width, window.innerWidth - 16));
+    d.el.classList.toggle('t-in-side', d.ph.parentElement.dataset.zone === 'side');
+    if (reduceMotion()) { d.w = d.tw; moveLifted(); }
+  }
+  function moveLifted() {
+    const d = homeDrag;
+    const scale = reduceMotion() ? 1 : 1.015;
+    // The grab point stays at the same fraction of the card while its width follows the column under it.
+    d.el.style.width = `${d.w}px`;
+    d.el.style.transform = `translate(${d.x - d.fx * d.w - d.rl}px, ${d.y - d.y0}px) scale(${scale})`;
+  }
+  function liftHome() {
+    const d = homeDrag; const el = d.el;
+    if (!el.isConnected) { endHomeDrag(); return; }
+    $('#stage').classList.remove('view-in'); // moved cards must not replay their entrance
+    const r = el.getBoundingClientRect();
+    d.lifted = true;
+    d.ph = document.createElement('div');
+    d.ph.className = `t-ph${el.classList.contains('t-wide') ? ' t-wide' : ''}`;
+    d.ph.setAttribute('aria-hidden', 'true');
+    d.ph.style.height = `${r.height}px`;
+    el.before(d.ph);
+    for (const zone of HL.ZONES) { const node = zoneEl(zone); if (!node) continue; const target = document.createElement('div'); target.className = 't-zone-empty'; target.setAttribute('aria-hidden', 'true'); node.append(target); }
+    el.classList.add('t-lifted');
+    el.style.width = `${r.width}px`; el.style.left = `${r.left}px`; el.style.top = `${r.top}px`;
+    const placed = el.getBoundingClientRect(); // correct once if an ancestor shifts fixed boxes
+    d.left = r.left + (r.left - placed.left); d.top = r.top + (r.top - placed.top);
+    el.style.left = `${d.left}px`; el.style.top = `${d.top}px`;
+    d.rl = r.left; d.rt = r.top; d.w = r.width; d.tw = r.width; d.fx = (d.x0 - r.left) / r.width;
+    document.body.classList.add('home-dragging');
+    // While a card is held the grid keeps both columns, so an empty column stays a visible target in place.
+    flipHome(() => $('.today').classList.add('dragging'));
+    try { el.setPointerCapture(d.pid); } catch { /* synthetic or finished pointer */ }
+    syncHomeChrome();
+    moveLifted();
+    d.raf = requestAnimationFrame(homeTick);
+  }
+  /* Scrolls the page while the pointer is within 48px of its top or bottom edge. */
+  function homeTick() {
+    const d = homeDrag; if (!d || !d.lifted || d.settling) return;
+    const panel = $('#main-panel'); const pr = panel.getBoundingClientRect(); const edge = 48;
+    let v = 0;
+    if (d.y < pr.top + edge) v = -Math.min(18, Math.ceil((pr.top + edge - d.y) / edge * 14));
+    else if (d.y > pr.bottom - edge) v = Math.min(18, Math.ceil((d.y - (pr.bottom - edge)) / edge * 14));
+    if (v) { const was = panel.scrollTop; panel.scrollTop += v; if (panel.scrollTop !== was) retargetHome(); }
+    if (Math.abs(d.tw - d.w) > 0.5) { d.w += (d.tw - d.w) * 0.3; moveLifted(); } // about 160ms to the new width
+    else if (d.w !== d.tw) { d.w = d.tw; moveLifted(); }
+    d.raf = requestAnimationFrame(homeTick);
+  }
+  function onHomeMove(event) {
+    const d = homeDrag; if (!d || event.pointerId !== d.pid || d.settling) return;
+    d.x = event.clientX; d.y = event.clientY;
+    if (!d.lifted) { if (Math.hypot(d.x - d.x0, d.y - d.y0) < 4) return; liftHome(); if (!homeDrag) return; }
+    event.preventDefault();
+    moveLifted();
+    retargetHome();
+  }
+  function onHomeUp(event) { if (homeDrag && event.pointerId === homeDrag.pid) dropHome(); }
+  function onHomeCancel(event) { if (homeDrag && event.pointerId === homeDrag.pid) cancelHomeDrag(); }
+  function unlistenHome() {
+    document.removeEventListener('pointermove', onHomeMove, true);
+    document.removeEventListener('pointerup', onHomeUp, true);
+    document.removeEventListener('pointercancel', onHomeCancel, true);
+  }
+  function endHomeDrag() { unlistenHome(); homeDrag = null; }
+  /* The click that follows a drag must not open the link or button under the pointer. */
+  function swallowClick() {
+    const stop = event => { event.preventDefault(); event.stopPropagation(); };
+    document.addEventListener('click', stop, true);
+    setTimeout(() => document.removeEventListener('click', stop, true), 0);
+  }
+  /* Glides the held card into the placeholder, then puts it back in the page flow. */
+  function settleHome(instant, done) {
+    const d = homeDrag; if (!d || d.settling) return;
+    d.settling = true; unlistenHome(); cancelAnimationFrame(d.raf);
+    let anim = null;
+    const finish = () => {
+      if (d.finished) return; d.finished = true;
+      if (anim) anim.cancel();
+      const el = d.el; const focused = el.contains(document.activeElement) ? document.activeElement : null;
+      try { el.releasePointerCapture(d.pid); } catch { /* already released */ }
+      d.ph.replaceWith(el);
+      el.classList.remove('t-lifted', 't-in-side');
+      for (const prop of ['left', 'top', 'width', 'height', 'transform']) el.style.removeProperty(prop);
+      $$('.today .t-zone-empty').forEach(n => n.remove());
+      document.body.classList.remove('home-dragging');
+      const today = $('.today'); if (today) today.classList.remove('dragging');
+      homeDrag = null;
+      done();
+      syncHomeChrome();
+      if (focused && focused.isConnected) focused.focus({ preventScroll: true });
+      if (d.dirty) rerender();
+    };
+    d.finishNow = finish;
+    if (instant || reduceMotion()) { finish(); return; }
+    const to = d.ph.getBoundingClientRect();
+    anim = d.el.animate([
+      { transform: d.el.style.transform, width: `${d.el.offsetWidth}px`, height: `${d.el.offsetHeight}px` },
+      { transform: `translate(${to.left - d.rl}px, ${to.top - d.rt}px) scale(1)`, width: `${to.width}px`, height: `${to.height}px` }
+    ], { duration: 180, easing: HOME_EASE, fill: 'forwards' });
+    anim.onfinish = finish;
+    anim.oncancel = finish;
+  }
+  function dropHome() {
+    const d = homeDrag; if (!d) return;
+    if (!d.lifted) { endHomeDrag(); return; }
+    if (d.settling) return;
+    swallowClick();
+    const node = d.ph.parentElement; const zone = node.dataset.zone;
+    let index = 0; for (const el of node.children) { if (el === d.ph) break; if (isCard(el)) index++; }
+    const before = HL.normalize(prefs.homeLayout);
+    const next = HL.move(before, d.id, zone, index);
+    settleHome(false, () => {
+      if (JSON.stringify(next) === JSON.stringify(before)) return;
+      prefs.homeLayout = next; savePrefs();
+      announce(`${HOME_TITLES[d.id]} card moved to position ${next[zone].indexOf(d.id) + 1} in ${zoneName(zone)} column.`);
+    });
+  }
+  /* Esc, a lost pointer, leaving the window or the page: the card returns to where it started, nothing is saved. */
+  function cancelHomeDrag(instant = false) {
+    const d = homeDrag; if (!d) return;
+    if (!d.lifted) { endHomeDrag(); return; }
+    if (d.settling) { if (instant && d.finishNow) d.finishNow(); return; }
+    swallowClick();
+    if (instant || reduceMotion()) d.el.before(d.ph);
+    else flipHome(() => d.el.before(d.ph));
+    settleHome(instant, () => {});
+  }
+  /* Arrow keys on a focused grip: up/down reorder within the column, left/right change column, Home/End jump. */
+  function homeKey(event) {
+    const grip = event.target.closest ? event.target.closest('.today .t-grip') : null;
+    if (!grip || homeDrag || event.altKey || event.ctrlKey || event.metaKey) return false;
+    const id = grip.dataset.id;
+    const cur = HL.normalize(prefs.homeLayout);
+    const zone = cur.main.includes(id) ? 'main' : 'side';
+    const at = cur[zone].indexOf(id); const last = cur[zone].length - 1;
+    const moves = { ArrowUp: [zone, at - 1], ArrowDown: [zone, at + 1], Home: [zone, 0], End: [zone, last], ArrowLeft: zone === 'side' ? ['main', cur.main.length] : null, ArrowRight: zone === 'main' ? ['side', cur.side.length] : null };
+    if (!(event.key in moves)) return false;
+    event.preventDefault();
+    const to = moves[event.key];
+    if (!to || (to[0] === zone && (to[1] < 0 || to[1] > last || to[1] === at))) return true;
+    const next = HL.move(cur, id, to[0], to[1]);
+    prefs.homeLayout = next; savePrefs();
+    $('#stage').classList.remove('view-in');
+    flipHome(() => { for (const z of HL.ZONES) { const node = zoneEl(z); const tail = node.querySelector(':scope > .t-zone-empty'); for (const cid of next[z]) { const el = $(`.today [data-card="${cid}"]`); if (el) node.insertBefore(el, tail); } } });
+    const again = $(`.today .t-grip[data-id="${id}"]`);
+    if (again) { again.focus({ preventScroll: true }); again.closest('[data-card]').scrollIntoView({ block: 'nearest' }); }
+    announce(`${HOME_TITLES[id]} card moved to position ${next[to[0]].indexOf(id) + 1} in ${zoneName(to[0])} column.`);
+    return true;
+  }
+  function bindHomeDrag() {
+    document.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || homeDrag || S.view !== 'home' || !HL) return;
+      const head = event.target.closest ? event.target.closest('.today .t-card-head') : null;
+      if (!head || event.target.closest(HOME_SKIP)) return;
+      const el = head.closest('[data-card]'); if (!el) return;
+      homeDrag = { el, id: el.dataset.card, pid: event.pointerId, x0: event.clientX, y0: event.clientY, x: event.clientX, y: event.clientY, lifted: false, dirty: false };
+      document.addEventListener('pointermove', onHomeMove, true);
+      document.addEventListener('pointerup', onHomeUp, true);
+      document.addEventListener('pointercancel', onHomeCancel, true);
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && homeDrag && homeDrag.lifted) { event.preventDefault(); event.stopImmediatePropagation(); cancelHomeDrag(); }
+    }, true);
+    window.addEventListener('blur', () => cancelHomeDrag());
   }
 
   // ───────────────────────── settings
@@ -1160,6 +1492,16 @@
     const id = button.dataset.id;
     switch (action) {
       case 'date-card': if (S.view !== 'calendar') go('calendar'); break;
+      case 'nav-group': setNavGroup(id, !navGroupOpen(id)); break;
+      case 'home-grip': break; // the grip moves its card by drag or arrow keys; a plain click does nothing
+      case 'home-reset': {
+        const before = prefs.homeLayout;
+        prefs.homeLayout = null; savePrefs(); rerender();
+        const first = $('.today .t-grip'); if (first) first.focus({ preventScroll: true });
+        announce('Today layout reset.');
+        toast('Layout reset.', { action: { label: 'Undo', run: () => { prefs.homeLayout = before; savePrefs(); if (S.view === 'home') rerender(); announce('Today layout restored.'); } } });
+        break;
+      }
       case 'cal-prev': shiftPeriod(-1); break;
       case 'cal-next': shiftPeriod(1); break;
       case 'cal-today': selectDate(todayISO()); S.scrollToMorning = true; rerenderCalendar(); break;
@@ -1184,11 +1526,16 @@
       case 'home-day': selectDate(button.dataset.day); go('calendar'); break;
       case 'home-subject': if (LN) { LN.open(id); go('learning'); } break;
       case 'edit-profile': S.editingProfile = true; rerender(); break;
-      case 'cancel-profile': S.editingProfile = false; rerender(); break;
-      case 'change-photo': await changePhoto(); break;
+      case 'cancel-profile': S.editingProfile = false; rerender({ focus: 'profile-edit-btn' }); break;
+      case 'cover-position': {
+        const P = ['center 20%', 'center 52%', 'center 85%'];
+        await saveProfile({ coverPosition: P[(P.indexOf(S.user.coverPosition || 'center 52%') + 1) % P.length] }, { focus: button.id || undefined });
+        break;
+      }
+      case 'change-photo': await changePhoto(button.id || undefined); break;
       case 'cover-theme': await saveProfile({ coverTheme: button.dataset.value, coverImageName: null }); break;
       case 'cover-image': {
-        try { const picked = await api(() => window.account.pickImage()); if (picked) await saveProfile({ coverImageName: picked.imageName }); } catch { /* shown */ }
+        try { const picked = await api(() => window.account.pickImage()); if (picked) await saveProfile({ coverImageName: picked.imageName }, { focus: button.id || undefined }); } catch { /* shown */ }
         break;
       }
       case 'motion': prefs.motion = button.dataset.value; savePrefs(); applyMotionPref(); rerender(); break;
@@ -1225,18 +1572,31 @@
       default: break;
     }
   }
-  async function saveProfile(changes) {
+  // Only the profile form closes edit mode. A photo/banner save that lands while the
+  // form is open (e.g. the image picker resolved after the pencil was clicked) keeps
+  // the form and the text typed so far.
+  async function saveProfile(changes, { closeEdit = false, focus } = {}) {
     const u = S.user;
     const next = { displayName: u.displayName, bio: u.bio || '', imageName: u.imageName || null, coverImageName: u.coverImageName || null, coverTheme: u.coverTheme || 'aurora', coverPosition: u.coverPosition || 'center 52%', ...changes };
     try {
       const state = await api(() => window.account.saveProfile(next.displayName, next.bio, next.imageName, next.coverImageName, next.coverTheme, next.coverPosition));
-      S.user = state.user; S.editingProfile = false;
-      renderRail(); rerender();
+      const form = $('[data-form="profile"]');
+      const draft = !closeEdit && S.editingProfile && form ? { displayName: form.displayName.value, bio: form.bio.value, active: form.contains(document.activeElement) ? document.activeElement.name : null } : null;
+      S.user = state.user;
+      if (closeEdit) S.editingProfile = false;
+      renderRail(); rerender(draft ? {} : { focus });
+      if (draft) {
+        const again = $('[data-form="profile"]');
+        if (again) {
+          again.displayName.value = draft.displayName; again.bio.value = draft.bio;
+          if (draft.active && again.elements[draft.active]) again.elements[draft.active].focus();
+        }
+      }
       return true;
     } catch { return false; }
   }
-  async function changePhoto() {
-    try { const picked = await api(() => window.account.pickImage()); if (picked) await saveProfile({ imageName: picked.imageName }); } catch { /* shown */ }
+  async function changePhoto(focus) {
+    try { const picked = await api(() => window.account.pickImage()); if (picked) await saveProfile({ imageName: picked.imageName }, { focus }); } catch { /* shown */ }
   }
 
   async function onSubmit(form) {
@@ -1261,7 +1621,7 @@
     } else if (kind === 'profile') {
       const name = String(data.get('displayName') || '').trim();
       if (!name) { form.displayName.focus(); return; }
-      await saveProfile({ displayName: name, bio: String(data.get('bio') || '').trim() });
+      await saveProfile({ displayName: name, bio: String(data.get('bio') || '').trim() }, { closeEdit: true, focus: 'profile-edit-btn' });
     } else if (kind === 'rename-chat') {
       const title = String(data.get('title') || '').trim();
       if (!title) return;
@@ -1324,8 +1684,10 @@
       const t = event.target;
       if (t.matches && t.matches('.event-chip') && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); t.click(); return; }
       if (t.id === 'chat-input' && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); t.form.requestSubmit(); return; }
+      if (S.view === 'home' && homeKey(event)) return;
       if (event.key === 'Escape') {
         if (!$('#search-overlay').hidden || !$('#account-menu').hidden || !$('#new-menu').hidden) { closeLayers(); return; }
+        if (S.editingProfile && !S.editing && !S.renamingChat) { S.editingProfile = false; rerender({ focus: 'profile-edit-btn' }); return; }
         if (S.editing || S.renamingChat || S.editingProfile) { S.editing = null; S.renamingChat = false; S.editingProfile = false; rerender(); return; }
       }
       if (!S.user || document.body.classList.contains('is-auth')) return;
@@ -1338,6 +1700,7 @@
       if (event.relatedTarget && form.contains(event.relatedTarget)) return;
       setTimeout(() => { if (form.isConnected && S.editing === form.dataset.id) form.requestSubmit(); }, 0);
     });
+    bindHomeDrag();
     $('#sidebar-toggle').addEventListener('click', toggleSidebar);
     $('#rail-account').addEventListener('click', openAccountMenu);
     $('#rail-new').addEventListener('click', openNewMenu);

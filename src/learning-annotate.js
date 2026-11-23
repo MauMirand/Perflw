@@ -24,7 +24,7 @@
     highlighter: '<path d="m12.5 3.5 4 4-6.5 6.5h-4v-4z"/><path d="M6 14 3.5 16.5h5"/>',
     eraser: '<path d="m8 16 8.5-8.5-4-4L4 12l4 4z"/><path d="M8 16h8.5M6.2 9.8l4 4"/>',
     comment: '<path d="M10 3.5c3.9 0 6.5 2.5 6.5 5.7s-2.6 5.7-6.5 5.7c-.9 0-1.7-.1-2.5-.4L4 16l.8-3.2c-.8-1-1.3-2.2-1.3-3.6 0-3.2 2.6-5.7 6.5-5.7z"/>',
-    commentFill: '<path fill="currentColor" stroke-width="1.4" d="M10 3.2c4.1 0 6.9 2.6 6.9 6s-2.8 6-6.9 6c-.9 0-1.8-.1-2.6-.4L3.6 16.6l.9-3.5c-.9-1.1-1.4-2.4-1.4-3.9 0-3.4 2.8-6 6.9-6z"/><path stroke="#6242B7" stroke-width="1.8" d="M7 8.5h6M7 11h4"/>',
+    commentFill: '<path fill="currentColor" stroke-width="1.4" d="M10 3.2c4.1 0 6.9 2.6 6.9 6s-2.8 6-6.9 6c-.9 0-1.8-.1-2.6-.4L3.6 16.6l.9-3.5c-.9-1.1-1.4-2.4-1.4-3.9 0-3.4 2.8-6 6.9-6z"/><path stroke="#6D4AFF" stroke-width="1.8" d="M7 8.5h6M7 11h4"/>',
     trash: '<path d="M4.5 6h11M8 6V4.5h4V6M6 6l.7 10h6.6L14 6"/>',
     send: '<path d="M10 15.5V4.5M5.5 9 10 4.5 14.5 9"/>',
     check: '<path d="m5 10.5 3.2 3.2L15 7"/>'
