@@ -147,6 +147,34 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
   }
   const examOptions = c => ({ multiplier: c.timeMultiplier == null ? 1 : c.timeMultiplier, test: c.test === true });
 
+  /* D13: after a failed final, every topic below the pass mark must be reviewed before a retake: each section of its file opened in a
+     review session started after the attempt, and each of its targeted notes opened. Read from the sessions' `visited` records. */
+  function retakeStatus(u, assessmentId) {
+    const s = store(); const a = s.getAssessment(u, { assessmentId });
+    if (a.kind !== 'final' || !['submitted', 'graded'].includes(a.status)) fail('Assessment not found.');
+    const t = totals(a); const result = exam.examResult(a, t.score, t.max);
+    if (result.passed !== false) return { failed: false, ready: false, topics: [] };
+    const mark = a.config.passMark;
+    const byTopic = new Map();
+    for (const i of a.items) { const r = byTopic.get(String(i.topicId)) || { score: 0, max: 0 }; r.score += (i.answer && i.answer.score) || 0; r.max += i.maxScore; byTopic.set(String(i.topicId), r); }
+    const sessions = s.listSessions(u, { subjectId: a.subjectId, kind: 'review', since: a.submittedAt });
+    const sections = new Set(); const materials = new Set();
+    for (const x of sessions) { for (const v of x.visited.sections) sections.add(`${v.fileId}\u0000${String(v.section).toLowerCase()}`); for (const m of x.visited.materials) materials.add(m); }
+    const rows = workspace.listTopics(u, a.subjectId).rows; const out = [];
+    for (const [topicId, r] of byTopic) {
+      if (!r.max || r.score / r.max >= mark) continue;
+      const row = rows.find(x => String(x.id) === topicId) || {};
+      let missingSections = [];
+      if (row.fileId && analysisOf) {
+        try { const analysis = analysisOf(u, row.fileId); if (analysis && analysis.status === 'ready') missingSections = templates.sectionsOf({ id: topicId, title: row.title }, analysis).map(x => x.title).filter(title => !sections.has(`${row.fileId}\u0000${String(title).toLowerCase()}`)); } catch { /* an unreadable file adds no requirement */ }
+      }
+      const notes = a.journeyId ? s.listMaterials(u, { journeyId: a.journeyId, topicId, kind: 'targeted_note' }) : [];
+      out.push({ topicId, title: row.title || '', percent: Math.round((r.score / r.max) * 1000) / 10, missingSections, missingNotes: notes.filter(n => !materials.has(n.id)).map(n => ({ id: n.id, title: n.title })) });
+    }
+    return { failed: true, passMarkPercent: Math.round(mark * 1000) / 10, topics: out, ready: out.every(x => !x.missingSections.length && !x.missingNotes.length) };
+  }
+  on('assessment:retakeStatus', ['assessmentId'], (u, a) => retakeStatus(u, a.assessmentId));
+
   // ───────── assessments
   on('assessment:create', ['subjectId', 'journeyId', 'kind', 'title', 'config', 'retakeOf'], (u, a) => {
     const picked = select(u, a);
@@ -158,6 +186,11 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
         if (!['submitted', 'graded'].includes(previous.status) || previous.kind !== 'final') fail('Assessment not found.');
         const result = exam.examResult(previous, totals(previous).score, totals(previous).max);
         if (result.passed !== false) fail('A retake is only for a final exam that was not passed.');
+        const gate = retakeStatus(u, a.retakeOf);
+        if (!gate.ready) {
+          const todo = gate.topics.filter(x => x.missingSections.length || x.missingNotes.length).map(x => `${x.title || 'a topic'} (${x.missingSections.length} section${x.missingSections.length === 1 ? '' : 's'}, ${x.missingNotes.length} note${x.missingNotes.length === 1 ? '' : 's'} left)`);
+          fail(`Review first: open every section and every targeted note of the topics below the pass mark in a review session. Still to do: ${todo.join('; ')}.`);
+        }
       }
       config = { ...config, ...exam.examConfigFor(chosen, examOptions(c)) };
     }

@@ -293,7 +293,7 @@
       case 'tab': setTab(control.dataset.tab); return;
       case 'reanalyze': if (ctx.fileId) { A.set(ctx.fileId, { status: 'pending' }); paintNotes(); api.reanalyze(ctx.fileId).catch(error => { A.set(ctx.fileId, { status: 'error', error: error.message }); paintNotes(); }); } return;
       case 'open-md': api.openNotesFile(ctx.subjectId, control.dataset.doc || null).catch(error => ctx.toast && ctx.toast(error.message || 'The notes file could not be opened.', { error: true })); return;
-      case 'section': case 'point': if (typeof ctx.openTopic === 'function') ctx.openTopic({ title: control.dataset.title, page: Number(control.dataset.page) || null, fileId: ctx.fileId, text: control.dataset.text }); return;
+      case 'section': case 'point': if (window.PerflwQuiz && control.dataset.title) window.PerflwQuiz.noteVisit({ subjectId: ctx.subjectId, fileId: ctx.fileId, section: control.dataset.title }); if (typeof ctx.openTopic === 'function') ctx.openTopic({ title: control.dataset.title, page: Number(control.dataset.page) || null, fileId: ctx.fileId, text: control.dataset.text }); return;
       case 'note-delete': {
         const id = control.dataset.id;
         N.set(ctx.subjectId, (N.get(ctx.subjectId) || []).filter(n => n.id !== id)); paintNotes();

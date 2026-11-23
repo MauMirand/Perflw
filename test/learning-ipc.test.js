@@ -26,9 +26,11 @@ function setup() {
   for (const [id, user, subject, position] of [['t1', 'u', 's1', 0], ['t2', 'u', 's1', 1], ['tv', 'v', 'sv', 0]]) {
     insert(db, 'subject_topics', { id, user_id: user, subject_id: subject, kind: 'topic', title: `Topic ${id}`, position, ...stamps });
   }
+  insert(db, 'subject_files', { id: 'f1', user_id: 'u', subject_id: 's1', name: 'a.pdf', stored_name: 'a', type: 'pdf', size: 1, created_at: T });
+  db.prepare("UPDATE subject_topics SET file_id='f1' WHERE id IN ('t1','t2')").run();
   const store = createLearningStore(db);
   const workspace = { learningStore: () => store, listTopics: (userId, subjectId) => ({
-    rows: db.prepare('SELECT id, title FROM subject_topics WHERE user_id=? AND subject_id=?').all(userId, subjectId) }) };
+    rows: db.prepare('SELECT id, title, kind, file_id AS fileId FROM subject_topics WHERE user_id=? AND subject_id=?').all(userId, subjectId) }) };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-ipc-'));
   const handlers = new Map();
   const clock = { now: Date.now() }; // the store stamps real time, so the fake clock starts there
@@ -37,7 +39,7 @@ function setup() {
   registerLearningIpc({
     handle: (channel, action) => handlers.set(channel, action),
     requireUser: () => { userChecks += 1; if (!user) throw new Error('Your session has expired. Log in again.'); return user; },
-    workspace, dataDir: dir, analysisOf: (userId, fileId) => ({ status: 'ready', sections: [{ number: '1', title: 'Topic t1', page: 1, description: 'About t1.', keyPoints: ['Point one.', 'Point two.'] }] }), now: () => clock.now,
+    workspace, dataDir: dir, analysisOf: (userId, fileId) => ({ status: 'ready', sections: [{ number: '1', title: 'Topic t1', page: 1, description: 'About t1.', keyPoints: ['Point one.', 'Point two.'] }, { number: '2', title: 'Topic t2', page: 2, description: 'About t2.', keyPoints: ['Point three.', 'Point four.'] }] }), now: () => clock.now,
   });
   return {
     call: (channel, arg) => handlers.get(channel)(arg),
@@ -79,7 +81,7 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results',
+    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
     'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due',
   ]);
@@ -273,7 +275,15 @@ test('an untimed final never expires; results carry the verdict; a failed attemp
   assert.equal(results.exam.passed, false);
   assert.equal(results.exam.test, true);
   assert.equal(results.exam.passMarkPercent, Math.round(made.config.passMark * 1000) / 10);
-  const retake = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', retakeOf: made.id, config: finalConfig({ count: 6, timeMultiplier: 0 }) });
+  const retakeArgs = { subjectId: 's1', journeyId: journey.id, kind: 'final', retakeOf: made.id, config: finalConfig({ count: 6, timeMultiplier: 0 }) };
+  assert.throws(() => t.call('assessment:create', retakeArgs), /Review first/);
+  const gate = t.call('assessment:retakeStatus', { assessmentId: made.id });
+  assert.equal(gate.failed, true); assert.equal(gate.ready, false); assert.ok(gate.topics.length >= 1 && gate.topics.every(x => x.missingSections.length === 1));
+  // A review session opens every section of the failing topics (D13), then the retake is allowed.
+  const review = t.store.startSession('u', { subjectId: 's1', journeyId: journey.id, kind: 'review' });
+  t.store.markVisited('u', { sessionId: review.id, sections: gate.topics.map(x => ({ fileId: 'f1', section: x.missingSections[0] })) });
+  assert.equal(t.call('assessment:retakeStatus', { assessmentId: made.id }).ready, true);
+  const retake = t.call('assessment:create', retakeArgs);
   assert.equal(retake.assessment.attempt, 2); assert.equal(retake.assessment.retakeOf, made.id);
   const attempts = t.call('exam:attempts', { subjectId: 's1', journeyId: journey.id });
   assert.equal(attempts.length, 1, 'only submitted attempts are compared');
@@ -328,8 +338,8 @@ test('mastery:report compares the pre-test with the whole cycle per topic', () =
 });
 
 // ───────── diagnosis, targeted notes, review queue (spec §5.2, §5.3)
-function runDiagnostic(t, journey, answer) {
-  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'diagnostic', config: { count: 20 } }).assessment;
+function runDiagnostic(t, journey, answer, count = 20) {
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'diagnostic', config: { count } }).assessment;
   t.call('assessment:start', { assessmentId: made.id });
   made.items.forEach((item, i) => t.call('assessment:saveAnswer', { itemId: item.id, response: answer(item, i) }));
   t.call('assessment:submit', { assessmentId: made.id });
@@ -404,10 +414,33 @@ test('practice these: exactly the listed questions', () => {
 
 test('template drafts come from analysed files, are not stored, and are hidden once accepted', () => {
   const t = setup();
-  // topics need a file to have drafts: give t1 a file row
-  t.store.constructor; // (the fake workspace has no file API; the drafts for topics without a file are simply empty)
-  const none = t.call('questions:templates', { subjectId: 's1' });
-  assert.equal(none.drafts.length, 0); assert.equal(none.files, 0);
+  const first = t.call('questions:templates', { subjectId: 's1' });
+  assert.ok(first.drafts.length >= 4 && first.analysed === 1 && first.files === 1);
+  assert.equal(t.call('questions:list', { subjectId: 's1' }).length, 0, 'drafts are not stored');
+  assert.ok(first.drafts.every(d => d.origin === 'template' && d.source[0].fileId === 'f1'));
+  const saved = t.call('questions:save', { question: first.drafts[0] });
+  assert.equal(saved.origin, 'template');
+  assert.equal(t.call('questions:templates', { subjectId: 's1' }).drafts.length, first.drafts.length - 1, 'an accepted draft is not offered again');
   t.as({ id: 'v' });
   assert.throws(() => t.call('questions:templates', { subjectId: 's1' }), /not found/i);
+});
+
+test('the retake gate also needs every targeted note opened, and only review sessions after the attempt count', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  runDiagnostic(t, journey, wrongChoice, 4);
+  const notes = t.call('notes:targeted', { journeyId: journey.id });
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: finalConfig({ count: 6, timeMultiplier: 0 }) }).assessment;
+  t.call('assessment:start', { assessmentId: made.id }); answerAll(t, made, 'a'); t.call('assessment:submit', { assessmentId: made.id });
+  gradeOpen(t, made.id, { c1: 'missing', c2: 'missing' });
+  const gate = t.call('assessment:retakeStatus', { assessmentId: made.id });
+  const failing = gate.topics.filter(x => x.missingNotes.length);
+  assert.ok(failing.length >= 1, 'a topic with a targeted note must have it opened');
+  const review = t.store.startSession('u', { subjectId: 's1', journeyId: journey.id, kind: 'review' });
+  t.store.markVisited('u', { sessionId: review.id, sections: gate.topics.flatMap(x => x.missingSections.map(section => ({ fileId: 'f1', section }))) });
+  assert.equal(t.call('assessment:retakeStatus', { assessmentId: made.id }).ready, false, 'sections alone are not enough');
+  t.store.markVisited('u', { sessionId: review.id, materials: notes.map(n => n.id) });
+  assert.equal(t.call('assessment:retakeStatus', { assessmentId: made.id }).ready, true);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('assessment:retakeStatus', { assessmentId: made.id }), /not found/i);
 });

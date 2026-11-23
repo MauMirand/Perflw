@@ -118,9 +118,14 @@
     const sum = st.summary;
     const done = sum ? `<div class="qz-feedback" role="status"><p><strong>Session saved</strong> · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${esc(sum.topics.join(', '))}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}</p>${sum.message ? `<p class="ln-soon">${esc(sum.message)}</p>` : ''}<p class="qz-row">${btn('practice', 'Practice now')}</p></div>` : '';
     const topics = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
-    return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
+    return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" data-qz-study-kind><option value="main">Learning</option><option value="review">Review (for a retake)</option></select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
   }
 
+  /* D13: notes opened during a study session count as visited (the retake gate reads them). */
+  async function visitNotes(S) {
+    if (!S.study.active || !S.notesShown || !S.notesShown.length) return;
+    try { await D().studyVisit({ sessionId: S.study.active.session.id, materials: S.notesShown.map(n => n.id) }); } catch { /* the notes stay readable */ }
+  }
   function notesView(S) {
     const notes = S.notesShown || [];
     const items = notes.map(n => `<li class="qz-q"><p class="qz-q-prompt">${esc(n.title)}</p><pre class="qz-md">${esc(n.text || '(empty)')}</pre></li>`).join('');
@@ -284,6 +289,11 @@
       ${weak ? `<p class="qz-journey-title"><strong>Weak topics, worst first</strong></p><ol class="qz-cats">${weak}</ol>` : ''}
       <div class="qz-row">${A.weak.length && R.assessment.journeyId ? btn('notes-make', 'Generate targeted notes', 'title="One note per weak topic, written from your own mistakes (no AI)"') : ''}${mistakes ? ghost('practice-these', `Practice these ${mistakes}`, 'title="A practice set of exactly the questions you missed"') : ''}</div></div>`;
   }
+  function retakeBlock(R) {
+    const g = R.retake; if (!g || !g.failed) return '';
+    const rows = g.topics.map(x => `<li><strong>${esc(x.title || x.topicId)}</strong> (${x.percent}%): ${x.missingSections.length ? `open ${x.missingSections.length} section${x.missingSections.length === 1 ? '' : 's'} (${esc(x.missingSections.join(', '))})` : 'all sections opened'}${x.missingNotes.length ? `; open ${x.missingNotes.length} targeted note${x.missingNotes.length === 1 ? '' : 's'}` : ''}</li>`).join('');
+    return `<div class="qz-analysis" role="status"><p class="qz-journey-title"><strong>${g.ready ? 'Ready to retake' : 'Before you retake'}</strong></p><p class="ln-soon">${g.ready ? 'You reviewed everything below the pass mark.' : `Start a study session of type Review, open each section in the viewer and read each targeted note. The pass mark was ${g.passMarkPercent}%.`}</p><ul class="qz-cats">${rows}</ul></div>`;
+  }
   function resultsView(S) {
     const R = S.results; const items = R.assessment.items; const t = R.assessment.totals;
     const topics = (R.mastery.topics || []).map(x => `<tr><th scope="row">${esc(x.title || x.topicId)}</th><td><span class="qz-chip">${esc(LEVELS[x.level] || x.level)}</span></td><td>${x.items} item${x.items === 1 ? '' : 's'}</td></tr>`).join('');
@@ -300,7 +310,8 @@
       ${analysisBlock(R)}
       ${attemptsTable(R)}
       <ol class="qz-reviews">${review}</ol>
-      <div class="qz-row">${failedFinal ? btn('retake', 'Retake the final', `data-id="${esc(R.assessment.id)}"`) : ''}${S.journey ? ghost('report', 'Report') : ''}${ghost('home', 'Back')}</div>`;
+      ${retakeBlock(R)}
+      <div class="qz-row">${failedFinal ? btn('retake', 'Retake the final', `data-id="${esc(R.assessment.id)}"${R.retake && !R.retake.ready ? ' disabled title="Review the topics below first"' : ''}`) : ''}${S.journey ? ghost('report', 'Report') : ''}${ghost('home', 'Back')}</div>`;
   }
 
   function examSetupView(S) {
@@ -426,8 +437,9 @@
     const assessment = await D().assessmentResults({ assessmentId });
     const mastery = assessment.journeyId ? await D().masteryJourney({ journeyId: assessment.journeyId }) : { topics: [] };
     const attempts = assessment.kind === 'final' ? await D().examAttempts({ subjectId: S.subjectId, journeyId: assessment.journeyId || undefined }) : [];
+    let retake = null; if (assessment.kind === 'final' && assessment.exam && assessment.exam.passed === false) { try { retake = await D().assessmentRetakeStatus({ assessmentId }); } catch { /* shown without the list */ } }
     let analysis = null; try { analysis = await D().assessmentAnalysis({ assessmentId }); } catch { /* the analysis is a bonus */ }
-    S.results = { assessment, mastery, attempts, analysis }; S.mode = 'results'; S.errors = ''; paint(S);
+    S.results = { assessment, mastery, attempts, analysis, retake }; S.mode = 'results'; S.errors = ''; paint(S);
   }
   async function advance(S, submitted) {
     // The journey moves on when a pre-test or a final is submitted (spec §2.2).
@@ -468,11 +480,11 @@
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
-      else if (action === 'notes') { S.notesShown = S.targeted; S.mode = 'notes'; paint(S); }
+      else if (action === 'notes') { S.notesShown = S.targeted; S.mode = 'notes'; paint(S); await visitNotes(S); }
       else if (action === 'notes-make') {
         target.disabled = true;
         S.notesShown = await D().notesTargeted({ journeyId: S.results.assessment.journeyId, assessmentId: S.results.assessment.id });
-        await load(S); S.mode = 'notes'; paint(S); say('Targeted notes written.');
+        await load(S); S.mode = 'notes'; paint(S); say('Targeted notes written.'); await visitNotes(S);
       }
       else if (action === 'practice-these') {
         const ids = S.results.analysis.items.filter(i => i.category && i.category !== 'guess' && i.questionId).map(i => i.questionId);
@@ -480,7 +492,7 @@
       }
       else if (action === 'study-start') {
         const topic = hostOf(S).querySelector('[data-qz-study-topic]').value;
-        const started = await D().studyStart({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, topicId: topic || undefined, kind: 'main' });
+        const started = await D().studyStart({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, topicId: topic || undefined, kind: hostOf(S).querySelector('[data-qz-study-kind]').value });
         S.study.summary = null; await load(S); if (S.journey && S.journey.stage === 'diagnostic') S.journey.stage = 'main_learning'; paint(S); say('Study session started.'); void started;
       }
       else if (action === 'study-end') {

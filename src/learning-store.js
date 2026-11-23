@@ -478,6 +478,14 @@ function createLearningStore(db) {
     run('DELETE FROM learning_sessions WHERE id=? AND user_id=?', row.id, userId);
     return { id: row.id, deleted: true };
   }
+  /* Study sessions of a subject, optionally only one kind and only those that started at or after `since` (ISO time). */
+  function listSessions(userId, input) {
+    const a = args(input); const subject = subjectOf(userId, a.subjectId);
+    let sql = 'SELECT * FROM learning_sessions WHERE user_id=? AND subject_id=?'; const params = [userId, subject.id];
+    if (a.kind != null) { sql += ' AND kind=?'; params.push(oneOf(a.kind, SESSION_KINDS, 'Session kind')); }
+    const since = cleanDate(a.since, 'start time'); if (since) { sql += ' AND started_at>=?'; params.push(since); }
+    return all(`${sql} ORDER BY started_at, id`, ...params).map(sessionOut);
+  }
   function sessionMaterials(userId, input) {
     const a = args(input); const row = sessionRow(userId, a.sessionId);
     let sql = 'SELECT * FROM learning_materials WHERE user_id=? AND session_id=?'; const params = [userId, row.id];
@@ -607,7 +615,7 @@ function createLearningStore(db) {
     createAssessment, startAssessment, getAssessment, assessmentOfItem, listAssessments, abandonAssessment,
     saveAnswer, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
-    getSession, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
+    getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
     recordReview, getReview, dueReviews,
     journeyEvidence,
   };
