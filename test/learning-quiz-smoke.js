@@ -216,12 +216,35 @@ async function main() {
   await shoot('quiz-5-results');
   assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'diagnostic', 'journey moved to the diagnostic stage after the pre-test is submitted');
 
-  // Practice: feedback after Check, key shown only for that question.
+  // Study session (LS-012): the account timer runs it, a side note is the student's own text, one focus entry with source learning.
   await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"study-start\"]')", 'study panel');
+  await fill('[data-qz-study-topic]', topicId);
+  await click('[data-qz="study-start"]');
+  await waitFor("!!document.querySelector('[data-qz-study-time]') && /Studying: Ionic bonds/.test(document.querySelector('.qz-study').textContent)", 'study session started');
+  assert.equal(await evaluate("window.workspaceData.focus().then(() => window.learningData.studyActive()).then(a => !!a && a.topicTitle)"), 'Ionic bonds', 'the main process reports the open session');
+  const clockA = await evaluate("document.querySelector('[data-qz-study-time]').textContent"); await sleep(2200);
+  const clockB = await evaluate("document.querySelector('[data-qz-study-time]').textContent");
+  assert.notEqual(clockA, clockB, 'the session clock runs');
+  await fill('[data-qz-form="note"] [name="text"]', 'Ionic bonds hold because opposite charges attract.');
+  await submit('[data-qz-form="note"]');
+  await waitFor("/Ionic bonds hold because opposite charges attract\./.test((document.querySelector('.qz-notes') || {}).textContent || '')", 'side note listed');
+  // A second timer cannot start while the session runs.
+  assert.match(await evaluate("window.learningData.studyStart({ subjectId: " + q(subjectId) + ", kind: 'main' }).then(() => 'started', e => e.message)"), /timer is already running/);
+  await click('[data-qz="study-end"]');
+  await waitFor("/Session saved/.test((document.querySelector('.qz-feedback') || {}).textContent || '')", 'session summary');
+  assert.ok(await evaluate("/1 note/.test(document.querySelector('.qz-feedback').textContent)"), 'summary counts the note');
+  const entries = await evaluate("window.workspaceData.focus()");
+  assert.equal(entries.filter(e => e.source === 'learning').length, 1, 'exactly one focus entry from the session');
+  assert.equal(await evaluate("window.learningData.studyActive()"), null, 'no open session and no ghost timer');
+  step('study session: timer runs, side note kept, one learning focus entry, summary shown');
+  await shoot('quiz-4b-study');
+
+  // Practice: feedback after Check, key shown only for that question (the study summary leaves us on the home screen).
   await waitFor("!!document.querySelector('.qz-stepper')", 'journey stepper on the home screen');
-  assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Diagnostic', 'stepper shows the current stage');
+  assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Main learning', 'stepper shows the current stage (a study session moves the journey on)');
   assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 7"), 'unbuilt stages read later');
-  step('journey stepper: Diagnostic current, 7 stages marked for a later update');
+  step('journey stepper: Main learning current, 7 stages marked for a later update');
   await waitFor("!!document.querySelector('[data-qz=\"practice\"]') && !document.querySelector('[data-qz=\"practice\"]').disabled", 'practice enabled');
   await click('[data-qz="practice"]');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');

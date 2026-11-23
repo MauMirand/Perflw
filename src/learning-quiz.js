@@ -26,7 +26,7 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -43,6 +43,12 @@
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
+    if (typeof D().studyActive === 'function') {
+      const act = await D().studyActive();
+      S.study.active = act && act.session.subjectId === S.subjectId ? act : null;
+      S.study.notes = S.study.active ? await D().studyNotes({ sessionId: S.study.active.session.id }) : [];
+      if (S.study.active) { S.study.base = S.study.active.elapsedSeconds || 0; S.study.t0 = Date.now(); }
+    }
     S.journey = journeys.filter(j => j.status !== 'archived').pop() || null;
   }
 
@@ -56,6 +62,7 @@
     // Bring the block into view when the screen changes (it sits below the topics), without smooth scrolling under reduced motion.
     if (S.shown !== S.mode) { S.shown = S.mode; if (S.mode !== 'home') host.scrollIntoView({ block: 'start' }); }
     const focus = host.querySelector('[data-qz-focus]'); if (focus) focus.focus({ preventScroll: true });
+    syncStudyTimer(S);
   }
   const btn = (action, label, extra = '', cls = 'btn btn-sm') => `<button class="${cls}" type="button" data-qz="${action}" ${extra}>${label}</button>`;
   const ghost = (action, label, extra = '') => btn(action, label, extra, 'btn btn-sm btn-ghost');
@@ -91,7 +98,24 @@
         ${btn('exam', 'Final exam', has ? 'title="Timed exam with a pass mark"' : 'disabled title="Add at least one question first"')}
         ${hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : ''}
         ${S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''}</div>
-      ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}`;
+      ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}
+      ${studyView(S)}`;
+  }
+
+  function studyView(S) {
+    const st = S.study; const a = st.active;
+    if (a) {
+      const notes = st.notes.map(n => `<li class="qz-note"><p>${esc(n.text || '(empty)')}</p></li>`).join('');
+      return `<div class="qz-study" role="group" aria-label="Study session"><p><strong>Studying${a.topicTitle ? `: ${esc(a.topicTitle)}` : ''}</strong> · <span class="qz-timer" data-qz-study-time>${a.elapsedSeconds == null ? 'timer stopped' : clock(st.base + (Date.now() - st.t0) / 1000)}</span></p>
+        <p class="ln-soon">Open topics in the viewer while you study; what you open is recorded for the retake check. Your notes below are yours alone.</p>
+        <form class="qz-form" data-qz-form="note" novalidate><label class="ln-field"><span>Side note</span><textarea class="field field-area" name="text" rows="3" maxlength="20000"></textarea></label>
+          <div class="qz-row"><button class="btn btn-sm" type="submit">Add note</button>${btn('study-end', 'End session')}</div></form>
+        ${notes ? `<ul class="qz-notes" aria-label="Notes from this session">${notes}</ul>` : ''}</div>`;
+    }
+    const sum = st.summary;
+    const done = sum ? `<div class="qz-feedback" role="status"><p><strong>Session saved</strong> · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${esc(sum.topics.join(', '))}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}</p>${sum.message ? `<p class="ln-soon">${esc(sum.message)}</p>` : ''}<p class="qz-row">${btn('practice', 'Practice now')}</p></div>` : '';
+    const topics = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
+    return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
   }
 
   function bankView(S) {
@@ -311,6 +335,34 @@
     const count = form.querySelector('[data-qz-count]'); if (count && Q.dirty.text != null) count.textContent = `${words(Q.dirty.text)} words`;
   }
 
+  // ───────── study session clock: shown once a second, heartbeat every minute (the last activity closes a forgotten session)
+  function syncStudyTimer(S) {
+    const st = S.study; const want = st.active && S.mode === 'home';
+    if (!want) { if (st.tick) { clearInterval(st.tick); st.tick = null; } return; }
+    if (st.tick) return;
+    let beats = 0;
+    st.tick = setInterval(() => {
+      if (S.mode !== 'home' || !st.active) { clearInterval(st.tick); st.tick = null; return; }
+      const el = hostOf(S) && hostOf(S).querySelector('[data-qz-study-time]');
+      if (el && st.active.elapsedSeconds != null) el.textContent = clock(st.base + (Date.now() - st.t0) / 1000);
+      if (++beats % 60 === 0) D().studyTouch({ sessionId: st.active.session.id }).catch(() => {});
+    }, 1000);
+  }
+  /* D13: the viewer reports each topic or section the student opens; during a study session it is stored once. */
+  const visitQueue = new Map();
+  function noteVisit({ subjectId, fileId, section }) {
+    const S = states.get(subjectId); if (!S || !S.study.active || !D() || typeof D().studyVisit !== 'function') return;
+    const key = `${fileId}\u0000${section}`; const queue = visitQueue.get(S.study.active.session.id) || { sent: new Set(), pending: [] };
+    visitQueue.set(S.study.active.session.id, queue);
+    if (queue.sent.has(key)) return;
+    queue.sent.add(key); queue.pending.push({ fileId, section: String(section || '').slice(0, 200) });
+    clearTimeout(queue.timer);
+    queue.timer = setTimeout(() => {
+      const sections = queue.pending.splice(0);
+      if (S.study.active && sections.length) D().studyVisit({ sessionId: S.study.active.session.id, sections }).catch(() => { sections.forEach(x => queue.sent.delete(`${x.fileId}\u0000${x.section}`)); });
+    }, 1500);
+  }
+
   // ───────── timer (timed finals; the main process enforces the deadline, this only shows and auto-submits)
   function stopTimer(S) { if (S.quiz && S.quiz.tick) { clearInterval(S.quiz.tick); S.quiz.tick = null; } }
   function startTimer(S) {
@@ -386,6 +438,15 @@
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
+      else if (action === 'study-start') {
+        const topic = hostOf(S).querySelector('[data-qz-study-topic]').value;
+        const started = await D().studyStart({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, topicId: topic || undefined, kind: 'main' });
+        S.study.summary = null; await load(S); if (S.journey && S.journey.stage === 'diagnostic') S.journey.stage = 'main_learning'; paint(S); say('Study session started.'); void started;
+      }
+      else if (action === 'study-end') {
+        const sum = await D().studyEnd({ sessionId: S.study.active.session.id });
+        S.study.summary = sum; S.study.active = null; S.study.notes = []; await load(S); paint(S); say('Study session saved.');
+      }
       else if (action === 'bank') { S.editId = null; await load(S); S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); }
       else if (action === 'edit') { const x = S.allQuestions.find(y => y.id === target.dataset.id); S.editId = x.id; S.form = questionToForm(x); S.mode = 'add'; paint(S); }
       else if (action === 'retire' || action === 'restore') {
@@ -502,6 +563,10 @@
           await D().assessmentGrade({ itemId: item.id, verdicts, grader: 'self' });
         }
         await showResults(S, S.grade.assessment.id);
+      } else if (kind === 'note') {
+        const text = form.elements.text.value;
+        await D().studySideNote({ sessionId: S.study.active.session.id, text });
+        S.study.notes = await D().studyNotes({ sessionId: S.study.active.session.id }); paint(S); H.toast('Note added.');
       } else if (kind === 'exam') {
         const E = S.exam; if (!E.preview || !E.preview.ok) return;
         await begin(S, 'final', E.retakeOf ? 'Final exam (retake)' : 'Final exam', { count: Number(E.count), test: E.test, timeMultiplier: Number(E.multiplier) }, E.retakeOf ? { retakeOf: E.retakeOf } : {});
@@ -534,5 +599,5 @@
     else { paint(S); if (S.mode === 'quiz') startTimer(S); }
   }
 
-  window.PerflwQuiz = { mount, init: helpers => { H = { ...H, ...helpers }; } };
+  window.PerflwQuiz = { mount, noteVisit, init: helpers => { H = { ...H, ...helpers }; } };
 })();

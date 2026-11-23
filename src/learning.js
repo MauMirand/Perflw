@@ -471,6 +471,7 @@
     await ensureTopics(subjectId);
     const t = currentTopic();
     if (t && t.fileId) loadFile(t.fileId);
+    if (t && t.fileId && window.PerflwQuiz) window.PerflwQuiz.noteVisit({ subjectId, fileId: t.fileId, section: t.title }); // D13: a study session records what was opened
     syncStudy();
   }
   /* Learn: open the subject's first topic in the viewer, or warn when nothing has been uploaded yet. */

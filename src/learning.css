@@ -664,3 +664,9 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-q { padding: 10px 12px; border-radius: 8px; background: #232222; }
 .qz-q p { margin: 2px 0; }
 .qz-q-prompt { font-weight: 600; font-size: 14px; }
+
+/* Study session panel. */
+.qz-study { margin-top: 14px; padding: 12px; border-radius: 8px; background: #232222; max-width: 760px; }
+.qz-notes { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.qz-note { padding: 8px 10px; border-radius: 6px; background: var(--raised); font-size: 13px; white-space: pre-wrap; }
+.qz-note p { margin: 0; }
