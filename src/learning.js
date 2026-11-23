@@ -236,6 +236,7 @@
         <p class="ln-page-stats">${s.mastery}% mastery · ${esc(spent(s.minutes))}</p>
       </header>
       <div class="ln-page-grid">${topicsSection(s)}${placeholders(true)}</div>
+      <div data-qz-host></div>
     </div>`;
   }
   function render() {
@@ -248,6 +249,8 @@
     const root = $('.ln-root'); if (!root) return;
     $$('[data-ln-img]', root).forEach(el => { el.style.backgroundImage = `url("${el.dataset.lnImg}")`; });
     $$('[data-ln-w]', root).forEach(el => { el.style.width = `${el.dataset.lnW}%`; });
+    const quiz = $('[data-qz-host]', root); const quizSubject = quiz && L.page ? subject(L.page) : null;
+    if (quiz && quizSubject && window.PerflwQuiz) window.PerflwQuiz.mount(quiz, quizSubject);
     if (L.focus) { const el = $(L.focus, root); if (el) el.focus(); L.focus = null; }
     if (L.viewer) { const box = $('[data-ln-doc]', root); if (box && PDFV) paintDoc(box); else annotate(); syncStudy(); }
   }
@@ -1071,6 +1074,7 @@
 
   function init(helpers) {
     H = helpers;
+    if (window.PerflwQuiz) window.PerflwQuiz.init(helpers);
     document.addEventListener('click', onClick);
     document.addEventListener('dblclick', onDblClick);
     document.addEventListener('keydown', onKey, true);
