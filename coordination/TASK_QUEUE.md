@@ -55,10 +55,10 @@ refer to `PROJECT_STATUS.md` §6.
 |---|---|---|---|---|---|
 | PF-004 | Fix the failing Electron E2E smoke test (Learning PDF stage) | P0 | **INTEGRATED** (`dfd1fbd`, 2026-11-23) | — | R2. Commits `3b8f738`, `f2006fa` on `fix/PF-004-smoke-pdf`. Independently re-verified: `npm test` 126 pass/0 fail/2 todo; smoke 3/3. Follow-ups: PF-007, PF-020. |
 | PF-005 | Upgrade Electron off EOL 38.x to a supported major | P0 | BACKLOG | PF-004; ADR-001 approval | R1, R5 |
-| PF-006 | Versioned, transactional schema migrations with a backup | P1 | **APPROVED** (HO-013, 2026-11-23): `claude/pf-006-migrations-3b8b79` @ `84741f0`; awaiting owner merge | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
+| PF-006 | Versioned, transactional schema migrations with a backup | P1 | **INTEGRATED** (`350520c`, 2026-11-23; pushed with `61e5c14`): `84741f0`, APPROVED in HO-013 | ADR-002 ✔ (D1); PF-004 INTEGRATED; PF-007 APPROVED + merged | R3; **gate G1 for all learning tables**. Touches `workspace.js`/`auth.js`; no other DB work in parallel. Full spec below. |
 | PF-007 | Safe user-data file I/O on Windows (atomic write with retry; reads that never turn "busy" into "empty") | **P0** (raised 2026-11-23) | **INTEGRATED** (`5664f56`, 2026-11-23; `--no-ff`, not pushed): `8475dcb` + `b545f18`, APPROVED in HO-010 | ADR-003 ✔ ACCEPTED; PF-004 INTEGRATED | R4 + data loss reproduced in PF-004. Full spec below. No file overlap with PF-006 |
 | PF-020 | Replace fixed waits in smoke steps with condition waits; root-cause the Home card-drag flake (`electron-smoke.js:1031` after PF-004, ~1 in 11 runs), the side-panel collapse flake (`:620`) and the sidebar group collapse flake (`:949`, after `sleep(250)`) | **P1, before LS-008** | **ASSIGNED** (lane 1, 2026-11-23; submission HO-014). Full brief: "TASK: PF-020" | PF-004 INTEGRATED | From HO-004 §8.2 and HO-008: Claude A saw 2 fixed-wait failures in 6 runs on the PF-007 branch. Gate G2 needs a trustworthy smoke run |
-| PF-021 | Startup: show a plain-language dialog when the workspace or accounts database cannot be backed up or migrated, then quit (today `createWorkspace`/`createAuth` throw uncaught in `main.js:217-218`) | **P1, before any release** | READY | PF-006 merged | From HO-012 §7.2, decided in HO-013. `src/main.js` only; test by injecting a failing migration list |
+| PF-021 | Startup: show a plain-language dialog when the workspace or accounts database cannot be backed up or migrated, then quit (today `createWorkspace`/`createAuth` throw uncaught in `main.js:217-218`) | **P1, required before the first release (packaged build)** | READY (queued; starts when a lane is free). Full brief: "TASK: PF-021" | PF-006 INTEGRATED ✔ | From HO-012 §7.2, decided in HO-013. `src/main.js` only; test by injecting a failing migration list |
 | PF-008 | `npm run verify` and Windows CI (GitHub Actions) | P1 | BACKLOG | PF-004; owner OK for Actions | R6 |
 | PF-009 | Owner decision: build expense tracking or remove the unused finance and ledger tables | P1 | BACKLOG | owner | R9; needs a decision, not code |
 | PF-010 | IPC contract test (channels in `preload.js` ↔ `handle()` in `main.js`) | P2 | BACKLOG | — | Cheap guard for about 120 channels |
@@ -175,7 +175,7 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
 
 ### TASK: LS-005 — Migration 2: Learning System tables
 
-**Status:** READY when PF-006 is merged (G1) · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
+**Status:** RELEASED for lane 3 (2026-11-23; G1 open: PF-006 integrated). Session not started yet: waits for the owner to start it · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
 **Submission:** HO-018 · **Created By:** Claude A
 
 #### Objective
@@ -220,9 +220,45 @@ after a backup. Spec §6.2 lists the tables, columns and indexes, including the 
 
 ---
 
+### TASK: PF-021 — Startup: a clear message when the databases cannot be opened, backed up or migrated
+
+**Status:** READY (queued 2026-11-23; starts when a lane is free) · **Priority:** P1, **required before the first
+release (packaged build)** · **Assigned To:** Claude B · **Submission:** next reserved number at release ·
+**Created By:** Claude A
+
+#### Objective
+If `createAuth` or `createWorkspace` fails at startup (backup failed, a migration failed and was rolled back, the file
+is not a database), the student sees one plain-language message and the app quits cleanly. Today the error is thrown
+inside `app.whenReady().then(...)` (`src/main.js:217-218`) and nothing catches it *[inferred from code: an unhandled
+rejection, so the app likely stays running with no window; confirm this first and record what actually happens]*.
+
+#### Requirements
+- Wrap the database start (`createAuth`, `createWorkspace`) in `main.js`. On error: no window is created; show
+  `dialog.showErrorBox(title, message)` with the error's plain-language message (PF-006's runner messages already
+  are), then `app.exit(1)`. Do not delete, move or rewrite any file.
+- Messages that are not from the runner (e.g. "file is not a database") get a plain wrapper: what happened, that
+  nothing was changed, where the data folder is, and that the newest `*.bak-*` copy can be restored (no automatic
+  restore).
+- Test mode (`!app.isPackaged && PERFLW_TEST_USER_DATA`): print the same message to stderr instead of the modal
+  dialog (a modal blocks automated runs), then exit 1.
+- Keep the message builder pure and unit-tested (new small module, e.g. `src/startup-error.js`).
+
+#### Restrictions
+`src/main.js` (startup block only), new `src/startup-error.js`, new tests. No change to `db-migrate.js`,
+`workspace.js` or `auth.js`.
+
+#### Acceptance Criteria
+- [ ] Unit tests for the message builder: runner error kept as is; foreign error wrapped; data path included.
+- [ ] Electron check: `PERFLW_TEST_USER_DATA` pointing at a temp folder whose `workspace.sqlite` holds garbage bytes →
+      process exits with code 1, stderr has the message, the garbage file is byte-identical afterwards, no window.
+- [ ] Rendered check (packaged-like run without test mode): screenshot of the dialog.
+- [ ] `npm test` exit 0; `npm run test:electron` exit 0 (normal startup unchanged).
+
+---
+
 ### TASK: PF-006 — Versioned, transactional schema migrations with a backup
 
-**Status:** APPROVED (HO-013, 2026-11-23); awaiting owner merge  
+**Status:** INTEGRATED (`350520c`, 2026-11-23); APPROVED in HO-013  
 **Priority:** P1 (gate G1 for the Learning System)  
 **Assigned To:** Claude B  
 **Created By:** Claude A  
@@ -284,7 +320,7 @@ Summary, files, test outputs with exit codes, commit hash, the list of tables/co
 
 #### Review
 **Reviewed By:** Claude A  
-**Decision:** **APPROVED** (HO-013, 2026-11-23), `84741f0` on `claude/pf-006-migrations-3b8b79` (generated branch name accepted). Not integrated yet.
+**Decision:** **APPROVED** (HO-013, 2026-11-23), `84741f0` on `claude/pf-006-migrations-3b8b79` (generated branch name accepted). Integrated as `350520c` (src/test identical to `84741f0`; `npm test` 154/154 on the merge per the orchestrator).
 
 ---
 
