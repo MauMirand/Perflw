@@ -908,6 +908,97 @@ tasks. Unchanged: PF-006, LS-002 to LS-004.
 
 ---
 
+### HO-015 — LS-002: Assessment model (pure module)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-002  
+**From:** Claude B  
+**To:** Claude A  
+**Status:** SUBMITTED  
+**Branch:** `claude/ls-002-assessment-model-9f8216` (session-generated worktree branch), base `main` at `243765c`  
+**Commits:** `613ee4d` (module + tests); this entry in a docs commit on top.
+
+#### 1. Understanding (stated before coding)
+A pure, dependency-free `src/assessment-model.js` (no I/O, DOM, Electron, SQL or AI) that loads in Node via
+`require` and in the renderer as `window.PerflwAssessmentModel` (same wrapper as `topic-model.js`). It is the one
+contract for spec §4.2–4.7: validating and normalizing the five question types, normalizing responses, grading the
+deterministic types, scoring open answers from rubric verdicts by code (ADR-007), seeded item selection with the D3
+review filter, and a student view with no answer key (ADR-005). Released by the owner without the G3 wait. Not added
+to `index.html` (LS-010 does).
+
+#### 2. Files
+- New: `src/assessment-model.js`, `test/assessment-model.test.js`. No other file changed (`package.json` glob
+  `test/*.test.js` already picks the test up).
+
+#### 3. API
+- Constants: `TYPES`, `OPEN_TYPES`, `DIMENSIONS`, `KINDS`, `ORIGINS`, `STATUSES`, `REVIEWS`, `VERDICTS`
+  (`met` 1, `partly` 0.5, `missing` 0), `LIMITS`.
+- `validateQuestion(q) → { ok, value, errors[] }`. `value` is the normalized question when ok, else `null`. Unknown
+  fields dropped; strings trimmed; errors read `"<field path>: <plain-language problem>."` (e.g.
+  `payload.pairs[1]: the right item "r1" is paired more than once.`). Defaults: `origin 'manual'`,
+  `status 'active'`, `review` = `'unreviewed'` for generated else `'approved'` (D3), `explanation ''`, `source []`,
+  `provenance null` unless generated (then required: `provider`, `model`, ISO `generatedAt`; `agentId`,
+  `promptVersion` optional). Points default: choice 1, true/false 1 (2 with justification), matching 1 per pair,
+  essay/explain = rubric total; must end up 1–20. Payload-local ids (options, left/right, rubric) are normalized to
+  strings; question-level ids keep their type (string ≤ 100 chars or non-negative integer).
+- `normalizeResponse(question, raw) → { questionId, choice?, value?, justification?, pairs?, text?, dontKnow?,
+  confidence?, timeMs }`. Keeps only the type's fields, drops ids the question lacks, first pair per left item wins,
+  `text`/`justification` capped at 20,000 chars, `confidence` only 1–3, `timeMs` ≥ 0 capped at 24 h.
+- `grade(question, response) → { score, max, status, category? , pendingPoints? }`. `status`: `'graded'` or
+  `'pending'`. dontKnow → 0 + `not_known`; empty → 0 + `not_answered` (both `graded`, any type). Choice single exact
+  match; multiple `max(0, (right − wrong) / correctCount) × points`; matching `points × hits / pairs`; true/false with
+  required justification grades the value half now and returns `pending` with `pendingPoints` (a blank justification
+  makes it `graded`, 0 for that half); essay/explain `pending`. Scores rounded to 2 decimals.
+- `rubricOf(question) → criteria[]`: the open rubric, or for true/false-with-justification one criterion
+  `{ id: 'justification', points: points/2 }`.
+- `scoreFromCriteria(question, verdicts) → number`. `verdicts` is `[{ id, verdict }]` (AI output shape) or
+  `{ id: verdict }`. Score = rubric share × Σ(criterion points × verdict factor) / Σ criterion points; share = the
+  question's points (essay/explain) or the justification half (true/false). Missing/invalid verdict = 0.
+- `selectItems({ questions, topics, count, types, dimensions, exclude, weakTopics, due, seed, kind }) → questions[]`.
+  Filters: `status` active, not excluded, type/dimension/topic filters when given, D3 review rule (`practice`: not
+  `rejected`; anything else, including a missing `kind`: only `approved`). `due` ids first. Round-robin over topics
+  (given order, else first appearance): each round gives every topic one item, then weak topics a second (×2).
+  Within a topic, a seeded order spread across dimensions; a diagnostic starts each topic with recall-or-higher when
+  available. No `count` = all eligible.
+- `stripAnswerKey(snapshot)`: a question, a list, or `{ ...fields, questions: [] }`. Whitelist copy; removes
+  `correct`, `pairs`, `modelAnswer`, rubric `keywords`, and also `explanation`, `source` and `provenance`. Input
+  unchanged.
+- `shuffle(items, seed)`: FNV-1a seed hash + mulberry32 Fisher–Yates; new array, same seed → same order.
+
+#### 4. Tests (`test/assessment-model.test.js`, 26)
+Dual-load (require + vm browser global); valid question per type with defaults; unknown fields dropped; common-field
+errors name the field; source refs; generated provenance + D3 review defaults; choice, true/false, matching,
+essay/explain payload invalid cases; normalizeResponse caps and filtering; choice single; multiple partial credit
+incl. floor at 0; true/false incl. justification pending; matching partial; essay/explain pending; dontKnow and
+empty for every type; scoreFromCriteria (met/partly/missing, scaling, justification half); shuffle seeded/stable;
+selectItems deterministic + covers every topic before repeating; dimension spread + diagnostic recall-first;
+exclude/types/dimensions/status; D3 for diagnostic/final/retention/missing kind vs practice; practice due-first + weak
+×2; stripAnswerKey deep check on in-progress diagnostic and final snapshots (all 5 types); student view keeps what is
+needed, whitelist blocks unknown payload fields, copy independent.
+
+#### 5. Results
+- `npm test > log 2>&1; echo EXIT=$?` → `EXIT=0`, `# tests 167`, `# pass 167`, `# fail 0` (base `243765c`: 141).
+- `npm run test:electron`: not run (no renderer change).
+
+#### 6. Spec ambiguities and limitations (reported, not decided)
+1. `id` is required by `validateQuestion`; AI/template questions must get an id before validation (store or coach).
+2. Default points per type are not in the spec; chosen as in §3. Open questions whose points differ from the rubric
+   total are scaled proportionally.
+3. True/false justification: the payload has no rubric, so `rubricOf` synthesizes one criterion. The `grade` result
+   adds `pendingPoints` beyond the spec shape.
+4. Text limits not in the spec: option/item text 500, criterion 500, keyword 100 (≤ 20), section 200, modelAnswer
+   5,000, words 0–5,000 (essay defaults 0–500).
+5. `stripAnswerKey` also removes `explanation` and source quotes (both can reveal the answer before submit) and
+   keeps rubric criterion text, which may hint at the answer for essays. Claude A to decide.
+6. Matching `right` and choice `options` keep their authored order in the student view; if authors list them in
+   answer order, the order leaks the key. The caller (LS-010) should `shuffle` them with the assessment seed.
+7. `due` (practice "due mistakes first", spec §4.7) is an added optional parameter not in the task signature. Weak
+   topic ×2 applies whenever `weakTopics` is passed, not only for practice.
+8. `grade` does not assign §5.2 mistake categories other than `not_known`/`not_answered`; those belong to
+   `learning-insight.js`.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
