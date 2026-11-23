@@ -1,7 +1,7 @@
 # Perflw Learning System — Product and Technical Specification
 
-**Status:** APPROVED IN PRINCIPLE (owner decisions D1–D5, 2026-11-23; see §9). ADR-004, ADR-005, ADR-008 await
-explicit confirmation. · **Author / architecture owner:** Claude A · **Implementation owner:** Claude B · **Date:** 2026-11-23
+**Status:** APPROVED IN PRINCIPLE (owner decisions D1–D12, 2026-11-23; see §9). ADR-004, ADR-005, ADR-008
+ACCEPTED. D6–D11 (owner's learning-loop answers, HO-011) folded in; 5 follow-up questions open (§9.1). · **Author / architecture owner:** Claude A · **Implementation owner:** Claude B · **Date:** 2026-11-23
 **Basis:** commit `e9cc8ae` (app code identical to `a54858c`) · **Related:** ADR-004 to ADR-008, tasks LS-001 to LS-030
 **Naming:** code, package and data folder say **Perflw**; this spec uses that name until PF-013 is decided.
 
@@ -20,7 +20,7 @@ subject's "mastery %" is a number the student types in.
 This spec adds that missing layer as a **repeatable learning cycle**:
 
 ```
-PRE-TEST → DIAGNOSE → TARGETED NOTES → MAIN LEARNING → PRACTICE → RE-DIAGNOSE → FINAL LEARNING → FINAL EXAM → MASTERY (+ delayed retention check) → next cycle
+PRE-TEST → DIAGNOSE → TARGETED NOTES → MAIN LEARNING (+ SIDE NOTES) → QUEST (practice) → RE-DIAGNOSE → FINAL LEARNING (evaluation) → FINAL EXAM → MASTERY (+ delayed retention check) → optional next cycle
 ```
 
 Three principles drive every decision below:
@@ -122,23 +122,27 @@ flowchart TD
   PT --> DA[Diagnostic report<br/>per topic and dimension]
   DA --> TN[Targeted notes<br/>for weak topics]
   TN --> ML[Main learning sessions<br/>viewer + side notes + Ask]
-  ML --> PR[Practice sessions<br/>immediate feedback]
+  ML --> PR[Quest = practice sets<br/>immediate feedback]
   PR --> MA[Mistake analysis]
   MA -->|gaps remain| SL[Supplementary learning] --> PR
-  MA -->|ready| FL[Final learning / review]
-  FL --> FE[Final exam<br/>parallel items, no feedback until submit]
-  FE --> MR[Mastery report<br/>pre vs final, evidence]
+  MA -->|ready| FL[Final learning, required<br/>statistical evaluation]
+  FL --> FE[Final exam<br/>50–100 parallel items, timed,<br/>pass mark 75–90% by difficulty]
+  FE -->|failed| RV[Review the topic's whole study load] --> FE
+  FE --> MR[Mastery report<br/>pre vs final, all attempts compared]
   MR --> RC[Retention check<br/>scheduled 7+ days later]
   RC --> MR
-  MR -->|next cycle| NJ
+  MR -->|next cycle, optional:<br/>stats start at 0, history kept| NJ
   JH -.-> CAL[Calendar: scheduled sessions and checks]
   CAL -.-> ML
 ```
 
 ### 2.2 Stages
 
-A journey has one **stage** at a time; the hub shows all stages as a stepper and lets the student move forward,
-skip an optional stage, or go back to practice. Stages never lock content: notes, files and Ask stay available.
+A **journey is the whole cycle** (D7). It has one **stage** at a time. The hub shows all stages as a stepper.
+Stages **unlock step by step**: a stage opens when the previous stage's exit condition is met, and the stepper shows
+progress along the way (done / current / locked). The loops in §2.1 stay possible: from Mistake analysis back to
+Quest or Supplementary learning, and from a failed Final exam to the review step. Locking applies to **stages
+only**: notes, files and Ask stay available at every stage *[interpretation of D7]*.
 
 | # | Stage | Entry | Student does | System records | Exit |
 |---|---|---|---|---|---|
@@ -150,15 +154,15 @@ skip an optional stage, or go back to practice. Stages never lock content: notes
 | 5 | **Pre-test** | Quiz panel | Answers; may mark "I don't know" and set confidence; may leave and resume | `assessment_answers` saved per answer | Submit → grading |
 | 6 | **Diagnostic** | Results | Sees per-topic and per-dimension results, mistake categories, weak topics ranked | computed from answers | "Generate targeted notes" |
 | 7 | **Targeted notes** | Hub | Reads one note per weak topic: key points + source excerpts (+ AI explanation if available) | `learning_materials` | "Start studying" |
-| 8 | **Main learning** | Topic viewer | Studies a topic in the existing viewer with a session bar (timer, topic, side notes, end) | `learning_sessions` + focus entry | Session ends |
-| 9 | **Practice** | Quiz panel | Short sets (5–10) targeted at weak topics; immediate feedback per question | `assessments` kind `practice` | Any time |
+| 8 | **Main learning** | Topic viewer | Studies a topic in the existing viewer with a session bar (timer, topic, side notes, end). Side notes are the student's own writing; optional AI help reviews them (D8, §3.8) | `learning_sessions` + focus entry; side notes in `learning_materials` | Session ends |
+| 9 | **Quest** (practice) | Quiz panel | Short graded sets (5–10) targeted at weak topics; immediate feedback per question (D6). A game layer (XP, streaks, rewards) is a later, separate phase (LS-031) | `assessments` kind `practice` | Any time |
 | 10 | **Mistake analysis** | Results | Mistakes grouped by category and topic; "practice these again" | computed | Back to practice, or "ready for final" |
 | 11 | **Supplementary learning** | Hub | Extra notes and sessions for topics still weak after practice | sessions, materials | Back to practice |
-| 12 | **Final learning** | Hub | Optional review session: targeted notes + flagged mistakes | session | "Take final exam" |
-| 13 | **Final exam** | Quiz panel | Like the pre-test but with **parallel items** (same topics/dimensions, different questions) | `assessments` kind `final` | Submit |
-| 14 | **Mastery report** | Results | Pre vs final per topic and dimension, evidence counts, provisional grades flagged | computed | Schedule retention check; start next cycle |
+| 12 | **Final learning** | Hub | **Required** (D9). Sees the cycle's full statistical evaluation (§5.6) and does a review session on targeted notes + flagged mistakes | session kind `review`; evaluation computed | Evaluation viewed and review session ended → final exam unlocks |
+| 13 | **Final exam** | Quiz panel | **Parallel items** (same topics/dimensions, different questions); 50–100 items chosen by the student, computed time limit, pass mark 75–90% by difficulty; retake only after reviewing the topic's whole study load (D10, §4.9) | `assessments` kind `final`, `attempt` n | Submit → passed / not passed |
+| 14 | **Mastery report** | Results | Pre vs final per topic and dimension, evidence counts, provisional grades flagged; **every final attempt compared** (D10) | computed | Schedule retention check; optionally start next cycle |
 | 15 | **Retention check** | Quiz panel | 7+ days later: short recall-only set on mastered topics | `assessments` kind `retention` | Updates retention evidence |
-| 16 | **Next cycle** | Report | New journey pre-filled with topics not yet mastered; links to the previous journey | `parent_journey_id` | Stage 2 |
+| 16 | **Next cycle** (optional, D11) | Report | The student chooses whether to start one. If not, the journey stays completed and its stats stay as they are. If yes: a new journey, topics pre-filled with those not yet mastered but freely editable; the new cycle's stats start at 0 (soft reset, §5.4) | `parent_journey_id` | Stage 2 |
 
 **Calendar** (stages 8, 9, 15): any session or check can be scheduled from the hub; it becomes a calendar event
 (§7.1).
@@ -171,6 +175,13 @@ Follows `C:/Users/Maurice/.claude/Claude-Handoff/DESIGN-PREFERENCES.md` and the 
 (`styles.css`, `learning.css`): restrained, compact, few visible buttons, short tooltips, clear state, keyboard and
 touch usable, `prefers-reduced-motion` honored. No Google branding or assets; the Gemini quiz panel is used only as
 an interaction reference (focused card, progress, navigation, check/next, explanation).
+
+**Binding (owner decision D12, 2026-11-23): the Learning System looks like the current app.** Every new screen
+(journey hub and stepper, quiz panel, results and evaluation, session bar, side notes, final exam, and later the
+Quest game layer) reuses the existing tokens, components, layout patterns and motion from `styles.css` and
+`learning.css`. No new visual language, no new design system, no new token set. A new CSS rule is allowed only
+when no existing pattern fits, uses existing tokens, and is named in the task's handoff. Acceptance for every
+renderer task: screenshots side by side with the existing Learning pages at 1280 px and 400 px (TASK_QUEUE S7).
 
 ### 3.1 Information architecture
 
@@ -294,14 +305,26 @@ Color is never the only signal: every state has an icon and a word.
 
 Inside the existing topic viewer (no new page): a slim **SessionBar** above the document: topic name, elapsed
 time, "Side note" button, "End session". Side notes open a small editor in the AI panel's Notes view, tagged to
-the session and the current page. Ending a session shows a 3-field summary (duration, topics, notes) and "Practice
+the session and the current page.
+
+**Side notes (D8).** A side note is the **student's own writing**. It is separate from targeted notes (weakness
+notes) and from PDF highlights/annotations. Optional AI help ("Check my note") reads the note and its cited pages
+and returns suggestions: gaps, unclear points, a short explanation. Rules *[interpretation of D8]*:
+- AI never writes into the student's note. Its suggestions are stored as their own record (`side_note_ai`, linked
+  to the note, with provenance, §6.4) and shown beside it.
+- The student may copy a suggestion in by hand; the note stays theirs. The UI labels AI suggestions "AI · suggestion".
+- Without AI, side notes work fully; only "Check my note" is unavailable.
+
+Ending a session shows a 3-field summary (duration, topics, notes) and "Practice
 this topic now". A session left running is closed on app exit at its last activity time (no ghost hours).
 
 ### 3.9 Responsive and accessible
 - Quiz card max-width 720px, side gutter ≥ 16px, works at 400px wide; matching stacks into one column with "Connect
   to…" menus below 600px.
-- WCAG 2.1 AA contrast; no timed questions by default (an optional exam time limit shows remaining time and warns at
-  5 and 1 minutes, announced politely).
+- WCAG 2.1 AA contrast. Pre-tests, Quests and retention checks are untimed. The **final exam is timed** by default
+  (D10, §4.9): remaining time shown, warnings at 5 and 1 minutes, announced politely. Proposed (§9.1 Q4): the student
+  can extend the limit (×1.5, ×2) or turn it off before starting (WCAG 2.2.1); such an attempt is labelled in the
+  report.
 - Motion: card change = 150 ms fade/slide, disabled under `prefers-reduced-motion`.
 
 ---
@@ -313,8 +336,8 @@ this topic now". A session left running is closed on app exit at its last activi
 | Kind | Purpose | Item source | Feedback | Counts toward mastery | Reuse of items |
 |---|---|---|---|---|---|
 | `diagnostic` | Pre-test and re-diagnosis: what is already known | bank / template / AI | **After submit only**: per-topic results and per-question correctness + explanation | Yes, as **baseline** (stage `pre`) | Items used in a diagnostic are excluded from that journey's final exam |
-| `practice` | Learning by retrieval | prefers weak topics and past mistakes | **Immediately**, after each Check | Yes, weighted 0.5 (help visible, retries allowed) | Any; mistakes come back (spaced) |
-| `final` | Demonstrate understanding at the end of a cycle | bank / template / AI, **parallel items** | After submit only; open answers need final grades before the report is "final" | Yes, weight 1.0 | Never items seen in this journey's diagnostic |
+| `practice` (UI: **Quest**, D6) | Learning by retrieval | prefers weak topics and past mistakes | **Immediately**, after each Check | Yes, weighted 0.5 (help visible, retries allowed) | Any; mistakes come back (spaced) |
+| `final` | Demonstrate understanding at the end of a cycle; 50–100 items, timed, pass mark, retakes (§4.9) | bank / template / AI, **parallel items** | After submit only; open answers need final grades before the report is "final" | Yes, weight 1.0; every attempt kept | Never items seen in this journey's diagnostic; a retake prefers items not used in earlier attempts |
 | `retention` | Delayed retrieval (≥ 7 days after final) | recall / understanding items on topics the final rated Proficient+ | After submit | Yes, as the **retention** dimension | Items not seen in the last 7 days |
 
 ### 4.2 Question data structure [proposed] (`src/assessment-model.js`, pure, unit-tested)
@@ -416,6 +439,29 @@ topic gets at least one item; within a topic, spread across dimensions (diagnost
 higher item per topic so recognition-only evidence cannot dominate); exclude items already used per §4.1;
 practice weights weak topics ×2 and due mistakes first.
 
+### 4.9 Final exam rules (D10) [proposed formulas; defaults in a frozen, versioned `DEFAULT_EXAM_CONFIG`, D4-style]
+
+The owner set the ranges; the formulas below are Claude A's proposal for "depending on how hard and how many".
+
+- **Item count:** the student picks a number from **50 to 100** *[interpretation: "range 50–100" = item count]*.
+  If the bank has too few eligible items (approved, not used in this journey's diagnostic), the setup sheet says
+  how many are missing per topic and offers bank / template / AI (LS-023). See §9.1 Q3 for M-L1.
+- **Difficulty** of an exam = mean `difficulty` (1–3) of its items, `d̄`.
+- **Time limit** = Σ per-item base time × difficulty factor, rounded up to 5 minutes.
+  Base: choice 60 s, true/false 45 s (+90 s with justification), matching 30 s per pair, explain 180 s,
+  essay 60 s per 50 words of `maxWords`. Factor: difficulty 1 → 0.8, 2 → 1.0, 3 → 1.3.
+  Example: 50 single-choice items at difficulty 2 → 50 × 60 s × 1.0 = 50 min.
+  On time-out the saved answers are submitted.
+- **Pass mark** = 75% + 7.5% × (d̄ − 1), so d̄ = 1 → 75%, 2 → 82.5%, 3 → 90%; rounded to 0.5%.
+  Passed = exam score ÷ max ≥ pass mark. The pass mark and `d̄` are stored in the attempt's `config`.
+- **Retake:** allowed after a failed attempt once the student has **reviewed the whole study load** of every exam
+  topic below the pass mark (definition: §9.1 Q1). Each retake is a new `assessments` row with `attempt` + 1 and
+  `retake_of` pointing to the previous attempt. Nothing is overwritten.
+- **Comparison:** the report shows every attempt side by side: score, pass mark, time used, per-topic and
+  per-dimension change between attempts.
+- **Pass vs Mastered:** passing is an exam-level result. "Mastered" stays a per-topic level (§5.4) that also needs a
+  retention check. How the two relate: §9.1 Q2.
+
 ### 4.8 Where questions come from
 1. **Manual** (question bank editor): always available.
 2. **Template** (deterministic, from `learning-intel` analysis, no AI) [proposed]:
@@ -474,7 +520,13 @@ code**, so the analysis works offline and is reproducible.
 
 ### 5.4 Topic-level mastery calculation
 
-For each topic, over **graded, non-abandoned** answers (provisional AI grades with low confidence excluded):
+**Scope: one cycle (D11, soft reset).** A topic's mastery is computed from the answers of **its current journey
+(cycle)** only, so a new cycle starts the topic's stats at 0. Earlier cycles and every attempt stay stored and are
+shown as history and comparison (journey history, LS-022; attempt comparison, §4.9). Nothing is deleted.
+Assessments without a journey (e.g. a Quest started from the subject page) belong to the active journey of that
+subject when one exists; otherwise they appear only in history.
+
+For each topic, over **graded, non-abandoned** answers of that scope (provisional AI grades with low confidence excluded):
 
 1. **Item score** `s = score / max` (0…1).
 2. **Weight** `w = kindWeight × graderWeight × guessWeight × recency`
@@ -523,6 +575,14 @@ student's own judgment, how often "Not assessed" appears) before Phase 5 locks t
   estimate stays visible in the journey history as a historical note.
 - Study time shown = the old manual minutes (labelled "before tracking") + the sum of learning focus entries.
 
+### 5.6 Final learning evaluation (D9)
+
+Required before the final exam unlocks. A computed, read-only report for the current cycle (no new table), per
+journey topic: pre-test score and level; current level and dimension scores (§5.4) with evidence counts; Quest
+results (sets, accuracy, trend); mistakes by category (§5.2); study time and sessions (focus entries); targeted
+notes read and side notes written; due reviews. A subject-level summary row follows §5.4 rule 5 (no averaged
+percentage). It ends with "Ready for the final exam" items: topics still below Developing are flagged, not blocked.
+
 ---
 
 ## 6. Data and architecture (E)
@@ -569,11 +629,11 @@ erDiagram
 | `learning_journeys` | `subject_id` FK→subjects CASCADE · `title` · `stage` CHECK(the 16 stage keys) · `status` CHECK(active, completed, archived) · `cycle` INT · `parent_journey_id` FK→self SET NULL · `target_date` · `completed_at` |
 | `journey_topics` | PK(`journey_id`,`topic_id`) · FKs CASCADE |
 | `question_items` | `subject_id` FK CASCADE · `topic_id` FK→subject_topics SET NULL · `type` CHECK(5) · `dimension` CHECK(4) · `difficulty` · `points` · `prompt` · `payload` JSON · `explanation` · `source` JSON · `origin` CHECK · `provenance` JSON · `status` CHECK(active, retired) · `review` CHECK(approved, unreviewed, rejected) · `reviewed_at` |
-| `assessments` | `subject_id` FK CASCADE · `journey_id` FK SET NULL · `kind` CHECK(diagnostic, practice, final, retention) · `title` · `config` JSON (count, types, feedback mode, time limit, seed) · `status` CHECK(draft, in_progress, submitted, graded, abandoned) · `started_at` · `submitted_at` · `graded_at` |
+| `assessments` | `subject_id` FK CASCADE · `journey_id` FK SET NULL · `kind` CHECK(diagnostic, practice, final, retention) · `title` · `config` JSON (count, types, feedback mode, time limit, seed; for finals also pass mark, `d̄`, exam config version) · `status` CHECK(draft, in_progress, submitted, graded, abandoned) · `attempt` INT DEFAULT 1 · `retake_of` FK→self SET NULL (D10) · `started_at` · `submitted_at` · `graded_at` |
 | `assessment_items` | `assessment_id` FK CASCADE · `question_id` FK SET NULL · `position` · `topic_id` · `dimension` · `max_score` · `question_snapshot` JSON (immutable) · UNIQUE(`assessment_id`,`position`) |
 | `assessment_answers` | `item_id` FK CASCADE UNIQUE · `response` JSON · `confidence` · `dont_know` · `saved_at` · `score` REAL NULL · `grade_status` CHECK(pending, provisional, final) · `grader` CHECK(auto, ai, ai_accepted, self, manual) · `criteria` JSON · `feedback` JSON (incl. AI provenance and original verdicts) · `mistake_category` · `graded_at` · `attempt` INT (practice retries) |
 | `learning_sessions` | `subject_id` FK CASCADE · `journey_id` FK SET NULL · `topic_id` FK SET NULL · `kind` CHECK(main, supplementary, review) · `started_at` · `ended_at` · `focus_entry_id` FK→focus_entries SET NULL · `summary` |
-| `learning_materials` | `subject_id` FK CASCADE · `journey_id` FK SET NULL · `topic_id` FK SET NULL · `session_id` FK SET NULL · `kind` CHECK(targeted_note, side_note, supplementary) · `title` · `body_file` (Markdown under `learning-files/<account>/journeys/<journeyId>/`) · `source` JSON · `origin` · `provenance` JSON |
+| `learning_materials` | `subject_id` FK CASCADE · `journey_id` FK SET NULL · `topic_id` FK SET NULL · `session_id` FK SET NULL · `kind` CHECK(targeted_note, side_note, side_note_ai, supplementary) · `parent_material_id` FK→self CASCADE (an AI suggestion's side note, D8) · `title` · `body_file` (Markdown under `learning-files/<account>/journeys/<journeyId>/`) · `source` JSON · `origin` · `provenance` JSON |
 | `learning_schedule` | `event_id` FK→events CASCADE UNIQUE · `journey_id` FK CASCADE · `kind` CHECK(session, practice, retention, final) · `topic_ids` JSON |
 | `question_review` | PK(`user_id`,`question_id`) · `box` INT 1–5 · `due_on` · `last_result` |
 
@@ -606,6 +666,8 @@ assessment:submit {assessmentId}    assessment:abandon {assessmentId}
 assessment:grade {itemId, criteria} (self/manual)   assessment:acceptGrade {itemId}   assessment:regrade {itemId}
 assessment:results {assessmentId}   mastery:subject {subjectId}   mastery:journey {journeyId}
 study:start {subjectId, journeyId?, topicId?, kind}  study:end {sessionId}   study:sideNote {sessionId, text, page?}
+study:sideNoteHelp {materialId}     (D8; AI job, returns a side_note_ai record; never edits the note)
+journey:evaluation {journeyId}      (D9, §5.6)   assessment:retakeStatus {assessmentId}  (D10: what is left to review)
 materials:list {journeyId}   materials:targeted {journeyId, topicIds, useAi}   materials:read {materialId}
 schedule:create {journeyId, kind, startsAt, endsAt, topicIds}   (creates the event + link in one transaction)
 ```
@@ -666,9 +728,10 @@ before any learning table exists. Pure modules do not wait.
 | **1 · Engine core (pure)** | Question model, grading, mastery, insight as tested pure modules | LS-002, LS-003, LS-004 | `npm test` green, boundary tests |
 | **M-L1 · Walking skeleton** | One full manual cycle, no AI | LS-005 → LS-012 | E2E step: create journey → pre-test (choice/TF/matching/explain self-graded) → results → session → final → report |
 | **2 · Quiz polish + all types** | Essay, navigator, keyboard, a11y, resume | LS-013, LS-014 | a11y audit, rendered check at 400px |
-| **3 · Diagnosis + notes + AI** | Templates, targeted notes, AI generation and grading with provenance | LS-015 → LS-019 | works with Ollama off (E2E) and on (bench) |
+| **3 · Diagnosis + notes + AI** | Templates, targeted notes, AI generation and grading with provenance, side-note AI help | LS-015 → LS-019, LS-032 | works with Ollama off (E2E) and on (bench) |
 | **4 · Practice journey** | Leitner reviews, mistake analysis, supplementary loop, history | LS-020 → LS-022 | unit + E2E |
-| **5 · Final + mastery** | Parallel-item final, report, retention checks, next cycle, replace manual mastery | LS-023 → LS-025 | unit + E2E |
+| **5 · Final + mastery** | Final learning evaluation, parallel-item timed final with pass mark and retakes, report with attempt comparison, retention checks, optional next cycle, replace manual mastery | LS-033, LS-023 → LS-025 | unit + E2E |
+| **Later · Quest game layer** | XP, streaks, rewards on top of Quests (D6 c); owner design first | LS-031 | owner sign-off |
 | **6 · Integration** | Calendar, home, analytics, planner reviews | LS-026 → LS-028 | E2E |
 | **7 · Hardening** | Onboarding, empty states, performance with 1k questions, docs | LS-029, LS-030 | bench + review |
 
@@ -692,8 +755,34 @@ assignment) are defined in `coordination/TASK_QUEUE.md` and may not be bypassed.
 | D3 | AI questions usable at once in practice; human review before pre-tests and final exams | **APPROVED in principle** | §4.2 `review`, LS-002, LS-017, LS-023 |
 | D4 | §5.4 thresholds as initial defaults, configurable, validated through use | **APPROVED in principle** | §5.4, LS-003 |
 | D5 | Offline walking-skeleton cycle (M-L1) is the first milestone | **APPROVED in principle** | §8 |
-| — | ADR-004 (SQLite for learning data), ADR-005 (module boundaries, object IPC), ADR-008 (sessions = focus entries; calendar link table) | **Awaiting confirmation** | LS-002–LS-007, LS-012, LS-026 |
+| — | ADR-004 (SQLite for learning data), ADR-005 (module boundaries, object IPC), ADR-008 (sessions = focus entries; calendar link table) | **ACCEPTED** (owner, 2026-11-23) | LS-002–LS-007, LS-012, LS-026 |
+| D6 | **Quest** = graded targeted practice now (owner: "(a) for now"); a game layer later (owner: "(c) for something more adventure feeling") | **APPROVED** | §2.2 stage 9, §4.1, LS-013, LS-031 |
+| D7 | **Journey** = the whole cycle, done step by step with progress shown (owner: "make it step by step at the time and progress along the way") | **APPROVED** | §2.2, LS-008 |
+| D8 | **Side notes**: mostly the student's own writing; AI reviews them and helps build and understand them; separate from weakness notes and PDF highlights | **APPROVED** | §3.8, §6.2, LS-012, LS-032 |
+| D9 | **Final learning** is required and gives a full statistical evaluation | **APPROVED** | §2.2 stage 12, §5.6, LS-033 |
+| D10 | **Final exam**: 50–100 items, time limit from difficulty and item count, pass mark 75–90% by difficulty, retakes after reviewing the topic's whole study load, attempts compared | **APPROVED** (formulas in §4.9 are proposals) | §4.9, §6.2, LS-023, LS-024 |
+| D11 | **Next cycle** is optional; topics flexible; soft reset: the new cycle's stats start at 0, earlier cycles kept as history (owner confirmed the soft reset: "yes") | **APPROVED** | §2.2 stage 16, §5.4 scope, LS-006, LS-024 |
+| D12 | **UI stays like the current app** (owner: "could we keep the over all ui design for this similar to what we currently have?"): existing tokens, components, layouts and motion from `styles.css`/`learning.css`; no new visual language or design system; the game layer too | **APPROVED** | §3, TASK_QUEUE S7, every LS renderer task |
 | — | PF-019: make Analytics reachable | **Awaiting decision** | LS-028 |
+
+Owner's verbatim answers (2026-11-23, relayed by the desktop orchestrator session) are in `coordination/HANDOFF_LOG.md`
+HO-011 §3. Text marked *[interpretation]* in this spec is Claude A's or the orchestrator's reading, not the owner's
+words.
+
+### 9.1 Open follow-up questions (do not block PF-006 or LS-002 to LS-004)
+
+1. **Retake condition (D10):** what counts as "reviewed the entire study load of that topic"? (a) the app checks
+   it: every section of the topic's files opened in a review session after the failed attempt, plus its targeted
+   notes; (b) a review session per topic where the student ticks off each section. *Recommendation: (a), because it
+   gives the solid data the loop is meant to produce.*
+2. **Pass mark vs Mastered:** keep them separate (exam pass = 75–90% on the whole exam; a topic is "Mastered" at
+   ≥ 80% on its final items plus a retention check), or make "Mastered" use the exam's pass mark? *Recommendation:
+   keep separate.*
+3. **50-item minimum in the first milestone (M-L1, no AI, questions written by hand):** enforce it from the start,
+   or allow a smaller test final in M-L1 and enforce 50–100 from LS-023? *Recommendation: enforce from LS-023.*
+4. **Time limit accessibility:** may the student extend the limit (×1.5, ×2) or switch it off, with the attempt
+   labelled? *Recommendation: yes (WCAG 2.2.1).*
+5. **Name in the UI:** show "Quest" instead of "Practice" everywhere the student sees it? *Recommendation: yes.*
 
 ## 10. Risks
 - **AI question quality** with small local models: mitigated by schema validation, source-citation check,
