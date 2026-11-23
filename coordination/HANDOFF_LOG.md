@@ -155,7 +155,7 @@ Claude B must review the project instructions and prepare for implementation ass
 **Task ID:** PF-004 (approved by the project owner in chat, 2026-11-23)  
 **From:** Claude B  
 **To:** Claude A  
-**Status:** SUBMITTED, PARTIAL: both PDF-stage causes are found. The `:581` cause is fixed. The 3-consecutive-pass criterion is not met because of the other steps in section 8.
+**Status:** SUBMITTED — awaiting review. Both PDF-stage causes are found. `:581` is fixed in the test. `:582` is reproduced and handed to PF-007. The acceptance batch had 3 consecutive passes (section 7). Earlier intermittent failures in two other steps are disclosed in section 8.
 
 > Numbering: HO-002 and HO-003 are Claude A's uncommitted entries in the `perflow-manager` worktree. Claude B's
 > familiarization report was also written as "HO-002" (branch `claude/caveman-mode-ac59fd`, commit `e3412ce`);
@@ -202,6 +202,17 @@ Neither failure is slow but correct work. PDF analysis took 480 ms in a timed ru
   - No smoke step changed.
 - `test/learning-state-io.test.js` (new): the 2 reproducers above, marked `{ todo: 'PF-007 / ADR-003' }`. They run and report, but do not fail `npm test`. Remove `todo` when PF-007 lands.
 - No product code changed.
+- No smoke assertion, wait condition or timeout value changed. The only diff in `test/electron-smoke.js` is the startup precondition and the extra diagnostic text.
+
+**Environment and dependency setup (this worktree only)**
+- Ran `npm ci` once in this worktree. That is a clean install from `package-lock.json`, which deletes any existing `node_modules` first. It exited 0.
+- `package.json` and `package-lock.json` are unchanged (`git diff e9cc8ae -- package.json package-lock.json` is empty). No dependency was added or upgraded.
+- Every needed package was already declared:
+  - `electron` (devDependency `^38.3.0`, locked 38.8.6);
+  - `pdfjs-dist` (dependency `5.4.296`, locked 5.4.296);
+  - `@napi-rs/canvas` (not in `package.json`; locked 0.1.100 as an optional dependency of `pdfjs-dist`, `^0.1.80`).
+- `npm ls --all` reports no missing, extraneous or invalid packages. `require.resolve('electron')` resolves inside this worktree.
+- So the `:581` failure is a missing local install in the worktree, not an application defect. Any new worktree must run `npm ci` before `npm run test:electron`.
 
 #### 5. Modified Files
 
@@ -229,6 +240,10 @@ Every command was captured as `cmd > log 2>&1; echo EXIT=$?`.
 | `npm run test:electron` ×3 consecutive | after the change | EXIT=0, **EXIT=1**, EXIT=0. Run 2 failed at `:1031` (Home card drag, see section 8), not in the PDF stage |
 | `npm test` | after the change | EXIT=0: 128 tests, 126 pass, 0 fail, 2 todo |
 | `node --test test/learning-state-io.test.js` | after the change | 2 todo (both reproduce), 0 fail |
+| **Acceptance batch** `npm run test:electron`, run until 3 passes in a row (cap 6) | commit `3b8f738`, after `npm ci`, nothing else running | run1 01:29:28Z EXIT=0 (70 s), run2 01:30:31Z EXIT=0 (63 s), run3 01:31:29Z EXIT=0 (58 s): **3 consecutive passes in the first 3 runs** |
+| **Acceptance** `npm test` | same, run alone after the batch | 01:33:24Z EXIT=0: 128 tests, 126 pass, 0 fail, 0 cancelled, 2 todo |
+
+Logs are kept in this worktree under `pf004-evidence/`: `summary.log`, `smoke-run1.log`…`smoke-run3.log` and `npm-test.log`. Each smoke log ends with "Electron smoke test passed.". The folder is local and not committed, because `*.log` is git-ignored. Each run was captured as `cmd > log 2>&1; echo EXIT=$?`.
 
 #### 8. Outstanding Issues
 
@@ -238,7 +253,7 @@ Every command was captured as `cmd > log 2>&1; echo EXIT=$?`.
    - when the failed status can't be saved, the error still reaches the panel (for example from memory).
 
    Recommended priority: raise PF-007 to P0. Silent loss of saved notes is a data-integrity issue.
-2. **Acceptance criterion "3 consecutive passes" is NOT met.** The PDF stage passed in every run with `node_modules` present: 9 normal runs plus 1 under load. Two other steps depend on fixed waits and fail intermittently. Both are outside PF-004's scope ("don't change other smoke steps"), so they were not changed. Line numbers: `:581`/`:582`/`:609` are from before this commit (now `:592`/`:593`/`:620`); `:1031` is from after it.
+2. **Intermittent failures outside the PDF stage remain (a known risk, not fixed).** The acceptance batch had 3 consecutive passes. An earlier 3-run attempt went pass, fail, pass. The PDF stage passed in every run with `node_modules` present: 9 normal runs plus 1 under load. Two other steps depend on fixed waits and fail intermittently. Both are outside PF-004's scope ("don't change other smoke steps"), so they were not changed. Line numbers: `:581`/`:582`/`:609` are from before this commit (now `:592`/`:593`/`:620`); `:1031` is from after it.
    - `test/electron-smoke.js:1031` (Home: a held card drops into the empty side column). The injected script reads `document.querySelector('.t-lifted').getBoundingClientRect()` after fixed `requestAnimationFrame` and `setTimeout(260)` waits. In 1 of 11 normal runs the card was not lifted yet, so it threw `Cannot read properties of null (reading 'getBoundingClientRect')`. The step came in with `a54858c`. Not yet determined: whether the drag code needs more time than the test allows, or the lift is dropped sometimes. That needs the same root-cause pass.
    - `test/electron-smoke.js:609` (Learning side panel collapse). It uses `sleep(450)` before measuring a CSS transition and failed once under CPU load.
 
