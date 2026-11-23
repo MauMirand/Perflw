@@ -123,9 +123,9 @@ Objectives:
 | PF-004 | Fix the failing E2E smoke test | Claude B | INTEGRATED (`dfd1fbd`) |
 | PF-007 | Safe user-data file I/O (P0) | Claude B | INTEGRATED (`5664f56`, approved HO-010) |
 | PF-006 | Versioned migrations (gate G1) | Claude B | INTEGRATED (`350520c`, pushed); G1 open. Follow-up PF-021 queued (before first release) |
-| LS-005 | Migration 2: learning tables | Claude B (lane 3) | RELEASED 2026-11-23 (HO-018); session waits for the owner to start it |
+| LS-005 | Migration 2: learning tables | Claude B (lane 3) | ASSIGNED 2026-11-23 (HO-018, branch `claude/nifty-haslett-6c96fe`); then REVIEW |
 | PF-020 | Smoke-test flakes (gate G2) | Claude B (lane 1) | ASSIGNED 2026-11-23 |
-| LS-002 | Assessment model (pure) | Claude B (lane 2) | ASSIGNED 2026-11-23; up to 3 parallel Claude B sessions (owner) |
+| LS-002 | Assessment model (pure) | Claude B (lane 2) | APPROVED (HO-019, `1ab06db`); awaiting merge by the orchestrator. LS-003 (HO-016) and LS-004 (HO-017) may start after it |
 | LS-001 | Learning System spec | Claude A | DONE: D1–D5 approved; ADR-004/005/008 ACCEPTED (2026-11-23); owner decisions D6–D17 recorded (HO-011) |
 
 Update this section whenever a task becomes active.

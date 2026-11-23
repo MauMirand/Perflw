@@ -175,7 +175,7 @@ Claude B (new session) · **Submission:** HO-014 · **Created By:** Claude A
 
 ### TASK: LS-005 — Migration 2: Learning System tables
 
-**Status:** RELEASED for lane 3 (2026-11-23; G1 open: PF-006 integrated). Session not started yet: waits for the owner to start it · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
+**Status:** **ASSIGNED** (lane 3, 2026-11-23; G1 open: PF-006 integrated). Session started on `claude/nifty-haslett-6c96fe`; then REVIEW · **Priority:** P1 · **Assigned To:** Claude B (lane 3) ·
 **Submission:** HO-018 · **Created By:** Claude A
 
 #### Objective
@@ -717,7 +717,7 @@ Summary, files, test output with exit code, commit hash, any spec ambiguities fo
 
 #### Review
 **Reviewed By:**  
-**Decision:** Pending
+**Decision:** **APPROVED** (HO-019, 2026-11-23), `1ab06db` on `claude/ls-002-assessment-model-9f8216` (code `613ee4d`). `npm test` 167/167 (EXIT=0).
 
 ### TASK: PF-004 — Fix the failing Electron E2E smoke test
 
