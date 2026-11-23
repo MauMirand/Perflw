@@ -456,7 +456,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Smoke step: create a journey on the fixture subject and see stage "Pre-test" (S5).
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
-**LS-009 · Question bank (`src/learning-bank.js`)** — P1 · Depends: LS-007 (APPROVED), G2. Not in parallel with LS-008.
+**LS-009 · Question bank (`src/learning-bank.js`)** — P1 · Depends: LS-007, LS-008 (INTEGRATED), G2. **Brief complete**; submission HO-024. Full brief: "TASK: LS-009". Not in parallel with LS-008.
 - [ ] List per subject filtered by topic/type/review state; editor for choice, true/false, matching, explain.
 - [ ] Field errors come from `validateQuestion` and are shown next to the field.
 - [ ] Retire instead of delete when a question has been used in an assessment.
@@ -753,7 +753,7 @@ factory that takes the open `DatabaseSync`, exposed by `createWorkspace` (`works
 - **Questions.** `saveQuestion({ question })` assigns an id when absent, runs `validateQuestion`, rejects with the
   validator's plain-language errors joined with a newline (one `field: problem.` per line, text unchanged), checks `subjectId`/`topicId` ownership (topic must belong to that subject),
   enforces payload ≤ 32 KB (spec §6.2) and source ≤ 8 KB (cap chosen here), inserts or updates; an update never changes an existing
-  snapshot. `getQuestion`, `listQuestions({ subjectId, topicId?, status?, review? })`, `retireQuestion({ questionId })`
+  snapshot. `getQuestion`, `listQuestions({ subjectId, topicId?, status?, review? })` (each row carries `used`: true when an `assessment_items` row references it), `retireQuestion({ questionId })`
   (status `retired`), `deleteQuestion({ questionId })` (only when no `assessment_items` row references it, else the error "This question was used in an assessment. Retire it instead."), `setReview({ questionId, review })` (sets `reviewed_at`; `approved`/`rejected` only).
 - **Assessments.** `createAssessment({ subjectId, journeyId?, kind, title?, config, questionIds })`: one transaction
   creates the `draft` assessment and one `assessment_items` row per id, in the given order, each with
@@ -865,7 +865,7 @@ a plain-language message naming the field.
 | `journey:create` | `{ subjectId, title?, topicIds?, targetDate?, parentId? }` | `createJourney` |
 | `journey:get` | `{ journeyId }` | `getJourney` |
 | `journey:update` | `{ journeyId, stage?, title?, topicIds?, targetDate?, status? }` | `updateJourney` |
-| `questions:list` | `{ subjectId, topicId?, status?, review? }` | `listQuestions` |
+| `questions:list` | `{ subjectId, topicId?, status?, review? }` | `listQuestions` (rows include `used`) |
 | `questions:save` | `{ question }` | `saveQuestion`; validator errors returned as one message, one `field: problem.` per line, text unchanged |
 | `questions:retire` | `{ questionId }` | `retireQuestion` |
 | `questions:delete` | `{ questionId }` | `deleteQuestion` (only when no assessment item uses it; otherwise "This question was used in an assessment. Retire it instead.") |
@@ -1023,6 +1023,86 @@ UI. Do not remove the "Mastery Statistics" skeleton. Overlap check at release: n
 #### Deliverables
 Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
 HANDOFF_LOG entry **HO-023**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-009 — Question bank (`src/learning-bank.js`)
+
+**Status:** READY (brief complete 2026-11-23). **Release when** LS-008 is INTEGRATED (renderer chain is sequential; both
+edit `index.html`, `learning.js`, `learning.css`, `electron-smoke.js`). Submission **HO-024**  
+**Priority:** P1  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Let the student write, edit, retire and delete their own questions per subject, with field-level validation errors, so the
+pre-test setup from LS-008 has questions to draw from without any AI.
+
+#### Context
+The bank is the `question_items` table through `window.learningData.questions*` (LS-007). Questions are validated by
+`assessment-model.validateQuestion` in main; the renderer shows the errors it returns (one `field: problem.` per line,
+text unchanged). `assessment-model.js` is dual-load (`window.PerflwAssessmentModel`) and may be loaded in the renderer for
+**form hints only** (counts, limits, enums via `LIMITS`/`TYPES`); the main-process validator stays the only gate. Manual
+questions are `origin:'manual'`, `review:'approved'` (D3). Spec §3.1 (bank placement), §3.2 (QuestionList, QuestionEditor),
+§3.4, §3.6, §4.2. Modules attach to `window` and are started from `learning.js` (`H` from LS-008, which includes `esc` and
+`announce`).
+
+#### Requirements
+- New `src/learning-bank.js` (IIFE → `window.PerflwBank`; `module.exports` for the pure parts). Pure, unit-tested helpers:
+  `emptyQuestion(type, { subjectId, topicId })`; `formToQuestion(type, form)` (form state → the question object sent to
+  `questionsSave`); `questionToForm(question)`; `mapErrors(message)` → `{ [fieldPath]: text }` plus `general[]` for lines
+  without a known field (a line is `"<field path>: <problem>."`); `listFilter(questions, { topicId, type, review, status })`.
+- **List** per subject: filter by topic, type, status (active/retired) and review state; each row shows type chip, topic,
+  prompt excerpt, dimension, difficulty, review chip ("Approved" / "AI · not reviewed" / "Rejected" — words, not only
+  colour) and used-in-assessment marker; empty state: "No questions yet. Write your first question." with an Add button.
+- **Editor** (sheet or inline panel, the existing pattern from `learning.js` dialogs) for **choice** (single/multiple,
+  2–8 options, mark correct), **true/false** (statement, answer, optional justification), **matching** (2–10 pairs, optional
+  distractors on the right) and **explain** (prompt, rubric criteria with points, optional model answer). Common fields:
+  topic, dimension, difficulty, explanation, optional source reference. Essay is not offered in M-L1 (the model supports it).
+- **Field errors:** after `questionsSave` fails, show each message next to its field (`aria-describedby`, `role="alert"`
+  for the first one), focus the first invalid field, keep every entered value. Do not re-implement validation rules.
+- **Retire or delete:** a question used in an assessment can only be retired; an unused one can be deleted
+  (`questionsDelete`, with an inline confirm row, not `confirm()`); retired questions are hidden by default (filter shows
+  them) and can be restored by editing status back to active only through a "Restore" action (re-save with
+  `status:'active'`).
+- Mount: a **Question bank** block on the subject page (spec §3.1), `PerflwBank.mount(container, { subject })`; the LS-008
+  "bank short" message links to it.
+- Accessibility (S5): editor is a labelled form; option and pair rows are reachable and removable by keyboard; correct-answer
+  markers have text, not only colour; focus returns to the trigger on close; works at 400 px (matching editor stacks).
+
+#### Relevant Files
+New: `src/learning-bank.js`, `test/learning-bank.test.js`. Edited: `src/learning.js` (mount of the Question bank block only),
+`src/index.html` (script tags: `assessment-model.js` if not yet loaded, `learning-bank.js`), `src/learning.css` (named rules),
+`test/electron-smoke.js` (one step). Read only: `src/assessment-model.js`, `src/learning-journey.js` (module pattern, `H`).
+
+#### Dependencies
+LS-007 (INTEGRATED), LS-008 (INTEGRATED, sequential chain), PF-020 (G2).
+
+#### Restrictions
+No main-process change; no new IPC channel (if a channel is missing, report it). No AI, templates or draft review UI
+(LS-015, LS-017). No new dependency, token or visual language. Overlap check at release: nothing else edits `index.html`,
+`learning.js`, `learning.css` or `electron-smoke.js` while LS-009 runs.
+
+#### Acceptance Criteria
+- [ ] Unit tests: `formToQuestion`/`questionToForm` round-trip for the four types; `mapErrors` with the exact message format
+      from the validator (use real `validateQuestion` output for at least one invalid question per type); `listFilter`.
+- [ ] **Smoke step (S5):** create one question of each of the four types on the fixture subject, with one deliberately invalid
+      save first (error shown next to its field, values kept) → the list shows four rows → retire one → delete an unused
+      one → the used-in-assessment case is covered by a unit test of the delete/retire decision (the row exposes the marker
+      from `assessmentList`/the store). `npm run test:electron` exit 0.
+- [ ] Field errors are the validator's text, unchanged; no validation rule duplicated in the renderer.
+- [ ] A question created here appears as available to the LS-008 setup sheet (`bankMessage` counts it) (smoke assertion).
+- [ ] **S7 UI parity (D12):** reuses `styles.css`/`learning.css` forms, chips, buttons, sheet pattern; new CSS rules listed in
+      HO-024; screenshots at 1280 px and 400 px of list and editor beside the baseline (`docs/ui-baseline/` `03-*`, `04-*`).
+- [ ] Keyboard-only: add a choice question and fix a validation error without a mouse.
+- [ ] S1, S2, S3 (≤ ~600 lines; split `learning-bank-editor.js` if needed and say so), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, test output with exit codes, commit hash, ambiguities (report, do not decide).
+HANDOFF_LOG entry **HO-024**.
 
 #### Review
 **Reviewed By:**  
