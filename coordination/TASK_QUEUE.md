@@ -422,7 +422,7 @@ block LS-002.
       outcome as expected.
 - [ ] Results include `configVersion`.
 
-**LS-004 · `src/learning-insight.js`** — P1 · Depends: LS-002 (APPROVED). Submission HO-017. Runs **in parallel
+**LS-004 · `src/learning-insight.js`** — P1 · Depends: LS-002 (INTEGRATED). **APPROVED** (HO-031, `0f122d8` on `feature/LS-004-learning-insight`, code `eb49dbf`, `npm test` 207/207). Submission HO-017. Runs **in parallel
 with LS-003** (the earlier "not alongside" was the one-task rule; the files do not overlap).
 - Brief: pure module, same pattern; new files `src/learning-insight.js`, `test/learning-insight.test.js` only;
   reads spec §5.2, §5.3 and §4.3 categories. It must not import `mastery-model.js` (LS-003 runs at the same time);
@@ -542,6 +542,7 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] Weak topics ranked on the results page; "Generate targeted notes" writes one Markdown material per weak topic
       (atomic write) and opens it in the viewer's Notes view.
 - [ ] Works with no provider configured (smoke step with AI disabled).
+- [ ] `categorize` returns `partial` for a multiple-choice answer with 0 < score < max (HO-031 §4.3); test added.
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **LS-017 · Question Writer agent and generation job** — P2 · Depends: LS-015 (APPROVED), ADR-007 ✔ (ACCEPTED 2026-11-23).

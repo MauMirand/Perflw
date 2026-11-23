@@ -519,7 +519,7 @@ code**, so the analysis works offline and is reproducible.
   ("You answered… The source says…"). Stored as Markdown (`learning_materials`).
   **AI enhancement** (optional): an explanation section written by the Subject Assistant constrained to those
   excerpts (same grounding rule as Ask), labelled with its model.
-- **Practice recommendation**: weak topics first; mistakes resurface after 1, 3 and 7 days (simple Leitner boxes
+- **Practice recommendation**: weak topics first; mistakes resurface after 1, 3, 7, 14 and 30 days (five Leitner boxes
   per question: correct moves up a box, wrong resets to box 1). No SM-2 or ML; easy to explain and test.
 
 ### 5.4 Topic-level mastery calculation
