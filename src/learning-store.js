@@ -484,6 +484,32 @@ function createLearningStore(db) {
     if (a.kind != null) { sql += ' AND kind=?'; params.push(oneOf(a.kind, MATERIAL_KINDS, 'Material kind')); }
     return all(`${sql} ORDER BY created_at, id`, ...params).map(materialOut);
   }
+  // ───────── review queue (Leitner boxes, spec §5.3): one row per account and question
+  function recordReview(userId, input) {
+    const a = args(input);
+    const question = owned('question_items', 'Question', userId, a.questionId);
+    if (!Number.isInteger(a.box) || a.box < 1 || a.box > 5) fail('Box must be a whole number from 1 to 5.');
+    const dueOn = cleanDate(a.dueOn, 'due date');
+    if (!dueOn) fail('Enter a valid due date.');
+    const stamp = now();
+    run(`INSERT INTO question_review (user_id,question_id,box,due_on,last_result,created_at,updated_at) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(user_id,question_id) DO UPDATE SET box=excluded.box,due_on=excluded.due_on,last_result=excluded.last_result,updated_at=excluded.updated_at`,
+    userId, question.id, a.box, dueOn.slice(0, 10), a.lastResult === 'correct' ? 'correct' : 'wrong', stamp, stamp);
+    return reviewOut(one('SELECT * FROM question_review WHERE user_id=? AND question_id=?', userId, question.id));
+  }
+  const reviewOut = row => ({ questionId: row.question_id, box: row.box, dueOn: row.due_on, lastResult: row.last_result });
+  function getReview(userId, input) {
+    const row = one('SELECT * FROM question_review WHERE user_id=? AND question_id=?', userId, owned('question_items', 'Question', userId, args(input).questionId).id);
+    return row ? reviewOut(row) : null;
+  }
+  /* Active questions of a subject whose review is due on or before `today` (YYYY-MM-DD), oldest first. */
+  function dueReviews(userId, input) {
+    const a = args(input); const subject = subjectOf(userId, a.subjectId);
+    const day = cleanDate(a.today, 'date');
+    if (!day) fail('Enter a valid date.');
+    return all(`SELECT r.* FROM question_review r JOIN question_items q ON q.id=r.question_id
+      WHERE r.user_id=? AND q.subject_id=? AND q.status='active' AND r.due_on<=? ORDER BY r.due_on, r.question_id`, userId, subject.id, day.slice(0, 10)).map(reviewOut);
+  }
   /* System use only (quit and crash recovery in main.js): every open session of every account. Not an IPC channel. */
   function listOpenSessions() {
     return all('SELECT id, user_id, started_at, updated_at, subject_id FROM learning_sessions WHERE ended_at IS NULL')
@@ -582,6 +608,7 @@ function createLearningStore(db) {
     saveAnswer, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
+    recordReview, getReview, dueReviews,
     journeyEvidence,
   };
 }

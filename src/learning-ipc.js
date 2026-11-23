@@ -12,6 +12,11 @@ const { randomBytes } = require('node:crypto');
 const model = require('./assessment-model');
 const mastery = require('./mastery-model');
 const exam = require('./exam-model');
+const insight = require('./learning-insight');
+const fs = require('node:fs');
+const path = require('node:path');
+const { randomUUID } = require('node:crypto');
+const { writeFileAtomic } = require('./safe-file');
 
 const fail = message => { throw new Error(message); };
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -55,7 +60,7 @@ const totals = assessment => assessment.items.reduce((t, i) => ({
   pending: t.pending + (i.answer && i.answer.gradeStatus === 'pending' ? 1 : 0),
 }), { score: 0, max: 0, pending: 0 });
 
-function registerLearningIpc({ handle, requireUser, workspace, now = () => Date.now() }) {
+function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, now = () => Date.now() }) {
   const store = () => workspace.learningStore();
   const on = (channel, keys, work) => handle(channel, arg => {
     const user = requireUser();
@@ -111,7 +116,14 @@ function registerLearningIpc({ handle, requireUser, workspace, now = () => Date.
     const exclude = kind === 'final' ? used('diagnostic') : [];
     const seed = typeof c.seed === 'string' && c.seed ? c.seed.slice(0, 60) : randomBytes(8).toString('hex');
     const pool = s.listQuestions(u, { subjectId: a.subjectId, status: 'active' });
-    const base = { questions: pool, topics, types: c.types, dimensions: c.dimensions, seed, kind };
+    // Practice (spec §4.7): mistakes that are due come first, weak topics count double, and a mistake list can be practised exactly.
+    let questions = pool; let due; let weakTopics;
+    if (Array.isArray(c.only) && c.only.length) questions = pool.filter(q => c.only.includes(q.id));
+    if (kind === 'practice') {
+      due = s.dueReviews(u, { subjectId: a.subjectId, today: today() }).map(r => r.questionId);
+      if (a.journeyId != null) weakTopics = topicLevels(u, s.getJourney(u, { journeyId: a.journeyId })).filter(t => insight.WEAK_LEVELS.includes(t.level)).map(t => t.topicId);
+    }
+    const base = { questions, topics, types: c.types, dimensions: c.dimensions, seed, kind, due, weakTopics };
     const fresh = kind === 'final' && a.retakeOf != null ? exclude.concat(used('final')) : exclude;
     const available = model.selectItems({ ...base, exclude }).length;
     if (!available) fail('No questions are available yet. Add questions in the Question bank.');
@@ -157,12 +169,19 @@ function registerLearningIpc({ handle, requireUser, workspace, now = () => Date.
     if (owner.status === 'in_progress' && enforceDeadline(u, owner) !== owner) fail('Time is up. Your saved answers were submitted.');
     return { savedAt: store().saveAnswer(u, a).savedAt };
   });
-  on('assessment:submit', ['assessmentId'], (u, a) => store().submitAssessment(u, a));
+  on('assessment:submit', ['assessmentId'], (u, a) => {
+    const submitted = store().submitAssessment(u, a);
+    if (submitted.status === 'graded') updateReviews(u, submitted);
+    return submitted;
+  });
   on('assessment:abandon', ['assessmentId'], (u, a) => present(store().abandonAssessment(u, a)));
   on('assessment:grade', ['itemId', 'verdicts', 'grader'], (u, a) => {
     const grader = a.grader == null ? 'self' : a.grader;
     if (!['self', 'manual'].includes(grader)) fail('Grader must be self or manual.');
-    return store().gradeOpenAnswer(u, { itemId: a.itemId, verdicts: a.verdicts, grader });
+    const graded = store().gradeOpenAnswer(u, { itemId: a.itemId, verdicts: a.verdicts, grader });
+    const owner = store().assessmentOfItem(u, { itemId: a.itemId });
+    if (owner.status === 'graded') updateReviews(u, store().getAssessment(u, { assessmentId: owner.id })); // the last written answer was graded
+    return graded;
   });
   /* Practice feedback (spec §4.5): grade one saved answer now and reveal its key. Nothing is stored here, and the key of
      the other questions stays hidden. */
@@ -210,6 +229,112 @@ function registerLearningIpc({ handle, requireUser, workspace, now = () => Date.
       });
   });
 
+  // ───────── review queue (Leitner): practice results move questions between boxes; mistakes anywhere enter box 1
+  const today = () => new Date(now()).toISOString().slice(0, 10);
+  function updateReviews(u, assessment) {
+    const s = store();
+    for (const item of assessment.items) {
+      const ans = item.answer; if (!item.questionId || !ans || ans.gradeStatus !== 'final' || ans.score == null) continue;
+      const correct = ans.score >= item.maxScore;
+      if (assessment.kind !== 'practice' && correct) continue; // only practice promotes; a mistake anywhere is queued
+      try {
+        const before = s.getReview(u, { questionId: item.questionId });
+        const next = insight.nextReview(before ? before.box : 1, correct, today());
+        s.recordReview(u, { questionId: item.questionId, box: next.box, dueOn: next.dueOn, lastResult: correct ? 'correct' : 'wrong' });
+      } catch { /* a deleted question has no review row */ }
+    }
+  }
+  on('review:due', ['subjectId'], (u, a) => { const ids = store().dueReviews(u, { subjectId: a.subjectId, today: today() }); return { count: ids.length, items: ids }; });
+
+  // ───────── analysis of a submitted assessment: mistake categories, weak topics (spec §5.2, §5.3)
+  const answerLine = (q, r) => {
+    const p = q.payload || {}; r = r || {};
+    if (q.type === 'choice') return (r.choice || []).map(id => (p.options.find(o => o.id === id) || {}).text).filter(Boolean).join(', ');
+    if (q.type === 'truefalse') return typeof r.value === 'boolean' ? (r.value ? 'True' : 'False') : '';
+    if (q.type === 'matching') return (r.pairs || []).map(([l, x]) => `${(p.left.find(i => i.id === l) || {}).text} → ${(p.right.find(i => i.id === x) || {}).text}`).join('; ');
+    return (r.text || '').trim();
+  };
+  const correctLine = q => {
+    const p = q.payload || {};
+    if (q.type === 'choice') return (p.correct || []).map(id => (p.options.find(o => o.id === id) || {}).text).join(', ');
+    if (q.type === 'truefalse') return p.correct ? 'True' : 'False';
+    if (q.type === 'matching') return (p.pairs || []).map(([l, x]) => `${(p.left.find(i => i.id === l) || {}).text} → ${(p.right.find(i => i.id === x) || {}).text}`).join('; ');
+    return p.modelAnswer || '';
+  };
+  function analyze(u, assessment) {
+    const entries = assessment.items.map(i => {
+      const ans = i.answer || {};
+      const response = { ...(ans.response || {}), confidence: ans.confidence || (ans.response || {}).confidence, dontKnow: ans.dontKnow || (ans.response || {}).dontKnow };
+      return { item: i, a: { question: i.snapshot, response, result: { score: ans.score == null ? 0 : ans.score, max: i.maxScore, status: ans.gradeStatus === 'pending' ? 'pending' : 'graded', category: ans.mistakeCategory || undefined }, topicId: i.topicId } };
+    });
+    const answers = entries.map(e => e.a); const siblings = answers.map(a => a.question);
+    const items = entries.map(({ item, a }) => ({
+      itemId: item.id, questionId: item.questionId, topicId: item.topicId, prompt: item.snapshot.prompt, type: item.snapshot.type, dimension: item.dimension,
+      category: insight.categorize(a, { kind: assessment.kind, answers, siblings }), score: a.result.score, max: a.result.max, pending: a.result.status === 'pending',
+    }));
+    const levels = assessment.journeyId ? new Map(topicLevels(u, store().getJourney(u, { journeyId: assessment.journeyId })).map(t => [String(t.topicId), t])) : new Map();
+    const titles = topicTitles(u, assessment.subjectId);
+    const topicIds = [...new Set(items.map(i => String(i.topicId)))];
+    const weak = insight.rankWeakTopics({ topics: topicIds.map((id, position) => ({ id, position, level: (levels.get(id) || {}).level })), answers: items.map(i => ({ topicId: String(i.topicId), category: i.category, pending: i.pending })) })
+      .map(w => ({ topicId: w.topicId, title: titles.get(String(w.topicId)) || '', score: w.score, items: w.items, level: w.level, reasons: w.reasons }));
+    const byCategory = {};
+    for (const i of items) if (i.category && i.category !== 'guess') byCategory[i.category] = (byCategory[i.category] || 0) + 1;
+    return {
+      assessmentId: assessment.id, kind: assessment.kind, items: items.map(i => ({ ...i, label: insight.CATEGORY_LABELS[i.category] || '', topicTitle: titles.get(String(i.topicId)) || '' })),
+      byCategory, labels: insight.CATEGORY_LABELS, weak,
+      topics: topicIds.map(id => ({ topicId: id, title: titles.get(id) || '', level: (levels.get(id) || {}).level || 'not_assessed', items: items.filter(i => String(i.topicId) === id).length, mistakes: items.filter(i => String(i.topicId) === id && i.category && i.category !== 'guess').length })),
+    };
+  }
+  const finished = (u, assessmentId) => {
+    const assessment = store().getAssessment(u, { assessmentId });
+    if (!['submitted', 'graded'].includes(assessment.status)) fail('Submit the assessment to see its analysis.');
+    return assessment;
+  };
+  on('assessment:analysis', ['assessmentId'], (u, a) => analyze(u, finished(u, a.assessmentId)));
+
+  // ───────── targeted notes (spec §5.3, deterministic, no AI): one Markdown file per weak topic
+  const folderFor = (u, journeyId) => path.join(dataDir, 'learning-files', String(u), 'journeys', String(journeyId));
+  on('notes:targeted', ['journeyId', 'assessmentId', 'topicIds'], (u, a) => {
+    if (!dataDir) fail('Notes cannot be saved here.');
+    const s = store(); const journey = s.getJourney(u, { journeyId: a.journeyId });
+    let assessment;
+    if (a.assessmentId) assessment = finished(u, a.assessmentId);
+    else {
+      const list = s.listAssessments(u, { subjectId: journey.subjectId, journeyId: journey.id }).filter(x => ['submitted', 'graded'].includes(x.status));
+      if (!list.length) fail('Take a pre-test first; the notes are built from your mistakes.');
+      assessment = s.getAssessment(u, { assessmentId: list[list.length - 1].id });
+    }
+    const analysis = analyze(u, assessment);
+    const wanted = Array.isArray(a.topicIds) && a.topicIds.length ? new Set(a.topicIds.map(String)) : null;
+    const weak = analysis.weak.filter(w => !wanted || wanted.has(String(w.topicId)));
+    if (!weak.length) fail('No weak topics: nothing to write notes about.');
+    fs.mkdirSync(folderFor(u, journey.id), { recursive: true, mode: 0o700 });
+    const made = [];
+    for (const w of weak) {
+      const missed = assessment.items.filter(i => String(i.topicId) === String(w.topicId)).map(i => ({ i, row: analysis.items.find(x => x.itemId === i.id) }))
+        .filter(({ row }) => row.category && row.category !== 'guess').map(({ i, row }) => ({
+          prompt: i.snapshot.prompt, answer: answerLine(i.snapshot, i.answer && i.answer.response), correctAnswer: correctLine(i.snapshot), category: row.category,
+          explanation: i.snapshot.explanation, source: (i.snapshot.source || []).filter(x => x && x.quote),
+        }));
+      const markdown = insight.targetedNote({ topic: { title: w.title || 'Topic' }, analysisSection: null, missed });
+      const bodyFile = `${randomUUID()}.md`; const file = path.join(folderFor(u, journey.id), bodyFile);
+      writeFileAtomic(file, markdown, { mode: 0o600 });
+      try {
+        const material = s.addMaterial(u, { subjectId: journey.subjectId, journeyId: journey.id, topicId: w.topicId, kind: 'targeted_note', title: `Targeted note: ${w.title || 'Topic'}`.slice(0, 180), bodyFile, origin: 'manual' });
+        made.push({ ...material, text: markdown });
+      } catch (error) { try { fs.unlinkSync(file); } catch { /* nothing to remove */ } throw error; }
+    }
+    return made;
+  });
+  on('notes:list', ['journeyId', 'kind'], (u, a) => {
+    const s = store(); const journey = s.getJourney(u, { journeyId: a.journeyId });
+    return s.listMaterials(u, { journeyId: journey.id, kind: a.kind }).map(m => {
+      let text = '';
+      try { text = fs.readFileSync(path.join(folderFor(u, journey.id), m.bodyFile), 'utf8'); } catch { /* missing file reads as empty */ }
+      return { ...m, text };
+    });
+  });
+
   // ───────── mastery (one cycle only, D11)
   const evidenceItems = (rows, topicId, onlyKinds) => rows
     .filter(r => String(r.topicId) === String(topicId) && (!onlyKinds || onlyKinds.includes(r.kind)))
@@ -220,7 +345,7 @@ function registerLearningIpc({ handle, requireUser, workspace, now = () => Date.
     const latest = rows.filter(r => r.kind === 'final').reduce((m, r) => Math.max(m, r.attempt || 1), 0);
     return rows.filter(r => !(r.kind === 'final' && (r.attempt || 1) !== latest));
   };
-  function topicLevels(u, journey) {
+  function topicLevels(u, journey) { // (hoisted: also used when choosing practice questions)
     const rows = latestFinalOnly(store().journeyEvidence(u, { journeyId: journey.id }));
     const titles = topicTitles(u, journey.subjectId);
     return journey.topicIds.map(topicId => {

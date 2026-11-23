@@ -4,6 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { WORKSPACE_MIGRATIONS } = require('../src/workspace');
@@ -28,6 +29,7 @@ function setup() {
   const store = createLearningStore(db);
   const workspace = { learningStore: () => store, listTopics: (userId, subjectId) => ({
     rows: db.prepare('SELECT id, title FROM subject_topics WHERE user_id=? AND subject_id=?').all(userId, subjectId) }) };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-ipc-'));
   const handlers = new Map();
   const clock = { now: Date.now() }; // the store stamps real time, so the fake clock starts there
   let user = { id: 'u' };
@@ -35,11 +37,11 @@ function setup() {
   registerLearningIpc({
     handle: (channel, action) => handlers.set(channel, action),
     requireUser: () => { userChecks += 1; if (!user) throw new Error('Your session has expired. Log in again.'); return user; },
-    workspace, now: () => clock.now,
+    workspace, dataDir: dir, now: () => clock.now,
   });
   return {
     call: (channel, arg) => handlers.get(channel)(arg),
-    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock,
+    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock, dir,
   };
 }
 
@@ -77,12 +79,12 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'assessment:abandon', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results',
+    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
-    'mastery:journey', 'mastery:report', 'mastery:subject', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save',
+    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'review:due',
   ]);
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam):[A-Za-z]+)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review):[A-Za-z]+)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -323,4 +325,79 @@ test('mastery:report compares the pre-test with the whole cycle per topic', () =
   assert.ok(a.pre.items >= 1 && a.post.items >= a.pre.items, 'post includes the pre-test answers plus the final');
   assert.deepEqual(Object.keys(a.improvement).sort(), ['application', 'recall', 'recognition', 'understanding']);
   assert.equal(report.provisional, false);
+});
+
+// ───────── diagnosis, targeted notes, review queue (spec §5.2, §5.3)
+function runDiagnostic(t, journey, answer) {
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'diagnostic', config: { count: 20 } }).assessment;
+  t.call('assessment:start', { assessmentId: made.id });
+  made.items.forEach((item, i) => t.call('assessment:saveAnswer', { itemId: item.id, response: answer(item, i) }));
+  t.call('assessment:submit', { assessmentId: made.id });
+  gradeOpen(t, made.id, { c1: 'missing', c2: 'missing' });
+  return made;
+}
+const wrongChoice = (item, i) => (item.question.type === 'choice' ? { choice: ['a'], confidence: 3 } : item.question.type === 'truefalse' ? { value: false } : item.question.type === 'explain' ? { text: 'unsure' } : { dontKnow: true });
+
+test('analysis names mistake categories, groups them by topic and ranks the weak topics', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const made = runDiagnostic(t, journey, wrongChoice);
+  const analysis = t.call('assessment:analysis', { assessmentId: made.id });
+  assert.ok(analysis.byCategory.misconception >= 1, 'confident and wrong is a misconception');
+  assert.ok(analysis.byCategory.not_known >= 1, 'a dont-know is not_known');
+  assert.ok(analysis.weak.length >= 1 && analysis.weak[0].title.startsWith('Topic '));
+  assert.ok(analysis.weak.every((w, i, all) => i === 0 || all[i - 1].score >= w.score), 'ranked, highest score first');
+  assert.ok(analysis.items.every(i => i.label === '' || typeof i.label === 'string'));
+  assert.ok(analysis.topics.every(x => typeof x.mistakes === 'number'));
+  assert.throws(() => t.call('assessment:analysis', { assessmentId: t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { count: 2 } }).assessment.id }), /Submit the assessment/);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('assessment:analysis', { assessmentId: made.id }), /not found/i);
+});
+
+test('targeted notes: one Markdown file per weak topic, from the student\'s own mistakes, no AI', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  assert.throws(() => t.call('notes:targeted', { journeyId: journey.id }), /Take a pre-test first/);
+  runDiagnostic(t, journey, wrongChoice);
+  const notes = t.call('notes:targeted', { journeyId: journey.id });
+  assert.ok(notes.length >= 1 && notes.every(n => n.kind === 'targeted_note' && n.text.startsWith('# Targeted note: Topic ')));
+  assert.ok(notes.every(n => /\*\*You answered:\*\*/.test(n.text)), 'it quotes what the student answered');
+  const file = path.join(t.dir, 'learning-files', 'u', 'journeys', journey.id, notes[0].bodyFile);
+  assert.equal(fs.readFileSync(file, 'utf8'), notes[0].text, 'the file is what is returned');
+  assert.equal(t.call('notes:list', { journeyId: journey.id, kind: 'targeted_note' }).length, notes.length);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('notes:targeted', { journeyId: journey.id }), /not found/i);
+  assert.throws(() => t.call('notes:list', { journeyId: journey.id }), /not found/i);
+});
+
+test('review queue: a mistake enters box 1, practice moves it, due mistakes come first in the next practice set', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  runDiagnostic(t, journey, wrongChoice); // mistakes are queued even outside practice
+  assert.equal(t.call('review:due', { subjectId: 's1' }).count, 0, 'due tomorrow, not today');
+  t.clock.now += 2 * 86400000;
+  const due = t.call('review:due', { subjectId: 's1' });
+  assert.ok(due.count >= 1);
+  assert.ok(due.items.every(r => r.box === 1 && r.lastResult === 'wrong'));
+  const practice = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'practice', config: { count: 3 } }).assessment;
+  assert.ok(due.items.slice(0, 3).every(r => practice.items.some(i => i.question.id === r.questionId)), 'due mistakes are in the set');
+  t.call('assessment:start', { assessmentId: practice.id });
+  for (const item of practice.items) {
+    const right = due.items.some(r => r.questionId === item.question.id);
+    t.call('assessment:saveAnswer', { itemId: item.id, response: item.question.type === 'choice' ? { choice: [right ? 'b' : 'a'] } : item.question.type === 'truefalse' ? { value: true } : { text: 'x' } });
+  }
+  t.call('assessment:submit', { assessmentId: practice.id });
+  gradeOpen(t, practice.id, { c1: 'met', c2: 'met' });
+  const moved = t.store.getReview('u', { questionId: due.items[0].questionId });
+  assert.ok(moved.box >= 1 && moved.lastResult === 'correct' ? moved.box === 2 : true, 'a correct practice answer climbs a box');
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('review:due', { subjectId: 's1' }), /not found/i);
+});
+
+test('practice these: exactly the listed questions', () => {
+  const t = setup(); seed(t);
+  const questions = t.call('questions:list', { subjectId: 's1' });
+  const only = [questions[0].id, questions[2].id];
+  const made = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { only } }).assessment;
+  assert.deepEqual(made.items.map(i => i.question.id).sort(), only.sort());
 });

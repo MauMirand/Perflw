@@ -26,7 +26,7 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -43,6 +43,8 @@
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
+    if (typeof D().reviewDue === 'function') S.due = (await D().reviewDue({ subjectId: S.subjectId })).count;
+    S.targeted = S.journey && typeof D().notesList === 'function' ? await D().notesList({ journeyId: S.journey.id, kind: 'targeted_note' }) : [];
     if (typeof D().studyActive === 'function') {
       const act = await D().studyActive();
       S.study.active = act && act.session.subjectId === S.subjectId ? act : null;
@@ -54,7 +56,7 @@
 
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
-  const VIEWS = { bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  const VIEWS = { notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
@@ -94,8 +96,9 @@
     return `${stepperView(S)}<p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.</p>
       <div class="qz-row">${ghost('add', 'Add question', 'data-qz-focus')}${ghost('bank', 'Question bank')}
         ${btn('start', 'Pre-test', has ? '' : 'disabled title="Add at least one question first"')}
-        ${btn('practice', 'Practice', has ? 'title="Short set with feedback after each question"' : 'disabled title="Add at least one question first"')}
+        ${btn('practice', S.due ? `Practice (${S.due} due)` : 'Practice', has ? 'title="Short set with feedback after each question; mistakes that are due come first"' : 'disabled title="Add at least one question first"')}
         ${btn('exam', 'Final exam', has ? 'title="Timed exam with a pass mark"' : 'disabled title="Add at least one question first"')}
+        ${S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : ''}
         ${hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : ''}
         ${S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''}</div>
       ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}
@@ -116,6 +119,12 @@
     const done = sum ? `<div class="qz-feedback" role="status"><p><strong>Session saved</strong> · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${esc(sum.topics.join(', '))}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}</p>${sum.message ? `<p class="ln-soon">${esc(sum.message)}</p>` : ''}<p class="qz-row">${btn('practice', 'Practice now')}</p></div>` : '';
     const topics = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
     return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
+  }
+
+  function notesView(S) {
+    const notes = S.notesShown || [];
+    const items = notes.map(n => `<li class="qz-q"><p class="qz-q-prompt">${esc(n.title)}</p><pre class="qz-md">${esc(n.text || '(empty)')}</pre></li>`).join('');
+    return `<p class="ln-soon" role="status">Built from your own mistakes, with no AI. Each note says what you answered, the right answer and why.</p><ul class="qz-qlist">${items || '<li>No notes yet.</li>'}</ul><div class="qz-row">${ghost('home', 'Back', 'data-qz-focus')}</div>`;
   }
 
   function bankView(S) {
@@ -256,6 +265,16 @@
     const rows = R.attempts.map(a => `<tr><th scope="row">${a.attempt}${a.result.test ? ' (test)' : ''}</th><td>${a.result.percent}%</td><td>${a.result.passMarkPercent == null ? '—' : `${a.result.passMarkPercent}%`}</td><td>${a.result.passed === null ? '—' : a.result.passed ? 'Passed' : 'Not passed'}</td><td>${a.result.timeUsedSeconds == null ? '—' : clock(a.result.timeUsedSeconds)}</td><td>${a.topics.map(t => `${esc(t.title || t.topicId)} ${t.percent == null ? '—' : `${t.percent}%`}`).join(' · ')}</td></tr>`).join('');
     return `<table class="qz-table"><caption>Every final attempt, side by side</caption><thead><tr><th scope="col">Attempt</th><th scope="col">Score</th><th scope="col">Pass mark</th><th scope="col">Result</th><th scope="col">Time</th><th scope="col">By topic</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
+  function analysisBlock(R) {
+    const A = R.analysis; if (!A) return '';
+    const cats = Object.entries(A.byCategory).map(([k, n]) => `<li>${esc(A.labels[k] || k)}: ${n}</li>`).join('');
+    const weak = A.weak.map(w => `<li>${esc(w.title || w.topicId)} · ${esc(LEVELS[w.level] || w.level)} · score ${w.score}</li>`).join('');
+    const mistakes = A.items.filter(i => i.category && i.category !== 'guess' && i.questionId).length;
+    if (!cats && !weak) return '';
+    return `<div class="qz-analysis"><p class="qz-journey-title"><strong>Your mistakes</strong></p>${cats ? `<ul class="qz-cats" aria-label="Mistake categories">${cats}</ul>` : '<p class="ln-soon">No mistakes to analyse.</p>'}
+      ${weak ? `<p class="qz-journey-title"><strong>Weak topics, worst first</strong></p><ol class="qz-cats">${weak}</ol>` : ''}
+      <div class="qz-row">${A.weak.length && R.assessment.journeyId ? btn('notes-make', 'Generate targeted notes', 'title="One note per weak topic, written from your own mistakes (no AI)"') : ''}${mistakes ? ghost('practice-these', `Practice these ${mistakes}`, 'title="A practice set of exactly the questions you missed"') : ''}</div></div>`;
+  }
   function resultsView(S) {
     const R = S.results; const items = R.assessment.items; const t = R.assessment.totals;
     const topics = (R.mastery.topics || []).map(x => `<tr><th scope="row">${esc(x.title || x.topicId)}</th><td><span class="qz-chip">${esc(LEVELS[x.level] || x.level)}</span></td><td>${x.items} item${x.items === 1 ? '' : 's'}</td></tr>`).join('');
@@ -269,6 +288,7 @@
       ${examBanner(R)}
       ${topics ? `<table class="qz-table"><caption>Where you stand by topic</caption><thead><tr><th scope="col">Topic</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${topics}</tbody></table>
       <p class="ln-soon">A level needs at least 3 graded items on a topic; below that it reads Not assessed.</p>` : ''}
+      ${analysisBlock(R)}
       ${attemptsTable(R)}
       <ol class="qz-reviews">${review}</ol>
       <div class="qz-row">${failedFinal ? btn('retake', 'Retake the final', `data-id="${esc(R.assessment.id)}"`) : ''}${S.journey ? ghost('report', 'Report') : ''}${ghost('home', 'Back')}</div>`;
@@ -397,7 +417,8 @@
     const assessment = await D().assessmentResults({ assessmentId });
     const mastery = assessment.journeyId ? await D().masteryJourney({ journeyId: assessment.journeyId }) : { topics: [] };
     const attempts = assessment.kind === 'final' ? await D().examAttempts({ subjectId: S.subjectId, journeyId: assessment.journeyId || undefined }) : [];
-    S.results = { assessment, mastery, attempts }; S.mode = 'results'; S.errors = ''; paint(S);
+    let analysis = null; try { analysis = await D().assessmentAnalysis({ assessmentId }); } catch { /* the analysis is a bonus */ }
+    S.results = { assessment, mastery, attempts, analysis }; S.mode = 'results'; S.errors = ''; paint(S);
   }
   async function advance(S, submitted) {
     // The journey moves on when a pre-test or a final is submitted (spec §2.2).
@@ -438,6 +459,16 @@
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
+      else if (action === 'notes') { S.notesShown = S.targeted; S.mode = 'notes'; paint(S); }
+      else if (action === 'notes-make') {
+        target.disabled = true;
+        S.notesShown = await D().notesTargeted({ journeyId: S.results.assessment.journeyId, assessmentId: S.results.assessment.id });
+        await load(S); S.mode = 'notes'; paint(S); say('Targeted notes written.');
+      }
+      else if (action === 'practice-these') {
+        const ids = S.results.analysis.items.filter(i => i.category && i.category !== 'guess' && i.questionId).map(i => i.questionId);
+        target.disabled = true; await begin(S, 'practice', 'Practice: your mistakes', { only: ids, count: ids.length });
+      }
       else if (action === 'study-start') {
         const topic = hostOf(S).querySelector('[data-qz-study-topic]').value;
         const started = await D().studyStart({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, topicId: topic || undefined, kind: 'main' });

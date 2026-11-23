@@ -207,6 +207,7 @@ async function main() {
   step('no answer key in an open assessment');
 
   await answerAll();
+  await check('input[name="dontKnow"]'); // the last question: "I don't know", so the analysis has a mistake to name
   const graded = await submitAndGrade(1);
   const score = await evaluate("document.querySelector('.qz-score').textContent");
   assert.match(score, /^Pre-test: \d+(\.\d+)? of \d+ points$/, score);
@@ -214,10 +215,25 @@ async function main() {
   assert.ok(await evaluate("/Not assessed|Emerging|Developing|Proficient|Mastered/.test(document.querySelector('.qz-table').textContent)"), 'a level per topic');
   step(`results: ${score}${graded ? ' (self-graded)' : ''}`);
   await shoot('quiz-5-results');
+  // Mistake analysis and deterministic targeted notes (no AI).
+  await waitFor("!!document.querySelector('.qz-analysis') && /Did not know/.test(document.querySelector('.qz-analysis').textContent)", 'analysis names the mistake category');
+  await click('[data-qz="notes-make"]');
+  await waitFor("/Targeted note: /.test(document.querySelector('.qz-md') ? document.querySelector('.qz-md').textContent : '')", 'targeted note written');
+  assert.ok(await evaluate("/You answered/.test(document.querySelector('.qz-md').textContent)"), 'the note quotes the mistake');
+  step('analysis: mistake categories, weak topics, targeted notes written without AI');
+  await shoot('quiz-5b-notes');
+  await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"notes\"]')", 'targeted notes listed on the home screen');
+  // Practice exactly the missed questions.
+  await click('[data-qz="results"]');
+  await waitFor("!!document.querySelector('[data-qz=\"practice-these\"]')", 'practice these offered');
+  await click('[data-qz="practice-these"]');
+  await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice of the mistakes opened');
+  await click('[data-qz="leave"]');
+  step('practice these: a set of exactly the missed questions');
   assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'diagnostic', 'journey moved to the diagnostic stage after the pre-test is submitted');
 
   // Study session (LS-012): the account timer runs it, a side note is the student's own text, one focus entry with source learning.
-  await click('[data-qz="home"]');
   await waitFor("!!document.querySelector('[data-qz=\"study-start\"]')", 'study panel');
   await fill('[data-qz-study-topic]', topicId);
   await click('[data-qz="study-start"]');
