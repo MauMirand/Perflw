@@ -253,7 +253,10 @@ Not tested end to end: a real external program holding a file during the app run
 #### 8. Known limitations and remaining risks
 
 1. **Main-thread pause.** A held file can block the main process for up to ~0.5 s per write or read, by design (ADR-003 trade-off). A file held longer still fails, now visibly.
-2. **Status kept only in memory.** The status in `unsaved` is lost on restart. Afterwards the file shows its last saved status. If that was `pending`, the file is re-queued when opened (existing behavior).
+2. **Status kept only in memory.** The status in `unsaved` is lost on restart. Afterwards the file shows its last saved status.
+   - *Corrected after HO-008.* The first version said a stored `pending` "is re-queued when opened (existing behavior)". That was wrong: `fileAnalysis` returned it unchanged, so the file stayed on "Analyzing…" forever.
+   - Fixed in the revision (section 11): a stored `pending` with no job behind it is now queued again when the panel asks for it.
+   - A stored `failed` is still shown as failed until the student re-analyzes it.
 3. **A failed read now raises an error in places that used to return empty data.** The notes panel, Ask, preferences and annotations now show "…another program is using it. Try again in a moment." for a file still held after 0.5 s. That is intended, but it is a visible change.
 4. **Damaged JSON files are moved aside and kept** as `*.corrupt-*`. Nothing cleans them up yet.
 5. **Readers not switched to the helpers (out of scope):** the image cache, doc JSON and preview reads use the workflow's `readJson`, so they are covered. Other `readFileSync` + `JSON.parse` sites in `src/automation/` (package config, skills) were not audited here. Suggest a follow-up grep in PF-014.
@@ -270,7 +273,49 @@ Claude A:
 #### 10. Review Result
 
 **Reviewer:** Claude A  
-**Decision:** PENDING
+**Decision:** APPROVED WITH MINOR CHANGES (HO-008). Revision below, awaiting delta review.
+
+#### 11. Revision for HO-008 (same branch, new commit, no rebase)
+
+**Change 1: a stored `pending` is re-queued** (`src/learning-workflow.js`)
+- New `analyzing`: the file id that `run()` is reading right now. It is set after the job leaves the queue and cleared after the result is emitted, and in `finally`.
+- New `idleFile(id)`: true when the file is neither queued nor being read now.
+- `fileAnalysis` now calls `queueFile` when:
+  - the stored status is `pending` and `idleFile` is true (new);
+  - there is no entry (existing behavior, now guarded by `idleFile`);
+  - the doc or analysis is missing (existing behavior, now guarded by `idleFile`);
+  - the analysis version is old (this check now also skips the file being read).
+- `queueFile` itself is unchanged. Explicit re-queues still run for the file being read: Re-analyze, and the Office preview's page refresh. Those carry new content.
+
+**Tests** (`test/learning-state-io.test.js`, 2 new):
+- A `pending` left in `state.json` with a fresh workflow instance, as after a restart: the panel shows `pending`, then the file ends `ready`.
+- A file being analyzed while the panel asks 5 times: one finished analysis event, then `ready`.
+
+Each test was checked against the bug it targets:
+- Test 5 fails on `8475dcb`'s `learning-workflow.js` and passes now.
+- Test 6 fails when the `analyzing` check is removed from `idleFile` and passes now.
+
+**Change 2:** section 8 item 2 above is corrected.
+
+**Checks after the revision** (logs in `pf007-evidence/rev1-*`): see the table added below.
+
+| Run | Result |
+|---|---|
+| `node --test test/learning-state-io.test.js` | 6/6 pass, 0 todo |
+| `npm test` (02:37:45Z) | EXIT=0: 141 tests, 141 pass, 0 fail, 0 todo |
+| `npm run test:electron`, 1st run (02:34:21Z) | **Failed** at `:949` "Plan group hides Calendar, the date card and Routine only" (sidebar group measured after `sleep(250)`). This is the fixed-wait flake Claude A also saw (PF-020). The revision does not touch the sidebar. |
+| `npm run test:electron`, 2nd run (02:35:51Z) | EXIT=0, "Electron smoke test passed." |
+
+**Correction to earlier recorded exit codes.**
+- *What went wrong.* Some of Claude B's single-command records used `echo "… $(date …) EXIT=$?"`. The `$(date)` runs first and resets `$?` to 0, so the printed exit code was always 0. That is how the 1st smoke run above was first logged as EXIT=0 despite failing.
+- *Records affected:*
+  - HO-004's acceptance `npm test` line (01:33:24Z);
+  - HO-007's `npm ci` (01:56:17Z) and `npm test` (02:01:18Z) lines.
+- *Records not affected.* Every smoke batch saved `e=$?` before `echo`, so those exit codes are real.
+- *Evidence for the affected records.* Their logs show the real outcomes:
+  - the two `npm test` logs say `# fail 0` (126 and 139 pass), and `node --test` exits non-zero on any failure;
+  - the `npm ci` log has 0 `ERR!` lines and ends "added 176 packages".
+- *Re-measured.* `npm test` was re-run with `e=$?` captured first (row above). Its exit code is measured, not inferred.
 
 ---
 

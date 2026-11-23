@@ -104,6 +104,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   // fileId → { status, error } that could not be written to state.json (the file was held by another program).
   // fileAnalysis answers from here first, so the notes panel never waits on a status that only exists on disk.
   const unsaved = new Map();
+  let analyzing = null; // fileId that run() is reading now
   function queueFile(userId, fileId) {
     let file; try { file = workspace.topicFile(userId, fileId); } catch { return; }
     if (!queue.some(job => job.fileId === fileId)) {
@@ -125,6 +126,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
       while (queue.length) {
         const { userId, fileId } = queue.shift();
         let file; try { file = workspace.topicFile(userId, fileId); } catch { continue; } // deleted meanwhile
+        analyzing = fileId;
         let status = 'ready'; let error = '';
         try { await analyzeFile(userId, file); unsaved.delete(fileId); }
         catch (failure) {
@@ -132,10 +134,13 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
           try { const state = loadState(userId, file.subjectId); state.files[fileId] = { ...(state.files[fileId] || {}), status, error }; saveState(userId, file.subjectId, state); unsaved.delete(fileId); }
           catch { unsaved.set(fileId, { status, error }); } // state.json held or subject removed: keep the status here
         }
+        analyzing = null;
         emit({ type: 'analysis', subjectId: file.subjectId, fileId, status, error });
       }
-    } finally { busy = false; }
+    } finally { busy = false; analyzing = null; }
   }
+  // Neither waiting in the queue nor being read right now (run() has already taken the active job off the queue).
+  const idleFile = fileId => analyzing !== fileId && !queue.some(job => job.fileId === fileId);
   // ───────── pictures: readings cached per picture (content hash), shared by every file and version
   const imageCacheFile = (userId, key) => path.join(base(userId), 'intel', 'image-cache', `${key}.json`);
   const cachedReading = (userId, key) => readJson(imageCacheFile(userId, key), null);
@@ -378,12 +383,15 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
     if (kept) return { status: kept.status, error: kept.error, fileId: file.id };
     const state = loadState(userId, file.subjectId);
     const entry = state.files[file.id];
-    if (!entry) { queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }   // uploaded before this workflow existed
+    if (!entry) { if (idleFile(file.id)) queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }   // uploaded before this workflow existed
+    // A stored "pending" with no job behind it (the app quit mid-analysis, or the result could not be saved and the
+    // app restarted): read it again, so the panel never stays on "Analyzing this file…".
+    if (entry.status === 'pending' && idleFile(file.id)) queueFile(userId, file.id);
     if (entry.status !== 'ready') return { status: entry.status, error: entry.error || '', fileId: file.id };
     const doc = state.docs.find(d => d.id === entry.docId);
     const analysis = doc && loadDoc(userId, file.subjectId, doc.id);
-    if (!doc || !analysis) { queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }
-    if ((entry.version || 1) < ANALYSIS_VERSION && !queue.some(job => job.fileId === file.id)) queueFile(userId, file.id); // shown now, refreshed when read again
+    if (!doc || !analysis) { if (idleFile(file.id)) queueFile(userId, file.id); return { status: 'pending', fileId: file.id }; }
+    if ((entry.version || 1) < ANALYSIS_VERSION && idleFile(file.id)) queueFile(userId, file.id); // shown now, refreshed when read again
     return {
       status: 'ready', fileId: file.id, docId: doc.id, title: analysis.title, fileType: analysis.fileType, pages: analysis.pages, empty: analysis.empty,
       sources: doc.sources, latest: doc.latestFileId === file.id, action: entry.action,

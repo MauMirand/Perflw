@@ -25,9 +25,13 @@ function setup(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-stateio-'));
   const workspace = createWorkspace(root);
   const ecosystem = createEcosystem({ root, workspace, secrets, providers });
-  const flow = createLearningWorkflow({ root, workspace, ecosystem });
+  const events = [];
+  const flow = createLearningWorkflow({ root, workspace, ecosystem, emit: event => events.push(event) });
   const subject = workspace.createSubject(USER, 'study', { name: 'Biology', type: 'major' });
-  t.after(async () => { await flow.close(); workspace.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const restarted = []; // workflows made by `restart()`, closed with the first
+  t.after(async () => { for (const f of [flow, ...restarted]) await f.close(); workspace.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  // A new workflow on the same data, as after an app restart (nothing in memory, only what is on disk).
+  const restart = () => { const again = createLearningWorkflow({ root, workspace, ecosystem, emit: event => events.push(event) }); restarted.push(again); return again; };
   // Same steps as main.js importTopicFile, without waiting for the analysis.
   function add(name, text) {
     const storedName = `${Math.random().toString(16).slice(2).padEnd(32, '0').slice(0, 32)}.md`;
@@ -35,7 +39,7 @@ function setup(t) {
     fs.writeFileSync(path.join(root, 'learning-files', USER, storedName), text);
     return workspace.importTopics(USER, subject.id, { name, storedName, type: 'md', size: text.length, text: '' }, [{ title: name, level: 0 }]).fileId;
   }
-  return { root, flow, add };
+  return { root, flow, add, events, restart, subject };
 }
 async function idle(flow) { for (let i = 0; i < 400 && !flow.idle(); i++) await new Promise(r => setTimeout(r, 15)); assert.ok(flow.idle(), 'workflow finished'); }
 /* Makes `method` throw `code` for state.json while `on()` is true, as a scanner holding the file would. */
@@ -101,4 +105,39 @@ test('a busy agent registry is not read as empty (no duplicate Learning agents, 
   held = false;
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'the registry was not rewritten');
   assert.deepEqual(await flow.ensureAgents(USER), first, 'the same agents are used afterwards');
+});
+
+/* Marks a file "pending" in its subject's state.json, as an app that quit mid-analysis (or could not save the
+   result) leaves it. */
+function leavePending(root, subjectId, fileId) {
+  const file = path.join(root, 'learning-files', USER, 'intel', subjectId, 'state.json');
+  const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+  state.files[fileId] = { ...state.files[fileId], status: 'pending' };
+  fs.writeFileSync(file, JSON.stringify(state));
+}
+
+test('a file left "pending" on disk is analyzed again after a restart, not shown as "Analyzing…" forever', async t => {
+  const { root, flow, add, restart, subject } = setup(t);
+  const fileId = add('Week 1 notes.md', '# Functions\nNotes\n## Domain and range\n');
+  flow.queueFile(USER, fileId); await idle(flow);
+  leavePending(root, subject.id, fileId);
+  const after = restart();
+  // Before this fix: the stored status was returned as is and nothing ever read the file again.
+  assert.equal(after.fileAnalysis(USER, fileId).status, 'pending', 'shown as pending while it is read again');
+  await idle(after);
+  assert.equal(after.fileAnalysis(USER, fileId).status, 'ready');
+});
+
+test('a file being analyzed right now is not queued a second time by the panel asking for it', async t => {
+  const { root, flow, add, events, subject } = setup(t);
+  const fileId = add('Week 1 notes.md', '# Functions\nNotes\n## Domain and range\n');
+  flow.queueFile(USER, fileId); await idle(flow);
+  leavePending(root, subject.id, fileId); // a stored "pending" while its job runs, as during any analysis
+  events.length = 0;
+  flow.reanalyze(USER, fileId);           // run() takes the job off the queue at once and starts reading
+  for (let i = 0; i < 5; i++) assert.equal(flow.fileAnalysis(USER, fileId).status, 'pending'); // the panel polls meanwhile
+  await idle(flow);
+  const finished = events.filter(e => e.type === 'analysis' && e.fileId === fileId && e.status !== 'pending' && !e.enrich);
+  assert.equal(finished.length, 1, `analyzed once (${JSON.stringify(finished)})`);
+  assert.equal(flow.fileAnalysis(USER, fileId).status, 'ready');
 });
