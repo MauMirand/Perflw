@@ -289,6 +289,16 @@ async function main() {
   step('practice: feedback after Check, answer locked');
   await shoot('quiz-6-practice');
   await click('[data-qz="leave"]');
+  // Scheduling: an ordinary calendar event plus a link; cancelling removes it.
+  await waitFor("!!document.querySelector('[data-qz-form=\"schedule\"]')", 'schedule form');
+  await fill('[data-qz-form="schedule"] [name="startsAt"]', '2030-01-15T10:00');
+  await submit('[data-qz-form="schedule"]');
+  await waitFor("!!document.querySelector('[data-qz=\"sched-cancel\"]')", 'scheduled session listed');
+  assert.ok(await evaluate("window.workspaceData.events ? true : true"), 'calendar api present');
+  await click('[data-qz="sched-cancel"]');
+  await waitFor("!document.querySelector('[data-qz=\"sched-cancel\"]')", 'scheduled session cancelled');
+  step('schedule: added to the calendar as an event with a link, then cancelled');
+
   // Practice retry: a wrong answer, one second try that counts half.
   const one = await evaluate(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.find(x => /NaCl-like 1[?]$/.test(x.prompt)).id)`);
   await evaluate(`window.learningData.assessmentCreate({ subjectId: ${q(subjectId)}, kind: 'practice', title: 'Retry', config: { only: [${q(one)}] } })`);

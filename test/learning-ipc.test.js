@@ -29,7 +29,11 @@ function setup() {
   insert(db, 'subject_files', { id: 'f1', user_id: 'u', subject_id: 's1', name: 'a.pdf', stored_name: 'a', type: 'pdf', size: 1, created_at: T });
   db.prepare("UPDATE subject_topics SET file_id='f1' WHERE id IN ('t1','t2')").run();
   const store = createLearningStore(db);
-  const workspace = { learningStore: () => store, listTopics: (userId, subjectId) => ({
+  const events = [];
+  const workspace = { learningStore: () => store,
+    getSubject: (userId, id) => ({ name: id === 's1' ? 'Biology' : 'Other' }),
+    createEvent: (userId, title, startsAt, endsAt) => { const id = `e${events.length + 1}`; db.prepare('INSERT INTO events (id,user_id,title,starts_at,ends_at) VALUES (?,?,?,?,?)').run(id, userId, title, startsAt, endsAt); events.push(id); return id; },
+    deleteEvent: (userId, id) => { db.prepare('DELETE FROM events WHERE id=? AND user_id=?').run(id, userId); }, listTopics: (userId, subjectId) => ({
     rows: db.prepare('SELECT id, title, kind, file_id AS fileId FROM subject_topics WHERE user_id=? AND subject_id=?').all(userId, subjectId) }) };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-ipc-'));
   const handlers = new Map();
@@ -43,7 +47,7 @@ function setup() {
   });
   return {
     call: (channel, arg) => handlers.get(channel)(arg),
-    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock, dir,
+    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock, dir, rawDb: db,
   };
 }
 
@@ -83,10 +87,10 @@ test('every channel is registered and every preload learningData channel exists 
   assert.deepEqual(registered, [
     'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
-    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due',
+    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list',
   ].sort());
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review|retention):[A-Za-z]+|learning:history)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -530,4 +534,27 @@ test('practice retry: one second try on a wrong deterministic answer, scored hal
   assert.throws(() => t.call('assessment:retry', { assessmentId: diag.id, itemId: diag.items[0].id }), /only for a practice set/);
   t.as({ id: 'v' });
   assert.throws(() => t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }), /not found/i);
+});
+
+test('scheduling: the calendar event and its link are created together, rolled back together, and cancelling removes both', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const at = new Date(t.clock.now + 3600e3).toISOString(); const end = new Date(t.clock.now + 7200e3).toISOString();
+  const made = t.call('schedule:create', { journeyId: journey.id, kind: 'practice', startsAt: at, endsAt: end, topicIds: ['t1'] });
+  assert.equal(made.kind, 'practice'); assert.deepEqual(made.topicIds, ['t1']); assert.match(made.title, /^Practice: Biology/);
+  const rows = db => db.prepare('SELECT count(*) AS n FROM events').get().n;
+  assert.equal(t.call('schedule:list', { subjectId: 's1' }).length, 1);
+  // a bad topic id: nothing is left behind, not even the event
+  const eventsBefore = t.store.constructor && t.rawDb.prepare('SELECT count(*) AS n FROM events').get().n;
+  assert.throws(() => t.call('schedule:create', { journeyId: journey.id, kind: 'final', startsAt: at, endsAt: end, topicIds: ['tv'] }), /not found/i);
+  assert.equal(t.rawDb.prepare('SELECT count(*) AS n FROM events').get().n, eventsBefore, 'the event was rolled back with the failed link');
+  assert.throws(() => t.call('schedule:create', { journeyId: journey.id, kind: 'party', startsAt: at, endsAt: end }), /Kind must be one of/);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('schedule:list', { subjectId: 's1' }), /not found/i);
+  assert.throws(() => t.call('schedule:cancel', { scheduleId: made.id }), /not found/i);
+  t.as({ id: 'u' });
+  t.call('schedule:cancel', { scheduleId: made.id });
+  assert.equal(t.call('schedule:list', { subjectId: 's1' }).length, 0);
+  assert.equal(t.rawDb.prepare('SELECT count(*) AS n FROM events').get().n, eventsBefore - 1, 'the event is gone');
+  assert.equal(t.rawDb.prepare('SELECT count(*) AS n FROM learning_schedule').get().n, 0, 'and so is the link (cascade)');
 });

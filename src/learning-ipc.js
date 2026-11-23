@@ -382,6 +382,18 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
       });
   });
 
+  // ───────── scheduled learning: an ordinary calendar event plus a link (ADR-008, spec §7)
+  const KIND_TITLE = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
+  on('schedule:create', ['journeyId', 'kind', 'startsAt', 'endsAt', 'topicIds'], (u, a) => {
+    const journey = store().getJourney(u, { journeyId: a.journeyId });
+    const subject = workspace.getSubject(u, journey.subjectId);
+    if (!KIND_TITLE[a.kind]) fail('Kind must be one of: session, practice, retention, final.');
+    return store().createSchedule(u, { journeyId: journey.id, kind: a.kind, topicIds: a.topicIds, makeEvent: () => workspace.createEvent(u, `${KIND_TITLE[a.kind]}: ${subject.name}`.slice(0, 180), a.startsAt, a.endsAt, null, null, 'light-blue', 'Event', '', 'Scheduled from Learning.') });
+  });
+  on('schedule:list', ['subjectId'], (u, a) => store().listSchedule(u, a));
+  /* Cancelling deletes the calendar event; the link goes with it (cascade) and nothing else is touched. */
+  on('schedule:cancel', ['scheduleId'], (u, a) => { const row = store().getSchedule(u, a); workspace.deleteEvent(u, row.eventId); return { id: row.id, cancelled: true }; });
+
   // ───────── review queue (Leitner): practice results move questions between boxes; mistakes anywhere enter box 1
   const today = () => new Date(now()).toISOString().slice(0, 10);
   function updateReviews(u, assessment) {

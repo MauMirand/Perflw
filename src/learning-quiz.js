@@ -30,7 +30,7 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], retention: null, due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -47,6 +47,7 @@
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
+    S.schedule = S.journey && typeof D().scheduleList === 'function' ? await D().scheduleList({ subjectId: S.subjectId }) : [];
     S.retention = S.journey && typeof D().retentionStatus === 'function' ? await D().retentionStatus({ journeyId: S.journey.id }) : null;
     if (typeof D().reviewDue === 'function') S.due = (await D().reviewDue({ subjectId: S.subjectId })).count;
     S.targeted = S.journey && typeof D().notesList === 'function' ? await D().notesList({ journeyId: S.journey.id, kind: 'targeted_note' }) : [];
@@ -111,7 +112,20 @@
         ${S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''}</div>
       ${S.retention && !S.retention.eligible && S.retention.eligibleOn ? `<p class="ln-soon">${esc(S.retention.reason)}</p>` : ''}
       ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}
+      ${scheduleView(S)}
       ${studyView(S)}`;
+  }
+
+  function scheduleView(S) {
+    if (!S.journey) return '';
+    const KIND = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
+    const rows = S.schedule.map(x => `<li>${esc(KIND[x.kind] || x.kind)} · ${esc(String(x.startsAt).replace('T', ' ').slice(0, 16))} ${btn('sched-start', 'Start', `data-kind="${esc(x.kind)}"`)} ${ghost('sched-cancel', 'Cancel', `data-id="${esc(x.id)}"`)}</li>`).join('');
+    return `<div class="qz-sched" role="group" aria-label="Schedule a session"><form class="qz-form" data-qz-form="schedule" novalidate><span class="qz-opt-row">
+      <label class="ln-field"><span>Schedule</span><select class="field" name="kind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+      <label class="ln-field"><span>Starts</span><input class="field" name="startsAt" type="datetime-local" required></label>
+      <label class="ln-field"><span>Minutes</span><input class="field" name="minutes" type="number" min="5" max="600" value="45"></label>
+      <button class="btn btn-sm" type="submit">Add to calendar</button></span></form>
+      ${rows ? `<ul class="qz-list" aria-label="Scheduled sessions">${rows}</ul>` : ''}</div>`;
   }
 
   function studyView(S) {
@@ -507,6 +521,14 @@
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
+      else if (action === 'sched-cancel') { await D().scheduleCancel({ scheduleId: target.dataset.id }); await load(S); paint(S); H.toast('Removed from your calendar.'); }
+      else if (action === 'sched-start') {
+        const kind = target.dataset.kind;
+        if (kind === 'practice') { target.disabled = true; await begin(S, 'practice', 'Practice', { count: 8 }); }
+        else if (kind === 'final') { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
+        else if (kind === 'retention') { target.disabled = true; await begin(S, 'retention', 'Retention check', { count: 8 }); }
+        else { hostOf(S).querySelector('[data-qz-study-topic]').scrollIntoView({ block: 'center' }); hostOf(S).querySelector('[data-qz-study-topic]').focus(); }
+      }
       else if (action === 'evaluation') { S.evaluation = await D().journeyEvaluation({ journeyId: S.journey.id }); S.mode = 'evaluation'; paint(S); }
       else if (action === 'history') { S.history = await D().learningHistory({ subjectId: S.subjectId }); S.mode = 'history'; paint(S); }
       else if (action === 'retention') { target.disabled = true; await begin(S, 'retention', 'Retention check', { count: 8 }); }
@@ -657,6 +679,11 @@
           await D().assessmentGrade({ itemId: item.id, verdicts, grader: 'self' });
         }
         await showResults(S, S.grade.assessment.id);
+      } else if (kind === 'schedule') {
+        const f = form.elements; if (!f.startsAt.value) throw new Error('Choose when it starts.');
+        const startsAt = new Date(f.startsAt.value); const endsAt = new Date(startsAt.getTime() + Number(f.minutes.value || 45) * 60000);
+        await D().scheduleCreate({ journeyId: S.journey.id, kind: f.kind.value, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() });
+        await load(S); paint(S); H.toast('Added to your calendar.');
       } else if (kind === 'note') {
         const text = form.elements.text.value;
         await D().studySideNote({ sessionId: S.study.active.session.id, text });

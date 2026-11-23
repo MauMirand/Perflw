@@ -530,6 +530,37 @@ function createLearningStore(db) {
     return all(`SELECT r.* FROM question_review r JOIN question_items q ON q.id=r.question_id
       WHERE r.user_id=? AND q.subject_id=? AND q.status='active' AND r.due_on<=? ORDER BY r.due_on, r.question_id`, userId, subject.id, day.slice(0, 10)).map(reviewOut);
   }
+  // ───────── scheduled learning (ADR-008): a calendar event plus a link row, created in ONE transaction
+  const SCHEDULE_KINDS = ['session', 'practice', 'retention', 'final'];
+  const scheduleOut = row => ({ id: row.id, eventId: row.event_id, journeyId: row.journey_id, kind: row.kind, topicIds: parse(row.topic_ids, []), title: row.title, startsAt: row.starts_at, endsAt: row.ends_at });
+  /* `makeEvent()` creates the calendar event on this same connection and returns its id. If the link cannot be written, the event
+     is rolled back with it, so a half-scheduled session never exists. */
+  function createSchedule(userId, input) {
+    const a = args(input);
+    const journey = owned('learning_journeys', 'Journey', userId, a.journeyId);
+    const kind = oneOf(a.kind, SCHEDULE_KINDS, 'Schedule kind');
+    const topicIds = a.topicIds == null ? [] : cleanTopicIds(userId, journey.subject_id, a.topicIds);
+    if (typeof a.makeEvent !== 'function') fail('The event could not be created.');
+    const linkId = randomUUID();
+    transaction(() => {
+      const eventId = a.makeEvent();
+      const stamp = now();
+      insert('learning_schedule', { id: linkId, user_id: userId, event_id: eventId, journey_id: journey.id, kind, topic_ids: JSON.stringify(topicIds), created_at: stamp, updated_at: stamp });
+    });
+    return listScheduleRows(userId, 'ls.id=?', linkId)[0];
+  }
+  function listScheduleRows(userId, where, ...params) {
+    return all(`SELECT ls.*, e.title, e.starts_at, e.ends_at FROM learning_schedule ls JOIN events e ON e.id=ls.event_id WHERE ls.user_id=? AND ${where} ORDER BY e.starts_at, ls.id`, userId, ...params).map(scheduleOut);
+  }
+  function listSchedule(userId, input) {
+    const subject = subjectOf(userId, args(input).subjectId);
+    return all(`SELECT ls.*, e.title, e.starts_at, e.ends_at FROM learning_schedule ls JOIN events e ON e.id=ls.event_id JOIN learning_journeys j ON j.id=ls.journey_id
+      WHERE ls.user_id=? AND j.subject_id=? ORDER BY e.starts_at, ls.id`, userId, subject.id).map(scheduleOut);
+  }
+  function getSchedule(userId, input) {
+    const row = owned('learning_schedule', 'Scheduled session', userId, args(input).scheduleId);
+    return listScheduleRows(userId, 'ls.id=?', row.id)[0];
+  }
   /* System use only (quit and crash recovery in main.js): every open session of every account. Not an IPC channel. */
   function listOpenSessions() {
     return all('SELECT id, user_id, started_at, updated_at, subject_id FROM learning_sessions WHERE ended_at IS NULL')
@@ -628,7 +659,7 @@ function createLearningStore(db) {
     saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
-    recordReview, getReview, dueReviews,
+    recordReview, getReview, dueReviews, createSchedule, listSchedule, getSchedule,
     journeyEvidence,
   };
 }
