@@ -526,7 +526,9 @@ brief: "TASK: LS-005". Submission HO-018.
 - [ ] S7 UI parity (D12): existing styles.css/learning.css patterns; screenshots at 1280/400 px side by side with the current Learning pages.
 
 **M-L1 exit** (Claude A review, not a task): one smoke run walks journey → pre-test → results → session → final
-(same quiz mode, different items) → results, with no AI provider configured.
+(same quiz mode, different items) → report, with no AI provider configured. The exact steps and the pass/fail rule are in
+`docs/ML1_ACCEPTANCE.md`; **LS-034** (HO-028) builds the missing final/report half and the script (`npm run test:ml1`).
+Chain after LS-011: LS-012 (HO-027) → LS-034 (HO-028).
 
 #### Phase 2 — Quiz completeness
 
@@ -1012,7 +1014,16 @@ page's missing journey area. `learning.js` (1114 lines) is the Learning controll
   `diagnostic`; then "Start pre-test" calls `H.startQuiz({ assessmentId })` if LS-010 has provided it, else is disabled
   with the tooltip "The quiz panel arrives with the next update"), and the later stages shown as locked with the
   tooltip "Coming in a later update". Do not invent behavior for `diagnostic` onward (LS-010/LS-011).
-- Empty states (§3.6): no topics → "Add topics or import a file to start a journey." with Import / Add topic buttons that
+- **Stage availability in M-L1 (rule added 2026-11-23, see `docs/ML1_ACCEPTANCE.md`):** the stepper has a constant
+  `BUILT_STAGES = material, pretest_setup, pretest, diagnostic, main_learning, final_exam, report`. The other six stages
+  (`targeted_notes`, `practice`, `mistake_analysis`, `supplementary`, `final_learning`, `retention`) get state `later`: shown dimmed
+  with the tooltip "Coming in a later update", not startable, and **skipped** when the next stage unlocks, so the M-L1 path
+  (pre-test → results → study session → final → report) is not blocked by features that do not exist yet. D7 still holds
+  among built stages: one unlocks after the previous one is done. Next-action texts for the later-built stages
+  (`pretest` "Resume pre-test", `diagnostic` "View results", `main_learning` "Start studying", `final_exam`/`report`) are placeholders
+  that LS-010, LS-011, LS-012 and LS-034 wire up; until then they read "Arrives with the next update". Stage changes are written by the
+  task that owns the action (LS-010: `pretest`, `diagnostic`; LS-012: `main_learning`; LS-034: `final_exam`, `report`).
+- Empty states (§3.6): no topics → "Add topics or import a file to start a journey."  with Import / Add topic buttons that
   reuse the existing topic actions; topics without source text → the message in §3.6.
 - `learning.js`: mount only. Replace the `placeholders()` use for the journey area with `PerflwJourney.mount(...)`;
   keep the "Mastery Statistics" skeleton until LS-011 (do not delete it here). No other `learning.js` change.
@@ -1040,7 +1051,7 @@ UI. Do not remove the "Mastery Statistics" skeleton. Overlap check at release: n
 `main.js` only).
 
 #### Acceptance Criteria
-- [ ] Unit tests: `stageSteps` for each of the 13 stages (exactly one `current`, earlier `done`, later `locked`);
+- [ ] Unit tests: `stageSteps` for each of the 13 stages (exactly one `current`, earlier built stages `done`, later built stages `locked`, the six unbuilt stages `later` and skipped by unlocking);
       `nextAction` per M-L1 stage; `setupDefaults` (2 per topic, capped at 40, minimum 1); `bankMessage` wording.
 - [ ] **Smoke step (S5):** on the fixture subject with topics, create a journey → stepper shows **Material** current and
       the later stages locked → Continue → **Pre-test setup** current → create the pre-test → the draft assessment exists
@@ -1455,6 +1466,95 @@ else edits `main.js`, `index.html`, `learning.js`, `learning.css` or `electron-s
 #### Deliverables
 Summary, files, channel table as built, the `stopTimerAt` diff, new CSS rules, screenshots, test output with exit codes, commit
 hash, ambiguities (report, do not decide). HANDOFF_LOG entry **HO-027**.
+
+#### Review
+**Reviewed By:**  
+**Decision:** Pending
+
+### TASK: LS-034 — M-L1 test final, minimal report and the end-to-end script
+
+**Status:** READY (brief complete 2026-11-23; new task, added because no task covered the M-L1 "final → report" half of the
+loop, D15). **Release when** LS-012 is INTEGRATED (renderer chain, sequential: LS-008 → LS-009 → LS-010 → LS-011 → LS-012 →
+LS-034). Submission **HO-028**  
+**Priority:** P1 (the last M-L1 task)  
+**Assigned To:** Claude B (next free lane)  
+**Created By:** Claude A  
+**Created:** 2026-11-23
+
+#### Objective
+Let a student who has done a study session take a small test final with parallel items, see a minimal pre-vs-final report, and
+give the project one automated pass/fail for the whole offline cycle (`docs/ML1_ACCEPTANCE.md`).
+
+#### Context
+D15: earlier than LS-023 a small test final is allowed (no 50–100 item rule, no time limit, no pass mark). Spec §4.1 (final = parallel
+items, never items seen in this journey's diagnostic), §4.9 (full exam rules come with LS-023), §5.4 (levels, `improvement`),
+§3.7 (mastery report), §2.2 stages 13–14. The quiz panel (LS-010) already runs `kind:'final'` assessments; the results page
+(LS-011) already shows their results. `assessment:create` (LS-007) selects with `selectItems` but does not yet exclude the
+diagnostic's items. The stepper (LS-008) marks stages that M-L1 does not build as "later" and skips them (rule added in the
+LS-008 brief). D9 (required final-learning stage, LS-033) is **not** built here: in M-L1 the final unlocks after one ended
+`main` study session; LS-033 replaces that rule.
+
+#### Requirements
+- **Final setup:** the setup sheet from LS-008 gains `kind: 'final'` (count default 2 per topic, max 40; types; source = bank);
+  shown from the next-action card at `main_learning` once at least one `main` session has ended ("Set up the final").
+  `assessment:create` for `final` **excludes every question used in any diagnostic of the same journey** and keeps the D3 rule
+  (approved only); shortage handled with the same `{ requested, available }` message. Creating it moves the journey to stage
+  `final_exam`; starting uses LS-010's panel unchanged; submitting a `final` moves the journey to stage `report`.
+- **Report data (`learning-ipc.js`, one new channel):** `mastery:report { journeyId }` → `{ topics: [{ topicId, title, pre:
+  { level, items }, post: { level, items }, improvement: { <dimension>: { diagnostic, final, delta } } }], provisional }`.
+  `pre` = `topicLevel` over the diagnostic rows only; `post` = `topicLevel` over all rows of the cycle (latest final attempt, HO-030
+  §4.4); `improvement` from `mastery-model.improvement`; `provisional` = true while any counted open answer is not `final`.
+  Preload `learningData.masteryReport`.
+- **Report view (new `src/learning-report.js`, IIFE → `window.PerflwReport`, `module.exports` for the pure parts):**
+  `buildReportView({ report, topics })` (pure, unit-tested) and the DOM page: per topic pre level → final level with an arrow and
+  a word ("Improved", "Same", "Lower", "Not comparable"), evidence counts ("4 items → 4 items"), per-dimension change only where both
+  sides have ≥ 2 items, "Not assessed" instead of a number when thin, a "Provisional" chip while `provisional`, and a "How this is
+  calculated" link to a short plain-words block. **No subject-wide percentage.** Opened from the hub at stage `report` and from the
+  final's results page. The full report (all attempts compared, retention, next cycle) is LS-024.
+- **End-to-end script:** `test/learning-ml1-smoke.js` and `"test:ml1": "node test/learning-ml1-smoke.js"` in `package.json`,
+  implementing `docs/ML1_ACCEPTANCE.md` step for step (the only `package.json` change allowed: that script line). Same CDP
+  harness as `test/electron-smoke.js` (share its helpers by requiring them if exported, else copy the minimum and say so). It
+  prints one `PASS`/`FAIL` line per step and a final summary, exits 0 only when every step passed, and writes the screenshots.
+- Stepper wiring (small edits to LS-008's code): `final_exam` and `report` actions as above; `main_learning` next action
+  "Set up the final" after a session ended.
+
+#### Relevant Files
+New: `src/learning-report.js`, `test/learning-report.test.js`, `test/learning-ml1-smoke.js`. Edited: `src/learning-ipc.js`
+(`assessment:create` exclusion for `final`, `mastery:report`), `src/preload.js` (`masteryReport`), `src/learning-journey.js`
+(final setup option, stage actions), `src/learning.js` (mount of the report page only), `src/index.html` (one script tag),
+`src/learning.css` (named rules), `package.json` (`test:ml1` line), `test/learning-ipc.test.js` (new cases). Read only:
+`docs/ML1_ACCEPTANCE.md`, `src/mastery-model.js`, `src/learning-insight.js`, `src/learning-quiz.js`, `src/learning-results.js`,
+`test/electron-smoke.js`.
+
+#### Dependencies
+LS-012 (INTEGRATED), LS-011, LS-010, LS-008, LS-007, LS-003, LS-004 (all INTEGRATED), PF-020 (G2).
+
+#### Restrictions
+No AI. No timer, pass mark, 50–100 item rule, retakes or retention (LS-023/LS-024). No schema change. No new IPC channel except
+`mastery:report`. No new dependency. Do not add selectors to earlier screens: report any missing selector in HO-028 (the script
+may use the selectors named in HO-023 to HO-027). Overlap check at release: nothing else edits `index.html`, `learning.css`,
+`learning-journey.js`, `learning-ipc.js`, `package.json` or `electron-smoke.js` while LS-034 runs.
+
+#### Acceptance Criteria
+- [ ] **Exclusion test:** `assessment:create` kind `final` never returns a question id used in any diagnostic of the journey; with
+      too few left it returns `{ requested, available }` with the shortfall; unreviewed AI items are refused (D3).
+- [ ] **`mastery:report` test:** for a fixture journey the output equals `mastery-model.topicLevel` on the diagnostic rows (pre) and
+      on all rows (post), and `improvement()`; `provisional` true when a counted open answer is `provisional`, false when all are
+      `final`; user B gets "not found"; extends the LS-007 contract test (channel and preload method).
+- [ ] **View-model unit test:** `buildReportView` labels (Improved / Same / Lower / Not comparable), "Not assessed", dimension
+      change hidden below 2 items on either side, no subject-wide percentage, Provisional chip.
+- [ ] **`npm run test:ml1` exits 0** on a clean checkout after `npm ci`, **three times in a row** (exit codes recorded), with every
+      step of `docs/ML1_ACCEPTANCE.md` printing `PASS`; report the run time. Any step that cannot be implemented is reported with
+      the reason (no silent skip).
+- [ ] The screenshots required by step 18 exist at 1280 px and 400 px; the report page and the final setup sheet are among them.
+- [ ] **S7 UI parity (D12):** the report page reuses `styles.css`/`learning.css` tokens, cards, chips, tables; new CSS rules named in
+      HO-028; screenshots beside `docs/ui-baseline/` (`03-*`).
+- [ ] Keyboard-only path through final setup and the report page; reduced motion respected.
+- [ ] S1 (`npm test`), `npm run test:electron` exit 0, S2, S3 (≤ ~600 lines per file), S4.
+
+#### Deliverables
+Summary, files, new CSS rules, screenshots, three recorded `test:ml1` exit codes with the run output summary, `npm test` and
+`test:electron` results, commit hash, ambiguities (report, do not decide). HANDOFF_LOG entry **HO-028**.
 
 #### Review
 **Reviewed By:**  
