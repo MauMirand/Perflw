@@ -43,9 +43,21 @@ strict CSP in `index.html`, external links only via `shell.openExternal` after U
 ## 2. Persistence
 
 - SQLite through `node:sqlite` (`DatabaseSync`), `PRAGMA foreign_keys = ON`.
-- **Schema evolution today is ad hoc**: `CREATE TABLE IF NOT EXISTS` plus "add the column if it is missing"
-  checks, and one table rebuild (`planner_items`) in `workspace.js`. No schema version, no pre-migration
-  backup. See PF-006 and ADR-002 in `coordination/`.
+- **Schema evolution is versioned** (PF-006, ADR-002) through `src/db-migrate.js`:
+  `migrate(db, { name, migrations, backup })`. The version is `PRAGMA user_version`; `migrations` is an ordered
+  list `{ version, up(db) }` numbered 1, 2, 3, …. Each pending migration runs in its own `BEGIN IMMEDIATE … COMMIT`
+  together with the `user_version` update; on error it rolls back and throws a plain-language message.
+  `PRAGMA foreign_keys = ON` is set per connection before migrating (it is a no-op inside a transaction).
+- **Migration lists**: `WORKSPACE_MIGRATIONS` (`src/workspace.js`) and `ACCOUNT_MIGRATIONS` (`src/auth.js`).
+  Version 1 of each is the former startup bootstrap, idempotent, so every pre-PF-006 install (version 0, any
+  subset of old columns) reaches the same shape. Workspace v1 includes the tables of the automation modules
+  (`createAutomationSchema`, `createSessionSchema`, `createConnectionSchema`); their store constructors no
+  longer run DDL. A new schema change is a new numbered migration, never an edit of an applied one. Version 2
+  is reserved for the Learning System tables (LS-005).
+- **Backup**: before the first pending migration on a file that already has tables, a `VACUUM INTO` copy is
+  written next to it as `<file>.bak-v<from>-<timestamp>` (written as `.tmp`, checked with `quick_check`, then
+  renamed); the newest 3 are kept. A failed backup stops the upgrade before any change. The live file is never
+  moved or deleted. A file whose version is newer than the app knows is left untouched.
 - Files: write to `<file>.tmp` then `rename` (atomic on the same volume), mode `0o600`. Not every writer does
   this yet (PF-007, ADR-003).
 

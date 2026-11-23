@@ -79,7 +79,8 @@ function readSettings(json) {
   return out;
 }
 
-function createSessionStore(db) {
+/* Schema for session settings, message metadata and memory. Called by workspace migration 1 (src/workspace.js). */
+function createSessionSchema(db) {
   const columns = table => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name));
   if (!columns('chat_sessions').has('settings_json')) db.exec("ALTER TABLE chat_sessions ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'");
   if (!columns('chat_messages').has('meta_json')) db.exec('ALTER TABLE chat_messages ADD COLUMN meta_json TEXT');
@@ -88,7 +89,9 @@ function createSessionStore(db) {
     );
     CREATE INDEX IF NOT EXISTS chat_memory_user ON chat_memory(user_id, created_at);
     CREATE TABLE IF NOT EXISTS chat_defaults (user_id TEXT PRIMARY KEY, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+}
 
+function createSessionStore(db) {
   const session = (userId, chatId, { writable = false } = {}) => {
     const row = db.prepare('SELECT * FROM chat_sessions WHERE id=? AND user_id=?').get(chatId, userId);
     if (!row || (writable && row.archived_at)) fail('Conversation not found.');
@@ -169,4 +172,4 @@ function createSessionStore(db) {
   return { getChat, getChatSettings, updateChatSettings, getChatDefaults, setChatDefaults, applyChatDefaults, listChatMessages, addChatMessage, deleteChatMessages, listMemory, addMemory, deleteMemory };
 }
 
-module.exports = { createSessionStore, cleanSettings, defaultSettings, CHAT_PREFS: PREFS, CHAT_LIMITS: LIMITS };
+module.exports = { createSessionStore, createSessionSchema, cleanSettings, defaultSettings, CHAT_PREFS: PREFS, CHAT_LIMITS: LIMITS };

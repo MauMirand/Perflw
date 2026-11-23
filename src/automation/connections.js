@@ -11,13 +11,17 @@ const OLLAMA_ID = 'ollama-local';
 const fail = message => { throw new Error(message); };
 const now = () => new Date().toISOString();
 
-function createConnectionStore(db, secrets) {
+/* Schema for provider connections. Called by workspace migration 1 (src/workspace.js), not by the store. */
+function createConnectionSchema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS provider_connections (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, label TEXT NOT NULL,
       base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', context_window INTEGER,
       supports_tools INTEGER NOT NULL DEFAULT 0, secret BLOB, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS provider_connections_user ON provider_connections(user_id, label);`);
+}
+
+function createConnectionStore(db, secrets) {
 
   const builtIn = () => ({ id: OLLAMA_ID, type: 'ollama', label: PROVIDER_TYPES.ollama.label, baseUrl: PROVIDER_TYPES.ollama.fixedBase, model: '', contextWindow: null, supportsTools: false, hasKey: false, builtIn: true });
   const publicRow = row => ({ id: row.id, type: row.type, label: row.label, baseUrl: row.base_url || PROVIDER_TYPES[row.type]?.fixedBase || '', model: row.model, contextWindow: row.context_window || null, supportsTools: Boolean(row.supports_tools), hasKey: Boolean(row.secret && row.secret.length), builtIn: false, updatedAt: row.updated_at });
@@ -97,4 +101,4 @@ function createConnectionStore(db, secrets) {
   return { list, get, resolve, save, remove };
 }
 
-module.exports = { createConnectionStore, OLLAMA_ID };
+module.exports = { createConnectionStore, createConnectionSchema, OLLAMA_ID };

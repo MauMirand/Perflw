@@ -2,17 +2,17 @@ const { DatabaseSync } = require('node:sqlite');
 const { randomBytes, scryptSync, timingSafeEqual, createHash } = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
+const { migrate } = require('./db-migrate');
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const hashToken = token => createHash('sha256').update(token).digest('hex');
 const fail = message => { throw new Error(message); };
 
-function createAuth(root) {
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(path.join(root, 'accounts.sqlite'));
-  db.exec(`PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS users (
+/* Migration 1 = the accounts schema as it was before versioning (PF-006): the former startup bootstrap, idempotent,
+   run inside the migration runner's transaction. */
+function accountsSchemaV1(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
       display_name TEXT, bio TEXT, image_name TEXT,
       cover_image_name TEXT,
@@ -35,6 +35,18 @@ function createAuth(root) {
   for (const [name, definition] of profileMigrations) {
     if (!userColumns.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
   }
+}
+
+const ACCOUNT_MIGRATIONS = Object.freeze([{ version: 1, up: accountsSchemaV1 }]);
+
+function createAuth(root, { migrations = ACCOUNT_MIGRATIONS } = {}) {
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const file = path.join(root, 'accounts.sqlite');
+  const db = new DatabaseSync(file);
+  try {
+    db.exec('PRAGMA foreign_keys = ON'); // per connection; a no-op inside a transaction, so set before migrating
+    migrate(db, { name: 'accounts', migrations, backup: file });
+  } catch (error) { db.close(); throw error; }
 
   function publicUser(row) {
     return { id: row.id, email: row.email, displayName: row.display_name || '',
@@ -125,4 +137,4 @@ function createAuth(root) {
   return { register, login, session, saveProfile, logout, close: () => db.close() };
 }
 
-module.exports = { createAuth };
+module.exports = { createAuth, ACCOUNT_MIGRATIONS };
