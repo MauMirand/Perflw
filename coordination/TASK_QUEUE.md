@@ -409,7 +409,7 @@ block LS-002.
 
 **LS-002 · `src/assessment-model.js`** — P1 · Depends: LS-001 (ADR-005 confirmed). Full spec below.
 
-**LS-003 · `src/mastery-model.js`** — P1 · Depends: LS-002 (APPROVED). Submission HO-016.
+**LS-003 · `src/mastery-model.js`** — P1 · Depends: LS-002 (INTEGRATED). **APPROVED** (HO-030, `d290d0b` on `claude/determined-ishizaka-801785`, code `3b3ebd6`, `npm test` 202/202). Submission HO-016.
 - Brief: pure module, same dual-load pattern as `topic-model.js`/`assessment-model.js`; new files
   `src/mastery-model.js`, `test/mastery-model.test.js` only; reads spec §5.1, §5.4 (incl. the D11 one-cycle scope:
   the caller passes one journey's evidence, the module never filters by journey itself) and §4.4 grader weights.
@@ -899,7 +899,7 @@ a plain-language message naming the field.
 | `assessment:abandon` | `{ assessmentId }` | `abandonAssessment` |
 | `assessment:grade` | `{ itemId, verdicts, grader? }` | `gradeOpenAnswer`, `grader` `self` or `manual` (default `self`) |
 | `assessment:results` | `{ assessmentId }` | full view; rejected unless `submitted`/`graded` ("Submit the assessment to see results.") |
-| `mastery:journey` | `{ journeyId }` | `journeyEvidence` → `mastery-model` (default config) |
+| `mastery:journey` | `{ journeyId }` | `journeyEvidence` → `mastery-model` (default config). Mapping (HO-030 §4.4, §5): `abandoned = assessmentStatus === 'abandoned'`; `now` from an injected clock; `aiConfidence` from stored AI feedback when `grader` is `ai`; for `final` rows pass only the latest graded final attempt, other kinds all attempts; the store row gains `assessmentStatus` (report the addition) |
 | `mastery:subject` | `{ subjectId }` | for each topic of the subject: the level from the subject's most recent non-archived journey's evidence (D11: one cycle), with that journey's id and cycle; no journey → `[]` |
 
 Not in this task: `questions:generate`/`templates`, `assessment:check`/`acceptGrade`/`regrade`, `study:*`,
