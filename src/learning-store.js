@@ -599,6 +599,11 @@ function createLearningStore(db) {
     const row = owned('learning_schedule', 'Scheduled session', userId, args(input).scheduleId);
     return listScheduleRows(userId, 'ls.id=?', row.id)[0];
   }
+  /* Study time of a subject: the sum of the focus entries its learning sessions saved (ADR-006, D2). */
+  function studySeconds(userId, input) {
+    const subject = subjectOf(userId, args(input).subjectId);
+    return one('SELECT COALESCE(SUM(f.duration_seconds),0) AS s FROM learning_sessions ls JOIN focus_entries f ON f.id=ls.focus_entry_id WHERE ls.user_id=? AND ls.subject_id=?', userId, subject.id).s;
+  }
   /* System use only (quit and crash recovery in main.js): every open session of every account. Not an IPC channel. */
   function listOpenSessions() {
     return all('SELECT id, user_id, started_at, updated_at, subject_id FROM learning_sessions WHERE ended_at IS NULL')
@@ -698,7 +703,7 @@ function createLearningStore(db) {
     saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer, setAiGrade, acceptAiGrade,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
-    recordReview, getReview, dueReviews, createSchedule, listSchedule, getSchedule,
+    recordReview, getReview, dueReviews, studySeconds, createSchedule, listSchedule, getSchedule,
     journeyEvidence,
   };
 }

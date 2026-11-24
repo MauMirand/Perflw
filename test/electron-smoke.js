@@ -471,16 +471,16 @@ async function run() {
   await submit('[data-ln-form]');
   await waitFor("!document.querySelector('[data-ln-form]') && document.querySelectorAll('[data-ln-subject]').length === 1", 'subject pocket created');
   await waitFor("document.querySelector('.ln-panel .ln-name')?.textContent.trim() === 'Calculus'", 'new subject previewed');
-  assert.ok((await text('.ln-panel-body')).includes('0% mastery'), 'a new subject starts at 0% mastery');
-  // Mastery and time spent are set on the edit panel
+  assert.ok((await text('.ln-panel-body')).includes('Not assessed yet'), 'a new subject has no assessment evidence yet');
+  // Mastery and time are computed (ADR-006, D2): the edit panel no longer types them, and an old manual value stays read-only and labelled.
+  const subjectId = await evaluate("document.querySelector('[data-ln-subject]').dataset.lnSubject");
+  await evaluate(`window.learningData.updateSubject(${q(subjectId)}, { mastery: 42, minutes: 200 })`);
   await click('[data-ln="menu"]');
   await click('.ln-menu [data-ln="edit"]');
-  await waitFor("document.querySelector('#ln-dialog-title')?.textContent === 'Edit Subject' && !!document.querySelector('[data-ln-form] [name=\"mastery\"]')", 'edit panel with mastery');
-  await fill('[data-ln-form] [name="mastery"]', '42');
-  await fill('[data-ln-form] [name="hours"]', '3');
-  await fill('[data-ln-form] [name="minutes"]', '20');
+  await waitFor("document.querySelector('#ln-dialog-title')?.textContent === 'Edit Subject' && !!document.querySelector('[data-ln-form] [name=\"description\"]')", 'edit panel');
+  assert.equal(await count('[data-ln-form] [name="mastery"], [data-ln-form] [name="hours"], [data-ln-form] [name="minutes"]'), 0, 'the edit panel no longer edits mastery or time');
   await submit('[data-ln-form]');
-  await waitFor("!document.querySelector('[data-ln-form]') && (document.querySelector('.ln-panel-body')?.textContent || '').includes('42% mastery')", 'subject edited');
+  await waitFor("!document.querySelector('[data-ln-form]') && (document.querySelector('.ln-panel-body')?.textContent || '').includes('Earlier self-estimate (entered manually)')", 'subject saved; the old value is shown as an earlier self-estimate');
   const meta = await text('.ln-panel-body');
   for (const part of ['Major', '42% mastery', '3h 20m spent', 'Limits, derivatives and integrals.', 'Topics', 'Mastery Statistics']) assert.ok(meta.includes(part), `Preview shows ${part}`);
   assert.ok(await evaluate("getComputedStyle(document.querySelector('.ln-panel .ln-cover-art')).backgroundImage.startsWith('url(\"data:image/png')"), 'Preview cover uses the subject image');

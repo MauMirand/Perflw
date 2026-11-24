@@ -87,12 +87,12 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'ai:status', 'assessment:abandon', 'assessment:acceptGrade', 'assessment:aiGrade', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'retention:status',
+    'ai:status', 'assessment:abandon', 'assessment:acceptGrade', 'assessment:aiGrade', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'learning:summary', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
     'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:generate', 'questions:list', 'questions:retire', 'questions:review', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list',
   ].sort());
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:ai|journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:ai|journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history|learning:summary)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -626,4 +626,17 @@ test('AI grade, then the student adjusts it: final, manual, the AI verdict kept 
   assert.deepEqual(adjusted.feedback.original.map(c => c.verdict), ['missing', 'missing'], 'the original AI verdicts are kept');
   t.as({ id: 'v' });
   await assert.rejects(async () => t.call('assessment:aiGrade', { itemId: made.items[0].id }), /not found/i);
+});
+
+test('the subject summary is computed from evidence and sessions, never typed (ADR-006, D2)', () => {
+  const t = setup(); seed(t);
+  const empty = t.call('learning:summary', { subjectId: 's1' });
+  assert.deepEqual(empty, { hasEvidence: false, total: 0, proficientPlus: 0, assessed: 0, studySeconds: 0 });
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  assert.equal(t.call('learning:summary', { subjectId: 's1' }).hasEvidence, false, 'a journey without answers is still no evidence');
+  runDiagnostic(t, journey, wrongChoice, 4);
+  const after = t.call('learning:summary', { subjectId: 's1' });
+  assert.equal(after.hasEvidence, true); assert.equal(after.total, 2); assert.ok(after.proficientPlus <= after.assessed && after.assessed <= 2);
+  t.as({ id: 'v' });
+  assert.throws(() => t.call('learning:summary', { subjectId: 's1' }), /not found/i);
 });

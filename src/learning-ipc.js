@@ -566,6 +566,15 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const journey = store().getJourney(u, a);
     return { journeyId: journey.id, cycle: journey.cycle, topics: topicLevels(u, journey) };
   });
+  /* ADR-006 / D2: "n of m topics Proficient or better" from evidence, and study time from the sessions' focus entries. Never an average. */
+  on('learning:summary', ['subjectId'], (u, a) => {
+    const s = store(); const journeys = s.listJourneys(u, { subjectId: a.subjectId }).filter(j => j.status !== 'archived');
+    const levels = journeys.length ? topicLevels(u, journeys[journeys.length - 1]) : [];
+    return {
+      hasEvidence: levels.some(l => l.items > 0), total: levels.length, proficientPlus: levels.filter(l => ['proficient', 'mastered'].includes(l.level)).length,
+      assessed: levels.filter(l => l.level !== 'not_assessed').length, studySeconds: s.studySeconds(u, { subjectId: a.subjectId }),
+    };
+  });
   on('mastery:subject', ['subjectId'], (u, a) => {
     const journeys = store().listJourneys(u, a).filter(j => j.status !== 'archived');
     if (!journeys.length) return [];

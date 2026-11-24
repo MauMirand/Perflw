@@ -28,6 +28,24 @@
 
   const subject = id => L.subjects.find(s => s.id === id) || null;
   const typeLabel = type => (type === 'minor' ? 'Minor' : 'Major');
+  /* ADR-006 / D2: the subject summary is computed from assessments and study sessions. Until a subject has evidence, the old
+     manual value stays visible, read-only and labelled, and is never used in a calculation. */
+  const summaries = new Map(); // subjectId → { text } filled from learningData.learningSummary
+  function studyTime(seconds) {
+    const m = Math.round((seconds || 0) / 60); if (!m) return 'No study time yet';
+    const h = Math.floor(m / 60), r = m % 60; return `${h ? `${h}h` : ''}${h && r ? ' ' : ''}${r ? `${r}m` : ''} studied`;
+  }
+  function earlierEstimate(s) { return s.mastery || s.minutes ? `Earlier self-estimate (entered manually): ${s.mastery}% mastery · ${spent(s.minutes)}` : 'Not assessed yet · No study time yet'; }
+  function summaryText(s) {
+    const c = summaries.get(s.id);
+    if (!c) return earlierEstimate(s);
+    return c.hasEvidence ? `${c.proficientPlus} of ${c.total} topic${c.total === 1 ? '' : 's'} Proficient or better · ${studyTime(c.studySeconds)}` : `${earlierEstimate(s)}${c.studySeconds ? ` · ${studyTime(c.studySeconds)}` : ''}`;
+  }
+  async function loadSummary(id) {
+    if (!api.learningSummary) return;
+    try { summaries.set(id, await api.learningSummary({ subjectId: id })); } catch { return; }
+    for (const el of document.querySelectorAll(`[data-ln-summary="${CSS.escape(id)}"]`)) { const s = subject(id); if (s) el.textContent = summaryText(s); }
+  }
   function spent(minutes) {
     if (!minutes) return 'No time spent yet';
     const h = Math.floor(minutes / 60), m = minutes % 60;
@@ -172,7 +190,7 @@
         </div>
         <button class="ln-learn" type="button" data-ln="learn" data-id="${esc(s.id)}">Learn</button>
       </div>
-      <p class="ln-spent">${esc(spent(s.minutes))} · ${s.mastery}% mastery</p>
+      <p class="ln-spent" data-ln-summary="${esc(s.id)}">${esc(summaryText(s))}</p>
       <p class="ln-desc ln-panel-desc${s.description ? '' : ' empty-desc'}">${s.description ? esc(s.description) : 'No description yet.'}</p>`;
   }
   function panel() {
@@ -233,7 +251,7 @@
           <button class="ln-learn ln-learn-lg" type="button" data-ln="learn" data-id="${esc(s.id)}">Learn</button>
         </div>
         <p class="ln-desc${s.description ? '' : ' empty-desc'}">${s.description ? esc(s.description) : 'No description yet.'}</p>
-        <p class="ln-page-stats">${s.mastery}% mastery · ${esc(spent(s.minutes))}</p>
+        <p class="ln-page-stats" data-ln-summary="${esc(s.id)}">${esc(summaryText(s))}</p>
       </header>
       <div class="ln-page-grid">${topicsSection(s)}${placeholders(true)}</div>
       <div data-qz-host></div>
@@ -249,6 +267,7 @@
     const root = $('.ln-root'); if (!root) return;
     $$('[data-ln-img]', root).forEach(el => { el.style.backgroundImage = `url("${el.dataset.lnImg}")`; });
     $$('[data-ln-w]', root).forEach(el => { el.style.width = `${el.dataset.lnW}%`; });
+    for (const el of $$('[data-ln-summary]', root)) loadSummary(el.dataset.lnSummary);
     const quiz = $('[data-qz-host]', root); const quizSubject = quiz && L.page ? subject(L.page) : null;
     if (quiz && quizSubject && window.PerflwQuiz) window.PerflwQuiz.mount(quiz, quizSubject);
     if (L.focus) { const el = $(L.focus, root); if (el) el.focus(); L.focus = null; }
@@ -830,7 +849,7 @@
           </div>
         </div>
       </div>
-      ${s ? `<div class="ln-field-row">
+      ${false ? `<div class="ln-field-row">
         <label class="ln-field"><span>Mastery %</span><input class="field" name="mastery" type="number" min="0" max="100" step="1" inputmode="numeric" value="${s.mastery}"></label>
         <div class="ln-field"><span id="ln-time-label">Time spent</span>
           <span class="ln-time" role="group" aria-labelledby="ln-time-label">
@@ -893,9 +912,8 @@
     try {
       const name = form.name.value.trim();
       if (!name) { form.name.focus(); replay(form.name, 'invalid'); throw new Error('Give the subject a name.'); }
-      // Mastery and time spent are on the edit panel only; a new subject starts at 0.
-      const minutes = form.hours ? whole(form.hours.value || '0', 'Hours', 16000) * 60 + whole(form.minutes.value || '0', 'Minutes', 59) : 0;
-      payload = { name, type: draft.type, mastery: form.mastery ? whole(form.mastery.value || '0', 'Mastery', 100) : 0, minutes, description: form.description.value, imageName: draft.imageName };
+      // Mastery and time are computed from assessments and study sessions (ADR-006): not typed here, and left untouched in the columns.
+      payload = { name, type: draft.type, description: form.description.value, imageName: draft.imageName };
     } catch (problem) { error.textContent = problem.message; replay(error, 'shake'); return; }
     dialog.busy = true; error.textContent = '';
     const submit = $('button[type="submit"]', el); submit.disabled = true;
