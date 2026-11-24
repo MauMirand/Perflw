@@ -1811,7 +1811,7 @@ Not pushed, not merged.
 ### HO-041 — Claude A built the quiz and exam slice (branch `feature/ml1-slice`)
 
 **Date:** 2026-11-24  
-**Task ID:** LS-006 (base), LS-007 to LS-013, LS-015 to LS-018, LS-020 to LS-022, LS-024 (parts), LS-026, LS-033, PF-021  
+**Task ID:** LS-006 (base), LS-007 to LS-027, LS-029 to LS-030, LS-032, LS-033, LS-034 (script), PF-021  
 **From:** Claude A (built at the owner's explicit request: "start building the feature", "add all the feature about quizzes and exams", "loop until everything we planned is integrated")  
 **To:** independent reviewer (not Claude A), Project Owner  
 **Status:** SUBMITTED (not reviewed, not merged, not pushed)  
@@ -1836,11 +1836,14 @@ Not pushed, not merged.
 | `npm run test:electron` on this branch | **UNVERIFIED** (not run on this branch) | |
 | Visual review against `docs/ui-baseline/` (S7) | **UNVERIFIED**: screenshots are written by the smoke test but not compared | |
 
-#### 3. Not verified or not built
-- **AI jobs** are tested with a fake `runAgent`. A real model was **not** run end to end (a local model exists on this machine, the button was seen enabled). Model output quality is unknown; bad output is rejected, never guessed.
-- **Not built:** AI explanation in targeted notes (LS-019) and side-note AI help (LS-032); replacing the manual subject mastery % (LS-025: it would change assertions in `test/electron-smoke.js`, which PF-020 also edits); Home Learn card (LS-027); Analytics section (LS-028, owner decision PF-019); onboarding audit (LS-029); performance (LS-030); game layer (LS-031, owner design first); the separate journey-hub, bank and quiz modules of LS-008 to LS-011 (this slice is one module, `learning-quiz.js`, about 900 lines, over the 600-line guide).
-- **Deviations to reconcile:** the one-module layout; `assessment_answers.attempt` now means "second try" in practice; the final-learning gate counts any ended Review session started after the pre-test (it does not track that the evaluation was opened); retention uses a simple "Proficient or Mastered" topic filter.
-- LS-006 here is the pre-revision store plus additions; its revision 2 (HO-021) must be merged in before review of the store.
+#### 3. Not verified, not built, deviations
+- **Verified here:** `npm test` 305/305; `npm run test:electron` (the existing smoke, after the LS-025 assertion change in `test/electron-smoke.js`) passes; `npm run test:ml1` (about 30 steps, real Electron, throwaway data) passes, including no http(s) request, no console error, accessible names, text contrast at least 4.5:1, navigator targets at least 24 px and database invariants after quit; `npm run bench:quiz` (1,000 questions, 200 assessments): `mastery:subject` 14 ms, quiz start 33 ms against targets of 100 and 200 ms.
+- **AI jobs** (question writer LS-017, grader LS-018, note explanation LS-019, Check my note LS-032) are tested with a fake `runAgent`. A real model was **not** run end to end (a local model exists on this machine). Output quality is unknown; unusable output is rejected, never guessed.
+- **Also built since the first version of this entry:** replacing the manual mastery/time editing with a computed summary (LS-025: `test/electron-smoke.js` changed, which PF-020 also edits, so expect a merge conflict there), the Home Learn card (LS-027; no UI writes `planner_items` of kind `learning`, so it is not used), first-use hint and loading state (LS-029), the benchmark (LS-030), the accessibility pass (LS-014), pre-test setup sheet, extra study for weak topics (LS-021).
+- **Not built, blocked on you:** Analytics section (LS-028, owner decision PF-019: Analytics is not reachable from navigation), Quest game layer (LS-031, owner design first).
+- **Not independently reviewed. `design:accessibility-review` was applied as a checklist by Claude A, not by a person with a screen reader:** manual testing with NVDA or VoiceOver is still needed.
+- **Deviations to reconcile:** one renderer module `learning-quiz.js` (about 1,100 lines, over the 600-line guide) instead of the separate journey hub, bank, quiz and results modules of LS-008 to LS-011; one branch instead of one task per branch; `assessment_answers.attempt` now means "second try" in practice; the final-learning gate counts any ended Review session started after the pre-test (it does not track that the evaluation was opened); retention uses a "Proficient or Mastered" topic filter; the study sessions run from the subject page, not from a bar inside the topic viewer (opened topics and sections are still recorded); calendar events are created and cancelled from the quiz block, the calendar view itself does not offer Start on them yet.
+- **LS-006 here** is the pre-revision store plus additions; its revision 2 (HO-021) must be merged in before the store is reviewed.
 
 ---
 
