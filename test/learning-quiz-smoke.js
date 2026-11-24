@@ -374,6 +374,18 @@ async function main() {
   await waitFor("!!document.querySelector('.qz-table caption') && /Pre-test vs now/.test(document.querySelector('.qz-table caption').textContent)", 'report');
   step('report: pre-test vs now by topic');
   await shoot('quiz-10-report');
+  // Home Learn card (LS-027): where to continue, and no typed mastery percentage any more (LS-025).
+  await click('.rail [data-go="home"]');
+  await waitFor("!!document.querySelector('.profile-card')", 'home page');
+  await waitFor("!!document.querySelector('[data-ln-home] .t-item')", 'the Learn card offers where to continue');
+  const learnCard = await evaluate("document.querySelector('[data-card=\"learn\"]').textContent");
+  assert.ok(/Continue: Chemistry/.test(learnCard) && !/% mastery/.test(learnCard), 'continue row present, no manual mastery percentage');
+  step('home Learn card: continue row with stage and cycle, computed summary, no manual percentage');
+  await click('.nav-item[data-go="learning"]');
+  await waitFor("document.querySelectorAll('[data-ln-subject]').length === 1", 'subjects list');
+  await evaluate("(() => { const el = document.querySelector('[data-ln-subject]'); el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })); return true; })()");
+  await waitFor("!!document.querySelector('.qz')", 'back on the subject page with the quiz block');
+
   // Next cycle: a new journey whose statistics start at zero; the old one stays.
   await click('[data-qz="home"]');
   await waitFor("!!document.querySelector('[data-qz=\"newcycle\"]')", 'next cycle offered after a final');

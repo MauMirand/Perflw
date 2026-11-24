@@ -575,6 +575,19 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
       assessed: levels.filter(l => l.level !== 'not_assessed').length, studySeconds: s.studySeconds(u, { subjectId: a.subjectId }),
     };
   });
+  /* Home "Learn" card (LS-027): for each given subject with a journey: its stage, the reviews due and the next scheduled session. */
+  on('learning:home', ['subjectIds'], (u, a) => {
+    if (!Array.isArray(a.subjectIds)) fail('subjectIds must be a list.');
+    const s = store(); const rows = [];
+    for (const subjectId of a.subjectIds.slice(0, 12)) {
+      let journeys; try { journeys = s.listJourneys(u, { subjectId }).filter(j => j.status !== 'archived'); } catch { continue; }
+      if (!journeys.length) continue;
+      const journey = journeys[journeys.length - 1];
+      const next = s.listSchedule(u, { subjectId }).find(x => Date.parse(x.startsAt) >= now() - 3600e3) || null;
+      rows.push({ subjectId, journeyId: journey.id, stage: journey.stage, cycle: journey.cycle, due: s.dueReviews(u, { subjectId, today: today() }).length, next: next ? { kind: next.kind, startsAt: next.startsAt } : null });
+    }
+    return rows;
+  });
   on('mastery:subject', ['subjectId'], (u, a) => {
     const journeys = store().listJourneys(u, a).filter(j => j.status !== 'archived');
     if (!journeys.length) return [];

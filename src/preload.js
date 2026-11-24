@@ -108,6 +108,7 @@ contextBridge.exposeInMainWorld('learningData', Object.freeze({
   assessmentResults: arg => call('assessment:results', arg),
   masterySubject: arg => call('mastery:subject', arg),
   learningSummary: arg => call('learning:summary', arg),
+  learningHome: arg => call('learning:home', arg),
   masteryJourney: arg => call('mastery:journey', arg),
   masteryReport: arg => call('mastery:report', arg),
   reviewDue: arg => call('review:due', arg),

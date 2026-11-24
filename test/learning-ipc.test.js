@@ -87,12 +87,12 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'ai:status', 'assessment:abandon', 'assessment:acceptGrade', 'assessment:aiGrade', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'learning:summary', 'retention:status',
+    'ai:status', 'assessment:abandon', 'assessment:acceptGrade', 'assessment:aiGrade', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'learning:home', 'learning:summary', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
     'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:generate', 'questions:list', 'questions:retire', 'questions:review', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list',
   ].sort());
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:ai|journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history|learning:summary)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:ai|journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history|learning:home|learning:summary)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -639,4 +639,16 @@ test('the subject summary is computed from evidence and sessions, never typed (A
   assert.equal(after.hasEvidence, true); assert.equal(after.total, 2); assert.ok(after.proficientPlus <= after.assessed && after.assessed <= 2);
   t.as({ id: 'v' });
   assert.throws(() => t.call('learning:summary', { subjectId: 's1' }), /not found/i);
+});
+
+test('the Home card rows: stage, reviews due and the next scheduled session, only for subjects with a journey, only your own', () => {
+  const t = setup(); seed(t);
+  assert.deepEqual(t.call('learning:home', { subjectIds: ['s1'] }), []);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const at = new Date(t.clock.now + 86400e3).toISOString(); const end = new Date(t.clock.now + 90000e3).toISOString();
+  t.call('schedule:create', { journeyId: journey.id, kind: 'practice', startsAt: at, endsAt: end });
+  const rows = t.call('learning:home', { subjectIds: ['s1', 'sv', 'nope'] });
+  assert.equal(rows.length, 1, 'a subject of another account or a missing one adds nothing');
+  assert.equal(rows[0].stage, 'material'); assert.equal(rows[0].cycle, 1); assert.equal(rows[0].due, 0); assert.equal(rows[0].next.kind, 'practice');
+  assert.throws(() => t.call('learning:home', { subjectIds: 's1' }), /must be a list/);
 });

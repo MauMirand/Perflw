@@ -41,6 +41,20 @@
     if (!c) return earlierEstimate(s);
     return c.hasEvidence ? `${c.proficientPlus} of ${c.total} topic${c.total === 1 ? '' : 's'} Proficient or better · ${studyTime(c.studySeconds)}` : `${earlierEstimate(s)}${c.studySeconds ? ` · ${studyTime(c.studySeconds)}` : ''}`;
   }
+  const STAGE_WORDS = { material: 'Material', pretest_setup: 'Pre-test setup', pretest: 'Pre-test', diagnostic: 'Diagnostic', targeted_notes: 'Targeted notes', main_learning: 'Main learning', practice: 'Practice', mistake_analysis: 'Mistake analysis', supplementary: 'Supplementary', final_learning: 'Final learning', final_exam: 'Final exam', report: 'Report', retention: 'Retention check' };
+  const NEXT_WORDS = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
+  /* The Home card's extra rows: where to continue, what is due, what is scheduled. Filled when the data arrives. */
+  function homeBlock(subjects) {
+    const ids = subjects.map(x => x.id);
+    if (!ids.length || !api.learningHome) return '';
+    api.learningHome({ subjectIds: ids }).then(rows => {
+      const box = document.querySelector('[data-ln-home]'); if (!box) return;
+      const name = id => (subjects.find(x => x.id === id) || {}).name || '';
+      box.innerHTML = rows.length ? `<ul class="t-list ln-home-rows" aria-label="Learning next steps">${rows.slice(0, 3).map(r => `<li><button class="t-item" type="button" data-action="home-subject" data-id="${esc(r.subjectId)}"><span class="t-main"><strong>Continue: ${esc(name(r.subjectId))}</strong><small>${esc(STAGE_WORDS[r.stage] || r.stage)} · cycle ${r.cycle}${r.due ? ` · ${r.due} review${r.due === 1 ? '' : 's'} due` : ''}${r.next ? ` · next: ${esc(NEXT_WORDS[r.next.kind] || r.next.kind)} ${esc(String(r.next.startsAt).replace('T', ' ').slice(0, 16))}` : ''}</small></span></button></li>`).join('')}</ul>` : '';
+    }).catch(() => {});
+    for (const id of ids) loadSummary(id);
+    return '<div data-ln-home aria-live="polite"></div>';
+  }
   async function loadSummary(id) {
     if (!api.learningSummary) return;
     try { summaries.set(id, await api.learningSummary({ subjectId: id })); } catch { return; }
@@ -1126,7 +1140,7 @@
   }
 
   window.PerflwLearning = {
-    init, load, reset, render, mount, home,
+    init, load, reset, render, mount, home, homeBlock, summaryText: sub => summaryText(sub),
     profile: () => L.profile,
     list: () => L.subjects.slice(),
     open: id => { if (subject(id)) { L.page = id; L.preview = id; } },
