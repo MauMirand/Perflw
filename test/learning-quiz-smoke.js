@@ -26,7 +26,8 @@ async function evaluate(expression) {
 async function waitFor(expression, label, timeout = 20000) {
   const until = Date.now() + timeout; let last;
   while (Date.now() < until) { try { last = await evaluate(expression); if (last) return last; } catch (error) { last = error.message; } await sleep(80); }
-  throw new Error(`Timed out: ${label} (last: ${String(last).slice(0, 200)})`);
+  let shown = ''; try { shown = await evaluate("(document.querySelector('.qz-error') || {}).textContent || ''"); } catch { /* page gone */ }
+  throw new Error(`Timed out: ${label} (last: ${String(last).slice(0, 200)})${shown ? ` · on screen: ${shown}` : ''}`);
 }
 const q = s => JSON.stringify(s);
 const click = s => evaluate(`(() => { const el = document.querySelector(${q(s)}); if (!el) throw new Error('Missing ' + ${q(s)}); el.click(); return true; })()`);
@@ -124,7 +125,14 @@ async function main() {
   const subjectId = await evaluate("document.querySelector('[data-ln-subject]').dataset.lnSubject");
   await evaluate(`window.learningData.addTopic(${q(subjectId)}, { title: 'Ionic bonds' })`);
   await evaluate("(() => { const el = document.querySelector('[data-ln-subject]'); el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })); return true; })()");
-  await waitFor("document.querySelector('.ln-page-head h1')?.textContent === 'Chemistry' && !!document.querySelector('.qz')", 'subject page with the quiz block');
+  await waitFor("document.querySelector('.ln-page-head h1')?.textContent === 'Chemistry' && !!document.querySelector('[data-qz-eval] .qz-tabs')", 'subject page with the Evaluation Cycle card');
+  assert.ok(await evaluate("/Study/.test(document.querySelector('.ln-page-head [data-ln=learn]').textContent) && !!document.querySelector('[data-ln=start-session]')"), 'header has Study and Start your session');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-evtab]')].map(b => b.textContent)"), ['Pre-Test', 'Practice', 'Final Exam']);
+  assert.ok(await evaluate("document.querySelector('[data-qz-host]').hidden"), 'the full workspace is closed until asked for');
+  await shoot('quiz-0-card');
+  await click('[data-qz-evexpand]');
+  await waitFor("!document.querySelector('[data-qz-host]').hidden && !!document.querySelector('.qz')", 'full workspace open');
+  step('subject page: Study, Start your session, Evaluation Cycle card with tabs; expand opens everything');
   await waitFor("/0 questions in your bank/.test(document.querySelector('.qz').textContent)", 'empty bank message');
   assert.ok(await evaluate("/How this works/.test(document.querySelector('.qz').textContent)"), 'the first-use hint is shown on a fresh subject');
   await click('[data-qz="hint-dismiss"]');
@@ -411,7 +419,10 @@ async function main() {
   await click('.nav-item[data-go="learning"]');
   await waitFor("document.querySelectorAll('[data-ln-subject]').length === 1", 'subjects list');
   await evaluate("(() => { const el = document.querySelector('[data-ln-subject]'); el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })); return true; })()");
-  await waitFor("!!document.querySelector('.qz')", 'back on the subject page with the quiz block');
+  await waitFor("!!document.querySelector('[data-qz-eval] .qz-gauge')", 'back on the subject page with the card');
+  assert.ok(await evaluate("/Correct/.test(document.querySelector('[data-qz-eval]').textContent)"), 'the card shows the latest result with its gauge');
+  if (await evaluate("document.querySelector('[data-qz-host]').hidden")) await click('[data-qz-evexpand]');
+  await waitFor("!!document.querySelector('.qz') && !document.querySelector('[data-qz-host]').hidden", 'workspace open again');
 
   // Next cycle: a new journey whose statistics start at zero; the old one stays.
   await click('[data-qz="home"]');

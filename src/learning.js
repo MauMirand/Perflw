@@ -262,12 +262,12 @@
             <h1 tabindex="-1">${esc(s.name)}</h1>
             <span class="ln-type" title="Subject type">${typeLabel(s.type)}</span>
           </div>
-          <button class="ln-learn ln-learn-lg" type="button" data-ln="learn" data-id="${esc(s.id)}">Learn</button>
+          <span class="ln-head-actions"><button class="ln-learn ln-learn-lg" type="button" data-ln="learn" data-id="${esc(s.id)}" title="Open the topic viewer">Study</button><button class="ln-learn ln-learn-lg ln-session-btn" type="button" data-ln="start-session" data-id="${esc(s.id)}" title="Start a timed study session">Start your session</button></span>
         </div>
         <p class="ln-desc${s.description ? '' : ' empty-desc'}">${s.description ? esc(s.description) : 'No description yet.'}</p>
         <p class="ln-page-stats" data-ln-summary="${esc(s.id)}">${esc(summaryText(s))}</p>
       </header>
-      <div class="ln-page-grid">${topicsSection(s)}${placeholders(true)}</div>
+      <div class="ln-page-grid">${topicsSection(s)}<section class="ln-block ln-eval" data-qz-eval aria-labelledby="ln-eval-title"><h3 class="ln-block-title" id="ln-eval-title">Evaluation Cycle</h3><p class="ln-soon">Loading…</p></section></div>
       <div data-qz-host></div>
     </div>`;
   }
@@ -284,6 +284,7 @@
     for (const el of $$('[data-ln-summary]', root)) loadSummary(el.dataset.lnSummary);
     const quiz = $('[data-qz-host]', root); const quizSubject = quiz && L.page ? subject(L.page) : null;
     if (quiz && quizSubject && window.PerflwQuiz) window.PerflwQuiz.mount(quiz, quizSubject);
+    const evalCard = $('[data-qz-eval]', root); if (evalCard && quizSubject && window.PerflwQuiz) window.PerflwQuiz.mountEval(evalCard, quizSubject);
     if (L.focus) { const el = $(L.focus, root); if (el) el.focus(); L.focus = null; }
     if (L.viewer) { const box = $('[data-ln-doc]', root); if (box && PDFV) paintDoc(box); else annotate(); syncStudy(); }
   }
@@ -994,6 +995,7 @@
         case 'topic-rename': if (!TS.editing) startRename(id); return;
         case 'topic-open': openViewer(control.dataset.subject || L.page, id); return;
         case 'learn': learn(id, control); return;
+        case 'start-session': if (window.PerflwQuiz) window.PerflwQuiz.startSession(id); return;
         case 'viewer-topic': L.viewer.jump = null; openViewer(L.viewer.subjectId, id); return;
         case 'viewer-learning': closeViewer('list'); return;
         case 'side-toggle': toggleSide(); return;

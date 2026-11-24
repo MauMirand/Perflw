@@ -30,7 +30,7 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], loading: true, hint: false, allQuestions: [], setup: { count: 2, types: ['choice', 'truefalse', 'matching', 'explain', 'essay'] }, ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], loading: true, hint: false, expanded: false, evalTab: 'diagnostic', evalCache: {}, allQuestions: [], setup: { count: 2, types: ['choice', 'truefalse', 'matching', 'explain', 'essay'] }, ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   /* Screen-reader announcements go through the app's polite live region (#sr-live), the same one the Home cards use. */
@@ -68,11 +68,13 @@
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
-    host.innerHTML = `<section class="ln-block qz" aria-labelledby="qz-title"><h3 class="ln-block-title" id="qz-title">Quizzes and exams</h3>${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
+    host.hidden = !S.expanded;
+    host.innerHTML = `<section class="ln-block qz" aria-labelledby="qz-title"><div class="qz-titlebar"><h3 class="ln-block-title" id="qz-title">Quizzes and exams</h3>${ghost('collapse', 'Close', 'title="Back to the evaluation card"')}</div>${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
     // Bring the block into view when the screen changes (it sits below the topics), without smooth scrolling under reduced motion.
     if (S.shown !== S.mode) { S.shown = S.mode; if (S.mode !== 'home') host.scrollIntoView({ block: 'start' }); }
     const focus = host.querySelector('[data-qz-focus]'); if (focus) focus.focus({ preventScroll: true });
     syncStudyTimer(S);
+    if (S.mode === 'home' || S.mode === 'results') paintEval(S).catch(() => {});
   }
   const btn = (action, label, extra = '', cls = 'btn btn-sm') => `<button class="${cls}" type="button" data-qz="${action}" ${extra}>${label}</button>`;
   const ghost = (action, label, extra = '') => btn(action, label, extra, 'btn btn-sm btn-ghost');
@@ -575,6 +577,7 @@
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';
     try {
+      if (action === 'collapse') { stopTimer(S); S.expanded = false; paint(S); paintEval(S); const card = document.querySelector('[data-qz-eval]'); if (card) card.scrollIntoView({ block: 'nearest' }); return; }
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
       else if (action === 'sched-cancel') { await D().scheduleCancel({ scheduleId: target.dataset.id }); await load(S); paint(S); H.toast('Removed from your calendar.'); }
       else if (action === 'sched-start') {
@@ -809,5 +812,90 @@
     else { paint(S); if (S.mode === 'quiz') startTimer(S); }
   }
 
-  window.PerflwQuiz = { mount, noteVisit, init: helpers => { H = { ...H, ...helpers }; } };
+  // ───────── Evaluation Cycle card (subject page): one tab per kind, the latest attempt, a gauge, strengths and focus areas
+  const EVAL_TABS = [['diagnostic', 'Pre-Test'], ['practice', 'Practice'], ['final', 'Final Exam']];
+  const evalHostOf = S => document.querySelector(`[data-qz-eval][data-subject="${CSS.escape(S.subjectId)}"]`);
+  function gauge(correct, total) {
+    const share = total ? correct / total : 0; const r = 52; const len = Math.PI * r;
+    return `<svg class="qz-gauge" viewBox="0 0 140 84" role="img" aria-label="${total ? `${correct} of ${total} correct` : 'Not taken yet'}">
+      <defs><linearGradient id="qz-g" x1="0" x2="1"><stop offset="0" stop-color="#7FA7F5"/><stop offset="1" stop-color="#F08AA6"/></linearGradient></defs>
+      <path d="M18 72 A52 52 0 0 1 122 72" fill="none" stroke="var(--raised)" stroke-width="10" stroke-linecap="round"/>
+      ${share > 0 ? `<path d="M18 72 A52 52 0 0 1 122 72" fill="none" stroke="url(#qz-g)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(len * share).toFixed(1)} ${len.toFixed(1)}"/>` : ''}
+      <text x="70" y="62" text-anchor="middle" class="qz-gauge-num">${total ? `${correct}/${total}` : '–'}</text><text x="70" y="78" text-anchor="middle" class="qz-gauge-lbl">${total ? 'Correct' : 'Not taken'}</text></svg>`;
+  }
+  async function evalData(S, kind) {
+    const done = S.assessments.filter(a => a.kind === kind && ['submitted', 'graded'].includes(a.status));
+    const last = done[done.length - 1]; if (!last) return null;
+    if (S.evalCache[last.id] && S.evalCache[last.id].status === last.status) return S.evalCache[last.id];
+    const r = await D().assessmentResults({ assessmentId: last.id });
+    const correct = r.items.filter(i => i.answer && i.answer.score != null && i.answer.score >= i.maxScore).length;
+    const byTopic = new Map();
+    for (const i of r.items) { const t = byTopic.get(String(i.topicId)) || { score: 0, max: 0 }; t.score += (i.answer && i.answer.score) || 0; t.max += i.maxScore; byTopic.set(String(i.topicId), t); }
+    const title = id => (S.topics.find(t => String(t.id) === id) || {}).title || 'Topic';
+    const share = [...byTopic].map(([id, t]) => ({ id, title: title(id), share: t.max ? t.score / t.max : 0 }));
+    const used = r.startedAt && r.submittedAt ? Math.max(0, Math.round((Date.parse(r.submittedAt) - Date.parse(r.startedAt)) / 60000)) : null;
+    let level = 'Not assessed';
+    try { if (r.journeyId) { const m = await D().masteryJourney({ journeyId: r.journeyId }); const counts = {}; for (const t of m.topics) counts[t.level] = (counts[t.level] || 0) + 1; const best = ['mastered', 'proficient', 'developing', 'emerging', 'not_assessed'].find(l => counts[l]); level = best ? `${LEVELS[best]}${m.topics.length > 1 ? ` · ${counts[best]} of ${m.topics.length} topics` : ''}` : level; } } catch { /* shown without a level */ }
+    const data = { id: last.id, status: last.status, correct, total: r.items.length, level, minutes: used, limit: r.config && r.config.timeLimitSeconds, exam: r.exam || null, attempts: done.length,
+      strengths: share.filter(x => x.share >= 0.75).map(x => x.title), focus: share.filter(x => x.share < 0.75).sort((a, b) => a.share - b.share).map(x => x.title) };
+    S.evalCache[last.id] = data; return data;
+  }
+  async function paintEval(S) {
+    const el = evalHostOf(S); if (!el) return;
+    const tab = S.evalTab; const label = (EVAL_TABS.find(t => t[0] === tab) || [])[1];
+    let d = null; try { d = await evalData(S, tab); } catch { d = null; }
+    const tabs = EVAL_TABS.map(([k, l]) => `<button class="qz-tab${k === tab ? ' on' : ''}" type="button" role="tab" aria-selected="${k === tab}" data-qz-evtab="${k}">${l}</button>`).join('');
+    const list = items => (items.length ? `<ul class="qz-ev-list">${items.slice(0, 4).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="qz-ev-none">—</p>');
+    const time = d ? (d.minutes == null ? '' : `${d.minutes} min${d.limit ? ` of ${Math.round(d.limit / 60)}` : ''}`) : '';
+    const verdict = d && d.exam && d.exam.passed !== null ? `<p class="${d.exam.passed ? 'qz-pass' : 'qz-fail'} qz-ev-verdict">${d.exam.passed ? '✓ Passed' : '✗ Not passed'} · pass mark ${d.exam.passMarkPercent}%</p>` : '';
+    el.dataset.subject = S.subjectId;
+    el.innerHTML = `<div class="qz-ev-head"><h3 class="ln-block-title" id="ln-eval-title">Evaluation Cycle</h3><button class="icon-btn qz-ev-expand" type="button" data-qz-evexpand aria-label="Open all quizzes and exams" title="Open all quizzes and exams">⤢</button></div>
+      <div class="qz-ev-bar"><div class="qz-tabs" role="tablist" aria-label="Kind">${tabs}</div><button class="btn btn-sm btn-ghost qz-ev-take" type="button" data-qz-evtake ${S.questions.length ? '' : 'disabled title="Add questions first (open the full view)"'}>Take</button></div>
+      <div class="qz-ev-body"><div class="qz-ev-text"><p class="qz-ev-title">${esc(label)}</p><p class="qz-ev-sub">${d ? esc(d.level) : 'Not taken yet'}</p>
+        <p class="qz-ev-meta">${d ? `${d.total} item${d.total === 1 ? '' : 's'}${d.attempts > 1 ? ` · attempt ${d.attempts}` : ''}` : `${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank`}</p><p class="qz-ev-meta">${d ? esc(time || 'Untimed') : ''}</p>${verdict}</div>
+        <div class="qz-ev-gauge">${gauge(d ? d.correct : 0, d ? d.total : 0)}</div></div>
+      <div class="qz-ev-cols"><div><p class="qz-ev-h">Strengths</p>${d ? list(d.strengths) : '<p class="qz-ev-none">—</p>'}</div><div><p class="qz-ev-h">Focus Area</p>${d ? list(d.focus) : '<p class="qz-ev-none">—</p>'}</div></div>`;
+  }
+  function expand(S, then) {
+    S.expanded = true; const host = hostOf(S); if (host) { host.hidden = false; host.scrollIntoView({ block: 'start' }); }
+    Promise.resolve(then ? then() : null).catch(error => fail(S, error));
+  }
+  function mountEval(el, subject) {
+    if (!el || !D() || typeof D().journeyList !== 'function') return;
+    const S = stateOf(subject); el.dataset.subject = subject.id;
+    if (!el.dataset.qzBound) {
+      el.dataset.qzBound = '1';
+      el.addEventListener('click', event => {
+        const tab = event.target.closest('[data-qz-evtab]');
+        if (tab) { S.evalTab = tab.dataset.qzEvtab; paintEval(S); return; }
+        if (event.target.closest('[data-qz-evexpand]')) { expand(S, async () => { S.mode = 'home'; await load(S); S.loading = false; paint(S); }); return; }
+        if (event.target.closest('[data-qz-evtake]')) {
+          const kind = S.evalTab;
+          expand(S, async () => {
+            if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S); }
+            else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) });
+            else { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
+          });
+        }
+      });
+      el.addEventListener('keydown', event => { // arrow keys move between the tabs
+        const tab = event.target.closest('[data-qz-evtab]'); if (!tab || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        const i = EVAL_TABS.findIndex(t => t[0] === S.evalTab); const next = EVAL_TABS[(i + (event.key === 'ArrowRight' ? 1 : EVAL_TABS.length - 1)) % EVAL_TABS.length][0];
+        S.evalTab = next; paintEval(S).then(() => { const b = el.querySelector(`[data-qz-evtab="${next}"]`); if (b) b.focus(); });
+      });
+    }
+    (S.loading ? load(S).then(() => { S.loading = false; }) : Promise.resolve()).then(() => paintEval(S)).catch(() => paintEval(S));
+  }
+  /* "Start your session" in the page header: open the workspace with the study panel and start a whole-subject session. */
+  function startSession(subjectId) {
+    const S = states.get(subjectId); if (!S) return;
+    expand(S, async () => {
+      await load(S); S.loading = false; S.mode = 'home'; paint(S);
+      if (S.study.active) { H.toast('A study session is already running.'); return; }
+      await D().studyStart({ subjectId, journeyId: S.journey ? S.journey.id : undefined, kind: 'main' });
+      await load(S); paint(S); say('Study session started.');
+    });
+  }
+
+  window.PerflwQuiz = { mount, mountEval, startSession, noteVisit, init: helpers => { H = { ...H, ...helpers }; } };
 })();
