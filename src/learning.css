@@ -681,3 +681,6 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-sched { margin-top: 14px; padding: 12px; border-radius: 8px; background: #232222; max-width: 760px; }
 
 .qz-ai { margin: 8px 0 12px; max-width: 760px; }
+
+.qz-hint { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: var(--raised); max-width: 760px; font-size: 13px; }
+.qz-hint p { margin: 0 0 8px; }

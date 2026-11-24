@@ -126,6 +126,10 @@ async function main() {
   await evaluate("(() => { const el = document.querySelector('[data-ln-subject]'); el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })); return true; })()");
   await waitFor("document.querySelector('.ln-page-head h1')?.textContent === 'Chemistry' && !!document.querySelector('.qz')", 'subject page with the quiz block');
   await waitFor("/0 questions in your bank/.test(document.querySelector('.qz').textContent)", 'empty bank message');
+  assert.ok(await evaluate("/How this works/.test(document.querySelector('.qz').textContent)"), 'the first-use hint is shown on a fresh subject');
+  await click('[data-qz="hint-dismiss"]');
+  assert.ok(await evaluate("!/How this works/.test(document.querySelector('.qz').textContent)"), 'the hint is dismissible');
+  step('first-use hint: shown once, dismissed, remembered');
   for (const action of ['start', 'practice', 'exam']) assert.ok(await evaluate(`document.querySelector('[data-qz="${action}"]').disabled`), `${action} is disabled with no questions`);
   step('quiz block on the subject page, empty bank');
   await shoot('quiz-1-home');

@@ -19,6 +19,7 @@
     "test:learning": "node test/learning-study-smoke.js",
     "test:startup": "node test/startup-error-smoke.js",
     "test:ml1": "node test/learning-quiz-smoke.js",
+    "bench:quiz": "node test/learning-quiz-bench.js",
     "build": "node scripts/build.js",
     "icons": "node scripts/make-icons.js",
     "setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",

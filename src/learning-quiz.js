@@ -30,7 +30,7 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], loading: true, hint: false, allQuestions: [], ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -88,7 +88,15 @@
     return `<div class="qz-journey"><p class="qz-journey-title"><strong>${esc(j.title)}</strong> · cycle ${j.cycle} · ${esc(j.status)}</p><ol class="qz-stepper" aria-label="Journey stages">${steps}</ol>${next ? `<p class="qz-next">Next: ${esc(next)}</p>` : ''}</div>`;
   }
 
+  /* First-use hint on the journey hub (LS-029): dismissible, remembered per account in this browser profile. */
+  let accountKey = 'anonymous';
+  try { if (window.account && window.account.state) window.account.state().then(st => { const u = st && (st.user || st); accountKey = String((u && (u.id || u.email)) || 'anonymous'); }).catch(() => {}); } catch { /* keep the shared key */ }
+  const hintKey = () => `perflw-learning-hint:${accountKey}`;
+  const hintDismissed = () => { try { return localStorage.getItem(hintKey()) === '1'; } catch { return false; } };
+  const hintView = S => (S.loading || hintDismissed() || S.assessments.length || S.questions.length > 12 ? '' : `<div class="qz-hint" role="note"><p><strong>How this works.</strong> Write a few questions for your topics, take a pre-test to see where you stand, study the weak topics, practice, then take a final exam. Your levels come from your own answers, never from a typed percentage.</p>${btn('hint-dismiss', 'Got it')}</div>`);
+
   function homeView(S) {
+    if (S.loading) return '<p class="ln-soon" role="status">Loading your quizzes…</p>';
     if (!S.topics.length) return '<p class="ln-soon">Add topics or import a file first, then write questions for them here.</p>';
     const perTopic = S.topics.map(t => `${esc(t.title)}: ${S.questions.filter(q => String(q.topicId) === String(t.id)).length}`).join(' · ');
     const has = S.questions.length > 0;
@@ -100,7 +108,7 @@
     };
     const past = S.assessments.filter(a => a.status !== 'abandoned').map(row).join('');
     const hasDone = S.assessments.some(a => ['submitted', 'graded'].includes(a.status));
-    return `${stepperView(S)}<p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.</p>
+    return `${hintView(S)}${stepperView(S)}<p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.</p>
       <div class="qz-row">${ghost('add', 'Add question', 'data-qz-focus')}${ghost('bank', 'Question bank')}
         ${btn('start', 'Pre-test', has ? '' : 'disabled title="Add at least one question first"')}
         ${btn('practice', S.due ? `Practice (${S.due} due)` : 'Practice', has ? 'title="Short set with feedback after each question; mistakes that are due come first"' : 'disabled title="Add at least one question first"')}
@@ -566,6 +574,7 @@
         S.study.summary = sum; S.study.active = null; S.study.notes = []; await load(S); paint(S); say('Study session saved.');
       }
       else if (action === 'bank') { S.editId = null; await load(S); S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); }
+      else if (action === 'hint-dismiss') { try { localStorage.setItem(hintKey(), '1'); } catch { /* the hint may return next time */ } paint(S); }
       else if (action === 'ai-generate') {
         const host = hostOf(S); target.disabled = true; H.toast('Writing questions… this can take a minute.');
         const out = await D().questionsGenerate({ subjectId: S.subjectId, topicId: host.querySelector('[data-qz-ai-topic]').value, count: Number(host.querySelector('[data-qz-ai-count]').value) || 5 });
@@ -747,7 +756,7 @@
       });
       host.addEventListener('input', event => { const form = event.target.closest('[data-qz-form="answer"]'); if (form && event.target.matches('textarea')) onAnswerChange(S, form); });
     }
-    if (S.mode === 'home') load(S).then(() => paint(S)).catch(error => fail(S, error));
+    if (S.mode === 'home') { if (!S.questions.length && !S.assessments.length) S.loading = true; paint(S); load(S).then(() => { S.loading = false; paint(S); }).catch(error => { S.loading = false; fail(S, error); }); }
     else { paint(S); if (S.mode === 'quiz') startTimer(S); }
   }
 
