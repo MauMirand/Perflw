@@ -16,6 +16,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-quiz-'));
 const exe = require(path.join(appDir, 'node_modules', 'electron'));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let child, socket, nextId = 0; const pending = new Map(); let stderr = '';
+const webRequests = []; const pageErrors = []; // M-L1: no http(s) request and no console error during the whole walk
 const cdp = (method, params) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
 async function evaluate(expression) {
   const r = await cdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -44,6 +45,12 @@ async function shoot(name) {
   await cdp('Emulation.clearDeviceMetricsOverride', {}); await sleep(200);
 }
 const step = label => console.log(`PASS ${label}`);
+/* Controls inside the quiz block with no accessible name (label, aria-label, aria-labelledby or visible button text). */
+const unnamedControls = () => evaluate(`[...document.querySelectorAll('.qz input, .qz select, .qz textarea, .qz button')].filter(el => {
+  if (el.type === 'hidden') return false;
+  if (el.tagName === 'BUTTON') return !(el.textContent.trim() || el.getAttribute('aria-label'));
+  return !(el.closest('label') || el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || (el.id && document.querySelector('label[for="' + el.id + '"]')));
+}).length`);
 const head = () => evaluate("document.querySelector('.qz-head').textContent");
 const total = async () => Number(((await head()).match(/of (\d+)/) || [])[1]);
 
@@ -89,8 +96,14 @@ async function main() {
   assert.ok(endpoint, 'Electron page did not open');
   socket = new WebSocket(endpoint);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
-  socket.onmessage = e => { const d = JSON.parse(e.data); const p = d.id && pending.get(d.id); if (!p) return; pending.delete(d.id); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result); };
-  await cdp('Runtime.enable');
+  socket.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.method === 'Network.requestWillBeSent' && /^https?:/i.test(d.params.request.url)) webRequests.push(d.params.request.url);
+    else if (d.method === 'Runtime.exceptionThrown') pageErrors.push(d.params.exceptionDetails.text + ' ' + ((d.params.exceptionDetails.exception || {}).description || ''));
+    else if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') pageErrors.push(d.params.args.map(a => a.value || a.description || '').join(' '));
+    const p = d.id && pending.get(d.id); if (!p) return; pending.delete(d.id); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result);
+  };
+  await cdp('Runtime.enable'); await cdp('Network.enable');
   await waitFor("document.readyState === 'complete' && !document.getElementById('login-page').hidden", 'login page');
   await click('[data-auth="register"]');
   await fill('#register-email', 'quiz@example.com'); await fill('#register-password', 'Quiz-pass-123'); await fill('#register-confirmation', 'Quiz-pass-123');
@@ -124,6 +137,7 @@ async function main() {
   await waitFor("!!document.querySelector('.qz-error') && /options|correct/i.test(document.querySelector('.qz-error').textContent)", 'validation error');
   assert.equal(await evaluate("document.querySelector('[data-qz-form=\"add\"] [name=\"prompt\"]').value"), 'Which bond is ionic?', 'typed text kept');
   step('invalid question rejected with a plain message, input kept');
+  assert.equal(await unnamedControls(), 0, 'every control in the question form has an accessible name');
 
   const saved = n => waitFor(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.length === ${n})`, `question ${n} saved`);
   await fill('[data-qz-form="add"] [name="opt0"]', 'Covalent'); await fill('[data-qz-form="add"] [name="opt1"]', 'NaCl');
@@ -205,6 +219,7 @@ async function main() {
   assert.ok(n >= 2, `pre-test has ${n} questions`);
   assert.match(await head(), /Pre-test · Question 1 of/);
   step(`pre-test started: ${n} questions`);
+  assert.equal(await unnamedControls(), 0, 'every control on the quiz card has an accessible name');
   await shoot('quiz-3-question');
 
   // The renderer never holds the answer key while the quiz is open.
@@ -370,12 +385,33 @@ async function main() {
   step('next cycle: cycle 2 starts at zero, cycle 1 is kept');
   assert.ok(!/Unhandled|TypeError|ReferenceError/.test(stderr), `no errors on stderr: ${stderr.slice(0, 300)}`);
   step('stderr clean');
+  assert.deepEqual(webRequests, [], 'no http(s) request was made: no AI provider or network was needed');
+  assert.deepEqual(pageErrors, [], 'no console error or exception on the page');
+  step('offline proof: 0 http(s) requests, 0 console errors');
 }
 
 main().then(() => 0, error => { console.error(`FAIL: ${error.message}`); return 1; }).then(async code => {
   try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Runtime.evaluate', params: { expression: 'window.windowControls && window.windowControls.close()' } })); } catch { /* closing */ }
   await Promise.race([new Promise(r => child?.once('exit', r)), sleep(15000)]);
   if (child && child.exitCode === null) child.kill();
-  fs.rmSync(root, { recursive: true, force: true });
-  process.exit(code);
+  let finalCode = code; let db = null;
+  if (code === 0) {
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      db = new DatabaseSync(path.join(root, 'workspace.sqlite'), { readOnly: true });
+      const one = sql => db.prepare(sql).get();
+      assert.equal(one('PRAGMA user_version').user_version, 2, 'workspace is at migration 2');
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [], 'no broken foreign key');
+      assert.equal(one('SELECT count(*) AS n FROM active_timers').n, 0, 'no ghost timer');
+      assert.equal(one('SELECT count(*) AS n FROM learning_sessions WHERE ended_at IS NULL').n, 0, 'every study session is ended');
+      assert.equal(one("SELECT count(*) AS n FROM assessments WHERE status='in_progress' AND kind IN ('diagnostic','final')").n, 0, 'no pre-test or final was left half done');
+      assert.ok(one("SELECT count(*) AS n FROM assessments WHERE kind='final' AND status='graded'").n >= 1, 'a graded final exists');
+      assert.equal(one("SELECT count(*) AS n FROM focus_entries WHERE source='learning'").n, 1, 'exactly one focus entry from the study session');
+      const stray = []; (function walk(dir) { for (const name of fs.readdirSync(dir)) { const f = path.join(dir, name); if (fs.statSync(f).isDirectory()) walk(f); else if (/\.tmp/.test(name)) stray.push(f); } })(root);
+      assert.deepEqual(stray, [], 'no temp file left in the data folder');
+      console.log('PASS invariants: migration 2, no broken keys, no ghost timer, sessions ended, one learning focus entry, no temp files');
+    } catch (error) { console.error(`FAIL: ${error.message}`); finalCode = 1; } finally { if (db) db.close(); }
+  }
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  process.exit(finalCode);
 });
