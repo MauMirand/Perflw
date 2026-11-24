@@ -1808,6 +1808,42 @@ Not pushed, not merged.
 
 ---
 
+### HO-041 — Claude A built the quiz and exam slice (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-24  
+**Task ID:** LS-006 (base), LS-007 to LS-013, LS-015 to LS-018, LS-020 to LS-022, LS-024 (parts), LS-026, LS-033, PF-021  
+**From:** Claude A (built at the owner's explicit request: "start building the feature", "add all the feature about quizzes and exams", "loop until everything we planned is integrated")  
+**To:** independent reviewer (not Claude A), Project Owner  
+**Status:** SUBMITTED (not reviewed, not merged, not pushed)  
+**Branch:** `feature/ml1-slice` (worktree `.claude/worktrees/ml1-slice`), cut from `feature/PF-021-startup-error` on `main` 5f3d1f5 and merged with LS-006's branch `claude/gracious-ellis-c78fac` at `0567c26` (that store was unreviewed when merged; its later revision 8317408 is not in this branch)
+
+> This is one branch because the owner asked for the feature to exist now. It deviates from the one-task-one-branch rule and from the sequential brief order; it must be split or reviewed as a whole before any merge. Independent review is required (Claude A cannot approve its own code).
+
+#### 1. What exists (all in the renderer's subject page, block "Quizzes and exams", `src/learning-quiz.js`)
+- **Question bank:** write choice, true/false, matching, explain, essay questions; list, filter, edit, retire, restore, delete (confirm; a used question can only be retired); template drafts from analysed files (`src/question-templates.js`, no AI); AI drafts (optional, see §3).
+- **Journey:** stepper over the 13 stages (11 driven, `pretest_setup` and `supplementary` marked later), stage moves forward only; next cycle with statistics at zero; history of every assessment with the levels right after it.
+- **Assessments:** pre-test, practice (feedback after each question, one second try scored half, due mistakes first, "practice these"), timed final exam (`src/exam-model.js`: 50 to 100 items or a test final, time limit with x1.5/x2/untimed, pass mark 75 to 90%, deadline enforced in main), retention check (7 days after a real final, recall and understanding on Proficient topics), results with mistake categories, weak topics and targeted notes (deterministic, no AI), attempts side by side, pre-vs-final report.
+- **Final learning (D9):** evaluation screen; a real final needs a Review study session ended after the pre-test. **Retake gate (D13):** after a failed final every section of the failing topics' files and every targeted note must have been opened in a Review session started after the attempt.
+- **Study sessions (LS-012, ADR-008):** run on the account's one timer, saved as one focus entry with source `learning`; side notes are the student's own text in files; opened topics and sections are recorded in `visited`; closed at the last activity on quit or after a crash. New `workspace.stopTimerAt`.
+- **Scheduling (LS-026):** a calendar event plus a `learning_schedule` link in one transaction.
+- **Main process:** `src/learning-ipc.js` (about 45 channels), `src/learning-session-ipc.js`, `src/learning-coach.js`, `src/learning-store.js` additions (sessions, review queue, schedule, AI grades, attempts), preload `learningData` methods, agents `Learning Question Writer` and `Learning Answer Grader` (created on first use only).
+
+#### 2. Checks (Claude A)
+| Check | Result | Level |
+|---|---|---|
+| `npm test` | PASS: EXIT=0, 299 tests, 299 pass | unit |
+| `node test/learning-quiz-smoke.js` (real Electron, throwaway data folder, about 20 steps through the whole flow) | PASS | live, scripted |
+| `npm run test:electron` on this branch | **UNVERIFIED** (not run on this branch) | |
+| Visual review against `docs/ui-baseline/` (S7) | **UNVERIFIED**: screenshots are written by the smoke test but not compared | |
+
+#### 3. Not verified or not built
+- **AI jobs** are tested with a fake `runAgent`. A real model was **not** run end to end (a local model exists on this machine, the button was seen enabled). Model output quality is unknown; bad output is rejected, never guessed.
+- **Not built:** AI explanation in targeted notes (LS-019) and side-note AI help (LS-032); replacing the manual subject mastery % (LS-025: it would change assertions in `test/electron-smoke.js`, which PF-020 also edits); Home Learn card (LS-027); Analytics section (LS-028, owner decision PF-019); onboarding audit (LS-029); performance (LS-030); game layer (LS-031, owner design first); the separate journey-hub, bank and quiz modules of LS-008 to LS-011 (this slice is one module, `learning-quiz.js`, about 900 lines, over the 600-line guide).
+- **Deviations to reconcile:** the one-module layout; `assessment_answers.attempt` now means "second try" in practice; the final-learning gate counts any ended Review session started after the pre-test (it does not track that the evaluation was opened); retention uses a simple "Proficient or Mastered" topic filter.
+- LS-006 here is the pre-revision store plus additions; its revision 2 (HO-021) must be merged in before review of the store.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
