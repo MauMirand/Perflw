@@ -48,7 +48,7 @@ function closeOpenSessions({ workspace, now = () => Date.now() }) {
   return closed;
 }
 
-function registerStudySessionIpc({ handle, requireUser, workspace, dataDir, now = () => Date.now() }) {
+function registerStudySessionIpc({ handle, requireUser, workspace, dataDir, coach = null, sectionsFor = null, now = () => Date.now() }) {
   const store = () => workspace.learningStore();
   const on = (channel, keys, work) => handle(channel, arg => {
     const user = requireUser();
@@ -107,13 +107,29 @@ function registerStudySessionIpc({ handle, requireUser, workspace, dataDir, now 
 
   on('study:notes', ['sessionId'], (u, a) => {
     const session = store().getSession(u, { sessionId: a.sessionId });
-    return store().sessionMaterials(u, { sessionId: session.id, kind: 'side_note' }).map(m => {
-      let text = '';
-      try { text = fs.readFileSync(path.join(dataDir, 'learning-files', String(u), notesFolder(session), m.bodyFile), 'utf8'); } catch { /* a missing file reads as empty */ }
-      return { ...m, text };
-    });
+    const read = m => { try { return fs.readFileSync(path.join(dataDir, 'learning-files', String(u), notesFolder(session), m.bodyFile), 'utf8'); } catch { return ''; } /* a missing file reads as empty */ };
+    const ai = store().sessionMaterials(u, { sessionId: session.id, kind: 'side_note_ai' });
+    return store().sessionMaterials(u, { sessionId: session.id, kind: 'side_note' }).map(m => ({ ...m, text: read(m), aiHelp: ai.filter(x => x.parentMaterialId === m.id).map(x => ({ id: x.id, text: read(x), provenance: x.provenance, label: 'AI · suggestion' })) }));
   });
 
+  /* "Check my note" (D8): the AI reads the note and its pages and answers with suggestions. They are stored as their OWN record
+     (a side_note_ai linked to the note, with provenance); the student's note is never touched. */
+  on('study:checkNote', ['materialId'], async (u, a) => {
+    if (!coach || !sectionsFor) fail('AI is not available in this build.');
+    const note = store().getMaterial(u, { materialId: a.materialId });
+    if (note.kind !== 'side_note') fail('Only a side note can be checked.');
+    const session = note.sessionId ? store().getSession(u, { sessionId: note.sessionId }) : null;
+    const folder = path.join(dataDir, 'learning-files', String(u), session ? notesFolder(session) : (note.journeyId ? path.join('journeys', note.journeyId) : path.join('side-notes', note.subjectId)));
+    let text = ''; try { text = fs.readFileSync(path.join(folder, note.bodyFile), 'utf8'); } catch { fail('The note could not be read.'); }
+    const help = await coach.checkNote(u, { noteText: text, sections: sectionsFor(u, note.subjectId, note.topicId).sections });
+    const bodyFile = `${randomUUID()}.md`; const file = path.join(folder, bodyFile);
+    fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    writeFileAtomic(file, help.text, { mode: 0o600 });
+    try {
+      const made = store().addMaterial(u, { subjectId: note.subjectId, journeyId: note.journeyId, topicId: note.topicId, sessionId: note.sessionId, kind: 'side_note_ai', parentMaterialId: note.id, title: 'AI · suggestion', bodyFile, origin: 'generated', provenance: help.provenance });
+      return { ...made, text: help.text, label: 'AI · suggestion' };
+    } catch (error) { try { fs.unlinkSync(file); } catch { /* nothing to remove */ } throw error; }
+  });
   on('study:end', ['sessionId', 'summary'], (u, a) => {
     const session = store().getSession(u, { sessionId: a.sessionId });
     if (session.endedAt) fail('This study session has already ended.');

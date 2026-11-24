@@ -101,6 +101,40 @@ function parseVerdicts(text, question) {
   return { ok: true, confidence, verdicts: rubric.map(r => ({ id: String(r.id), ...(given.get(String(r.id)) || { verdict: 'missing', reason: 'Not rated by the model.' }) })) };
 }
 
+// ───────── side-note help (D8, LS-032) and explanations in targeted notes (LS-019): plain text, grounded in the file's excerpts
+const NOT_IN_FILE = 'NOT_IN_FILE';
+function buildNoteHelpPrompt({ noteText, excerpts }) {
+  const source = excerpts.map(e => `[${e.ref}] ${e.title}: ${e.text}`).join('\n');
+  return `A student wrote this note while studying. Review it against the excerpts of their own file. Do NOT rewrite the note.
+
+Reply in plain text with exactly these parts, each a short list of "- " bullets, using only facts from the excerpts:
+GAPS: important points from the excerpts the note leaves out
+UNCLEAR: statements in the note that are vague or wrong according to the excerpts
+EXPLANATION: at most 120 words explaining the idea the note is about
+If the excerpts do not relate to the note, reply only ${NOT_IN_FILE}.
+
+NOTE: ${String(noteText).slice(0, 6000)}
+
+EXCERPTS
+${source}`;
+}
+function buildExplainPrompt({ topicTitle, missed, excerpts }) {
+  const source = excerpts.map(e => `[${e.ref}] ${e.title}: ${e.text}`).join('\n');
+  return `A student missed these questions about "${topicTitle}":
+${missed.map((m, i) => `${i + 1}. ${m}`).join('\n')}
+
+Explain, in at most 150 words and using ONLY the excerpts below, what the student should understand to answer them. Put the section number in brackets after each claim, like [1.2]. If the excerpts do not cover it, reply only ${NOT_IN_FILE}.
+
+EXCERPTS
+${source}`;
+}
+/* → the cleaned text, or null when the model refused or said nothing. */
+function cleanProse(text, max) {
+  const t = String(text == null ? '' : text).replace(/\r/g, '').trim();
+  if (!t || new RegExp(`^${NOT_IN_FILE}\\b`, 'i').test(t)) return null;
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+}
+
 function createLearningCoach({ ecosystem, agents, now = () => Date.now() }) {
   async function ready(userId, role) {
     const agent = await agents.ready(userId, role);
@@ -140,7 +174,30 @@ function createLearningCoach({ ecosystem, agents, now = () => Date.now() }) {
     if (!parsed.ok) fail(`${parsed.reason} The answer stays waiting; you can grade it yourself.`);
     return { ...parsed, provenance };
   }
-  return { status, generateQuestions, gradeOpenAnswer };
+  /* Reads the note and its file's excerpts and returns suggestions. It never edits the note (D8): the caller stores the result as
+     its own record. */
+  async function checkNote(userId, { noteText, sections, signal }) {
+    if (!String(noteText || '').trim()) fail('The note is empty.');
+    const excerpts = excerptsOf(sections).slice(0, 12);
+    if (!excerpts.length) fail('There is no analysed text for this topic to check the note against.');
+    const agent = await ready(userId, 'assistant');
+    const provenance = await provenanceFor(userId, 'assistant', agent);
+    const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt: buildNoteHelpPrompt({ noteText, excerpts }), signal, workflow: null, temperature: 0.2 });
+    const clean = cleanProse(text, 3000);
+    if (!clean) fail('Nothing in your file relates to this note, so there is nothing to suggest.');
+    return { text: clean, provenance };
+  }
+  /* A short explanation for a targeted note, from the excerpts only; null when the file does not cover it. */
+  async function explainMistakes(userId, { topicTitle, missed, sections, signal }) {
+    const excerpts = excerptsOf(sections).slice(0, 12);
+    if (!excerpts.length || !missed.length) return null;
+    const agent = await ready(userId, 'assistant');
+    const provenance = await provenanceFor(userId, 'assistant', agent);
+    const text = await ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt: buildExplainPrompt({ topicTitle, missed: missed.slice(0, 8), excerpts }), signal, workflow: null, temperature: 0.2 });
+    const clean = cleanProse(text, 1500);
+    return clean ? { text: clean, provenance } : null;
+  }
+  return { status, generateQuestions, gradeOpenAnswer, checkNote, explainMistakes };
 }
 
-module.exports = { createLearningCoach, extractJson, excerptsOf, buildQuestionPrompt, parseQuestions, buildGradingPrompt, parseVerdicts, PROMPT_VERSION };
+module.exports = { createLearningCoach, cleanProse, buildNoteHelpPrompt, buildExplainPrompt, extractJson, excerptsOf, buildQuestionPrompt, parseQuestions, buildGradingPrompt, parseVerdicts, PROMPT_VERSION };

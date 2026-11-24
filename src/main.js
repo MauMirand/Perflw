@@ -349,7 +349,17 @@ app.whenReady().then(() => {
     for (const folder of [...journeyIds.map(j => path.join('journeys', j)), path.join('side-notes', String(id))]) { try { fs.rmSync(path.join(root, 'learning-files', user.id, folder), { recursive: true, force: true }); } catch { /* best effort */ } }
   });
   registerLearningIpc({ handle, requireUser, workspace, dataDir: root, analysisOf: (userId, fileId) => learningFlow.fileAnalysis(userId, fileId), coach: createLearningCoach({ ecosystem, agents: learningFlow.agents }) });
-  registerStudySessionIpc({ handle, requireUser, workspace, dataDir: root });
+  { // the same AI coach and file lookup serve the quiz handlers and the study session
+    const coach = createLearningCoach({ ecosystem, agents: learningFlow.agents });
+    const sectionsFor = (userId, subjectId, topicId) => {
+      try {
+        const row = workspace.listTopics(userId, subjectId).rows.find(r => String(r.id) === String(topicId));
+        const analysis = row && row.fileId ? learningFlow.fileAnalysis(userId, row.fileId) : null;
+        return { sections: analysis && analysis.status === 'ready' ? require('./question-templates').sectionsOf({ id: row.id, title: row.title }, analysis) : [] };
+      } catch { return { sections: [] }; }
+    };
+    registerStudySessionIpc({ handle, requireUser, workspace, dataDir: root, coach, sectionsFor });
+  }
   try { closeOpenSessions({ workspace }); } catch (error) { console.error('study sessions', error.message); } // a crash can leave a session open: close it at its last activity
   handle('learning:topics', subjectId => workspace.listTopics(requireUser().id, subjectId));
   handle('learning:addTopic', (subjectId, details) => workspace.addTopic(requireUser().id, subjectId, details));

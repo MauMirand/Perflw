@@ -132,7 +132,7 @@
   function studyView(S) {
     const st = S.study; const a = st.active;
     if (a) {
-      const notes = st.notes.map(n => `<li class="qz-note"><p>${esc(n.text || '(empty)')}</p></li>`).join('');
+      const notes = st.notes.map(n => `<li class="qz-note"><p>${esc(n.text || '(empty)')}</p><p class="qz-row">${ghost('check-note', 'Check my note', S.ai.available ? `data-id="${esc(n.id)}" title="The AI reads your note and your file and suggests gaps; it never changes your note"` : `disabled title="${esc(S.ai.reason)}"`)}</p>${(n.aiHelp || []).map(h => `<div class="qz-feedback"><p><span class="qz-chip">AI · suggestion</span>${h.provenance ? ` ${esc(h.provenance.model)}` : ''}</p><pre class="qz-md">${esc(h.text)}</pre></div>`).join('')}</li>`).join('');
       return `<div class="qz-study" role="group" aria-label="Study session"><p><strong>Studying${a.topicTitle ? `: ${esc(a.topicTitle)}` : ''}</strong> · <span class="qz-timer" data-qz-study-time>${a.elapsedSeconds == null ? 'timer stopped' : clock(st.base + (Date.now() - st.t0) / 1000)}</span></p>
         <p class="ln-soon">Open topics in the viewer while you study; what you open is recorded for the retake check. Your notes below are yours alone.</p>
         <form class="qz-form" data-qz-form="note" novalidate><label class="ln-field"><span>Side note</span><textarea class="field field-area" name="text" rows="3" maxlength="20000"></textarea></label>
@@ -544,12 +544,17 @@
       else if (action === 'notes') { S.notesShown = S.targeted; S.mode = 'notes'; paint(S); await visitNotes(S); }
       else if (action === 'notes-make') {
         target.disabled = true;
-        S.notesShown = await D().notesTargeted({ journeyId: S.results.assessment.journeyId, assessmentId: S.results.assessment.id });
+        S.notesShown = await D().notesTargeted({ journeyId: S.results.assessment.journeyId, assessmentId: S.results.assessment.id, useAi: S.ai.available });
         await load(S); S.mode = 'notes'; paint(S); say('Targeted notes written.'); await visitNotes(S);
       }
       else if (action === 'practice-these') {
         const ids = S.results.analysis.items.filter(i => i.category && i.category !== 'guess' && i.questionId).map(i => i.questionId);
         target.disabled = true; await begin(S, 'practice', 'Practice: your mistakes', { only: ids, count: ids.length });
+      }
+      else if (action === 'check-note') {
+        target.disabled = true; H.toast('The AI is reading your note…');
+        await D().studyCheckNote({ materialId: target.dataset.id });
+        S.study.notes = await D().studyNotes({ sessionId: S.study.active.session.id }); paint(S);
       }
       else if (action === 'study-start') {
         const topic = hostOf(S).querySelector('[data-qz-study-topic]').value;

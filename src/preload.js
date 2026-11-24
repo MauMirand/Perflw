@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld('learningData', Object.freeze({
   studyVisit: arg => call('study:visit', arg),
   studySideNote: arg => call('study:sideNote', arg),
   studyNotes: arg => call('study:notes', arg),
+  studyCheckNote: arg => call('study:checkNote', arg),
   studyEnd: arg => call('study:end', arg),
   assessmentCheck: arg => call('assessment:check', arg),
   assessmentRetry: arg => call('assessment:retry', arg),

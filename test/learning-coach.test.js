@@ -103,3 +103,31 @@ test('gradeOpenAnswer: prompt carries the rubric but not a score request; failur
   const bad = coach.createLearningCoach({ ecosystem: { ...ecosystem, runAgent: async () => 'rubbish' }, agents });
   await assert.rejects(() => bad.gradeOpenAnswer('u', { question: explain, answerText: 'x', sections }), /stays waiting; you can grade it yourself/);
 });
+
+// ───────── side-note help (D8) and note explanations
+test('cleanProse drops empty and NOT_IN_FILE replies and caps the length', () => {
+  assert.equal(coach.cleanProse('', 100), null); assert.equal(coach.cleanProse('NOT_IN_FILE', 100), null); assert.equal(coach.cleanProse('  not_in_file.  ', 100), null);
+  assert.equal(coach.cleanProse('GAPS:\n- one', 100), 'GAPS:\n- one');
+  assert.ok(coach.cleanProse('x'.repeat(500), 100).length <= 100);
+});
+
+test('checkNote: reads the note against the excerpts, never rewrites it, and refuses when the file does not relate', async () => {
+  let prompt = '';
+  const agents = { ready: async (u, role) => { assert.equal(role, 'assistant'); return { id: 'as', name: 'Assistant', model: 'm' }; } };
+  const make = reply => coach.createLearningCoach({ ecosystem: { getAgent: () => ({ config: { provider: { connectionId: 'ollama-local' } } }), runAgent: async (u, args) => { prompt = args.prompt; return reply; } }, agents });
+  const out = await make('GAPS:\n- Lattices are missing.\nUNCLEAR:\n- none').checkNote('u', { noteText: 'Ions attract.', sections });
+  assert.match(out.text, /^GAPS:/); assert.equal(out.provenance.model, 'm');
+  assert.match(prompt, /Do NOT rewrite the note/); assert.match(prompt, /NOTE: Ions attract\./);
+  await assert.rejects(() => make('NOT_IN_FILE').checkNote('u', { noteText: 'Cats.', sections }), /Nothing in your file relates/);
+  await assert.rejects(() => make('x').checkNote('u', { noteText: '  ', sections }), /note is empty/);
+  await assert.rejects(() => make('x').checkNote('u', { noteText: 'Ions.', sections: [] }), /no analysed text/);
+});
+
+test('explainMistakes: grounded explanation, or null when the file does not cover it', async () => {
+  const agents = { ready: async () => ({ id: 'as', name: 'A', model: 'm' }) };
+  const make = reply => coach.createLearningCoach({ ecosystem: { getAgent: () => ({ config: { provider: { connectionId: 'x' } } }), runAgent: async () => reply }, agents });
+  assert.match((await make('Ions attract [1].').explainMistakes('u', { topicTitle: 'Ionic', missed: ['Why?'], sections })).text, /Ions attract/);
+  assert.equal(await make('NOT_IN_FILE').explainMistakes('u', { topicTitle: 'Ionic', missed: ['Why?'], sections }), null);
+  assert.equal(await make('x').explainMistakes('u', { topicTitle: 'Ionic', missed: [], sections }), null);
+  assert.equal(await make('x').explainMistakes('u', { topicTitle: 'Ionic', missed: ['Why?'], sections: [] }), null);
+});

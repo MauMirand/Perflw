@@ -11,7 +11,7 @@ const { registerStudySessionIpc, closeOpenSessions } = require('../src/learning-
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function setup(t, wrap = w => w) {
+function setup(t, wrap = w => w, extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-study-'));
   const workspace = createWorkspace(dir);
   t.after(() => { workspace.close(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -20,7 +20,7 @@ function setup(t, wrap = w => w) {
   const other = workspace.createSubject('v', 'study', { name: 'Chemistry' });
   const handlers = new Map(); let user = { id: 'u' };
   const wrapped = wrap(workspace);
-  registerStudySessionIpc({ handle: (c, a) => handlers.set(c, a), requireUser: () => { if (!user) throw new Error('Your session has expired. Log in again.'); return user; }, workspace: wrapped, dataDir: dir });
+  registerStudySessionIpc({ handle: (c, a) => handlers.set(c, a), requireUser: () => { if (!user) throw new Error('Your session has expired. Log in again.'); return user; }, workspace: wrapped, dataDir: dir, ...extra });
   return { workspace, subject, topic, other, dir, call: (c, a) => handlers.get(c)(a), as: next => { user = next; }, handlers };
 }
 const focusEntries = (workspace, user = 'u') => workspace.listFocus(user);
@@ -152,4 +152,26 @@ test('stopTimerAt keeps the manual timer behavior: stopTimer still needs one tra
   assert.throws(() => s.workspace.stopTimer('u'), /at least one second/);
   assert.equal(s.workspace.stopTimerAt('u', { endedAt: new Date().toISOString() }), null, 'with an explicit end time a tiny timer is simply removed');
   assert.equal(s.workspace.activeTimer('u'), null);
+});
+
+test('Check my note (D8): the suggestion is its own record linked to the note; the note stays byte for byte; no AI means a clear message', async t => {
+  const coach = { checkNote: async (u, { noteText, sections }) => ({ text: `GAPS:\n- Missing something about "${noteText.slice(0, 5)}"`, provenance: { provider: 'ollama-local', model: 'm', agentId: 'a', promptVersion: 'coach-1', generatedAt: '2026-11-24T10:00:00.000Z' } }) };
+  const s = setup(t, w => w, { coach, sectionsFor: () => ({ sections: [{ title: 'Cells', description: 'd', keyPoints: ['k'] }] }) });
+  const { session } = s.call('study:start', { subjectId: s.subject.id, topicId: s.topic, kind: 'main' });
+  const text = 'Mitochondria make ATP.';
+  const note = s.call('study:sideNote', { sessionId: session.id, text });
+  const noteFile = path.join(s.dir, 'learning-files', 'u', 'side-notes', s.subject.id, note.bodyFile);
+  const before = fs.readFileSync(noteFile, 'utf8');
+  const help = await s.call('study:checkNote', { materialId: note.id });
+  assert.equal(help.kind, 'side_note_ai'); assert.equal(help.parentMaterialId, note.id); assert.equal(help.label, 'AI · suggestion'); assert.equal(help.provenance.model, 'm');
+  assert.equal(fs.readFileSync(noteFile, 'utf8'), before, 'the note body is byte-identical after the run');
+  const listed = s.call('study:notes', { sessionId: session.id });
+  assert.equal(listed.length, 1, 'the suggestion is not listed as a note of its own'); assert.equal(listed[0].aiHelp.length, 1); assert.match(listed[0].aiHelp[0].text, /^GAPS:/);
+  await assert.rejects(async () => s.call('study:checkNote', { materialId: help.id }), /Only a side note can be checked/);
+  s.as({ id: 'v' });
+  await assert.rejects(async () => s.call('study:checkNote', { materialId: note.id }), /not found/i);
+  const none = setup(t);
+  const sn = none.call('study:start', { subjectId: none.subject.id, kind: 'main' });
+  const n2 = none.call('study:sideNote', { sessionId: sn.session.id, text: 'x' });
+  await assert.rejects(async () => none.call('study:checkNote', { materialId: n2.id }), /AI is not available/);
 });

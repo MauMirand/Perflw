@@ -370,19 +370,19 @@ test('analysis names mistake categories, groups them by topic and ranks the weak
   assert.throws(() => t.call('assessment:analysis', { assessmentId: made.id }), /not found/i);
 });
 
-test('targeted notes: one Markdown file per weak topic, from the student\'s own mistakes, no AI', () => {
+test('targeted notes: one Markdown file per weak topic, from the student\'s own mistakes, no AI', async () => {
   const t = setup(); seed(t);
   const journey = t.call('journey:create', { subjectId: 's1' });
-  assert.throws(() => t.call('notes:targeted', { journeyId: journey.id }), /Take a pre-test first/);
+  await assert.rejects(async () => t.call('notes:targeted', { journeyId: journey.id }), /Take a pre-test first/);
   runDiagnostic(t, journey, wrongChoice);
-  const notes = t.call('notes:targeted', { journeyId: journey.id });
+  const notes = await t.call('notes:targeted', { journeyId: journey.id });
   assert.ok(notes.length >= 1 && notes.every(n => n.kind === 'targeted_note' && n.text.startsWith('# Targeted note: Topic ')));
   assert.ok(notes.every(n => /\*\*You answered:\*\*/.test(n.text)), 'it quotes what the student answered');
   const file = path.join(t.dir, 'learning-files', 'u', 'journeys', journey.id, notes[0].bodyFile);
   assert.equal(fs.readFileSync(file, 'utf8'), notes[0].text, 'the file is what is returned');
   assert.equal(t.call('notes:list', { journeyId: journey.id, kind: 'targeted_note' }).length, notes.length);
   t.as({ id: 'v' });
-  assert.throws(() => t.call('notes:targeted', { journeyId: journey.id }), /not found/i);
+  await assert.rejects(async () => t.call('notes:targeted', { journeyId: journey.id }), /not found/i);
   assert.throws(() => t.call('notes:list', { journeyId: journey.id }), /not found/i);
 });
 
@@ -431,11 +431,11 @@ test('template drafts come from analysed files, are not stored, and are hidden o
   assert.throws(() => t.call('questions:templates', { subjectId: 's1' }), /not found/i);
 });
 
-test('the retake gate also needs every targeted note opened, and only review sessions after the attempt count', () => {
+test('the retake gate also needs every targeted note opened, and only review sessions after the attempt count', async () => {
   const t = setup(); seed(t);
   const journey = t.call('journey:create', { subjectId: 's1' });
   runDiagnostic(t, journey, wrongChoice, 4);
-  const notes = t.call('notes:targeted', { journeyId: journey.id });
+  const notes = await t.call('notes:targeted', { journeyId: journey.id });
   const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'final', config: finalConfig({ count: 6, timeMultiplier: 0 }) }).assessment;
   t.call('assessment:start', { assessmentId: made.id }); answerAll(t, made, 'a'); t.call('assessment:submit', { assessmentId: made.id });
   gradeOpen(t, made.id, { c1: 'missing', c2: 'missing' });

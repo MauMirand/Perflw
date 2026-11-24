@@ -496,7 +496,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
 
   // ───────── targeted notes (spec §5.3, deterministic, no AI): one Markdown file per weak topic
   const folderFor = (u, journeyId) => path.join(dataDir, 'learning-files', String(u), 'journeys', String(journeyId));
-  on('notes:targeted', ['journeyId', 'assessmentId', 'topicIds'], (u, a) => {
+  on('notes:targeted', ['journeyId', 'assessmentId', 'topicIds', 'useAi'], async (u, a) => {
     if (!dataDir) fail('Notes cannot be saved here.');
     const s = store(); const journey = s.getJourney(u, { journeyId: a.journeyId });
     let assessment;
@@ -519,7 +519,13 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
           prompt: i.snapshot.prompt, answer: answerLine(i.snapshot, i.answer && i.answer.response), correctAnswer: correctLine(i.snapshot), category: row.category,
           explanation: i.snapshot.explanation, source: (i.snapshot.source || []).filter(x => x && x.quote),
         }));
-      const markdown = insight.targetedNote({ topic: { title: w.title || 'Topic' }, analysisSection: null, missed });
+      let markdown = insight.targetedNote({ topic: { title: w.title || 'Topic' }, analysisSection: null, missed });
+      if (a.useAi === true && coach) { // optional, labelled, from the file's excerpts only; the note works without it
+        try {
+          const explained = await coach.explainMistakes(u, { topicTitle: w.title || 'Topic', missed: missed.map(m => m.prompt), sections: sectionsFor(u, journey.subjectId, w.topicId).sections });
+          if (explained) markdown += `\n## Explanation (AI · ${insight.escapeMarkdown(explained.provenance.model)})\n\n${insight.escapeMarkdown(explained.text)}\n`;
+        } catch { /* AI off or failed: the deterministic note stands */ }
+      }
       const bodyFile = `${randomUUID()}.md`; const file = path.join(folderFor(u, journey.id), bodyFile);
       writeFileAtomic(file, markdown, { mode: 0o600 });
       try {
