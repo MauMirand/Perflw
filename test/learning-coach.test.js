@@ -1,0 +1,105 @@
+'use strict';
+/* LS-017/LS-018: the AI jobs with a fake runAgent: valid output is kept, everything doubtful is rejected, the score is code's. */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const coach = require('../src/learning-coach');
+const model = require('../src/assessment-model');
+
+const sections = [
+  { number: '1', title: 'Ionic bonds', description: 'Atoms swap electrons and stick together.', keyPoints: ['Ions form when electrons transfer.', 'Opposite charges attract strongly.'] },
+  { number: '2', title: 'Covalent bonds', description: 'Atoms share electron pairs.', keyPoints: ['Shared pairs hold atoms together.'] },
+];
+const excerpts = coach.excerptsOf(sections);
+const provenance = { provider: 'ollama-local', model: 'qwen2.5:7b', agentId: 'agent-1', promptVersion: coach.PROMPT_VERSION, generatedAt: '2026-11-24T10:00:00.000Z' };
+const ctx = { subjectId: 's1', topicId: 't1', excerpts, provenance };
+const good = {
+  type: 'truefalse', prompt: 'True or false: ions form by electron transfer?', dimension: 'recognition', difficulty: 1, explanation: 'Because electrons move between atoms.',
+  payload: { statement: 'Ions form when electrons transfer.', correct: true, requireJustification: false },
+  source: { section: '1', quote: 'Ions form when electrons transfer.' },
+};
+
+test('a valid question with a real quote is kept as an unreviewed, attributed draft', () => {
+  const { questions, rejected } = coach.parseQuestions(JSON.stringify({ questions: [good] }), ctx);
+  assert.equal(rejected.length, 0); assert.equal(questions.length, 1);
+  const q = questions[0];
+  assert.equal(q.origin, 'generated'); assert.equal(q.review, 'unreviewed', 'D3: a person approves it before pre-tests and finals');
+  assert.deepEqual(q.provenance.model, 'qwen2.5:7b'); assert.equal(q.source[0].section, '1');
+});
+
+test('JSON in a fence or surrounded by words is accepted; anything else is rejected without a guess', () => {
+  const wrapped = `Here you go:\n\`\`\`json\n${JSON.stringify({ questions: [good] })}\n\`\`\`\nHope that helps.`;
+  assert.equal(coach.parseQuestions(wrapped, ctx).questions.length, 1);
+  for (const text of ['not json at all', '', '{"questions":"nope"}', '[1,2,3]', undefined]) {
+    const r = coach.parseQuestions(text, ctx);
+    assert.equal(r.questions.length, 0, String(text)); assert.match(r.rejected[0].reason, /usable JSON/);
+  }
+});
+
+test('a missing, short or invented citation is rejected', () => {
+  const cases = {
+    'no source': { ...good, source: undefined },
+    'empty quote': { ...good, source: { section: '1', quote: '' } },
+    'short quote': { ...good, source: { section: '1', quote: 'ions' } },
+    'invented quote': { ...good, source: { section: '1', quote: 'Electrons are made of tiny pink elephants.' } },
+  };
+  for (const [name, bad] of Object.entries(cases)) {
+    const r = coach.parseQuestions(JSON.stringify({ questions: [bad] }), ctx);
+    assert.equal(r.questions.length, 0, name); assert.match(r.rejected[0].reason, /quote|citation/i, name);
+  }
+});
+
+test('a question that fails validateQuestion is rejected with the validator reason; the good ones around it survive', () => {
+  const broken = { ...good, payload: { statement: 'Ions form when electrons transfer.', correct: 'yes' } };
+  const r = coach.parseQuestions(JSON.stringify({ questions: [good, broken, { ...good, difficulty: 9 }, good] }), ctx);
+  assert.equal(r.questions.length, 2); assert.equal(r.rejected.length, 2);
+  assert.ok(r.rejected.every(x => /payload|difficulty/.test(x.reason)));
+});
+
+test('generateQuestions: success, nothing to write from, AI unavailable, and an aborted run', async () => {
+  const calls = [];
+  const ecosystem = { getAgent: () => ({ config: { provider: { connectionId: 'ollama-local' } } }), runAgent: async (userId, args) => { calls.push(args); return JSON.stringify({ questions: [good] }); } };
+  const agents = { ready: async () => ({ id: 'agent-1', name: 'Writer', model: 'qwen2.5:7b' }) };
+  const c = coach.createLearningCoach({ ecosystem, agents, now: () => Date.parse('2026-11-24T10:00:00Z') });
+  const out = await c.generateQuestions('u', { subjectId: 's1', topic: { id: 't1', title: 'Ionic bonds' }, sections, types: ['truefalse'], dimensions: ['recognition'], count: 3 });
+  assert.equal(out.questions.length, 1); assert.equal(out.provenance.provider, 'ollama-local');
+  assert.match(calls[0].prompt, /EXCERPTS\n\[1\] Ionic bonds/); assert.equal(calls[0].temperature, 0.4);
+  await assert.rejects(() => c.generateQuestions('u', { subjectId: 's1', topic: { id: 't1', title: 'X' }, sections: [], types: ['choice'], dimensions: ['recall'], count: 1 }), /no analysed text/);
+  const off = coach.createLearningCoach({ ecosystem, agents: { ready: async () => ({ missing: 'No AI model is available.' }) } });
+  await assert.rejects(() => off.generateQuestions('u', { subjectId: 's1', topic: { id: 't', title: 'T' }, sections, types: ['choice'], dimensions: ['recall'], count: 1 }), /No AI model is available\. You can still write your own questions/);
+  assert.deepEqual(await off.status('u'), { available: false, reason: 'No AI model is available.' });
+  assert.equal((await c.status('u')).available, true);
+  const aborting = coach.createLearningCoach({ ecosystem: { ...ecosystem, runAgent: async () => { throw new Error('This request was stopped.'); } }, agents });
+  await assert.rejects(() => aborting.generateQuestions('u', { subjectId: 's1', topic: { id: 't1', title: 'T' }, sections, types: ['choice'], dimensions: ['recall'], count: 1 }), /stopped/);
+});
+
+// ───────── grading
+const explain = { id: 'q1', type: 'explain', prompt: 'Why is NaCl hard to melt?', points: 2, payload: { rubric: [{ id: 'c1', criterion: 'Mentions ions', points: 1 }, { id: 'c2', criterion: 'Mentions strong attraction', points: 1 }], modelAnswer: 'Strong ionic attraction.' } };
+
+test('grading: per-criterion verdicts are kept, unknown ids dropped, absent ids count as missing, confidence defaults to low', () => {
+  const ok = coach.parseVerdicts(JSON.stringify({ criteria: [{ id: 'c1', verdict: 'met', reason: 'Names ions.' }, { id: 'zzz', verdict: 'met' }], confidence: 'high', score: 99 }), explain);
+  assert.equal(ok.ok, true); assert.equal(ok.confidence, 'high');
+  assert.deepEqual(ok.verdicts.map(v => [v.id, v.verdict]), [['c1', 'met'], ['c2', 'missing']]);
+  assert.equal(coach.parseVerdicts(JSON.stringify({ criteria: [{ id: 'c1', verdict: 'met' }] }), explain).confidence, 'low');
+});
+
+test('grading: a model-supplied number is ignored, the score comes from scoreFromCriteria', () => {
+  const parsed = coach.parseVerdicts(JSON.stringify({ criteria: [{ id: 'c1', verdict: 'met' }, { id: 'c2', verdict: 'partly' }], score: 2, total: 2, confidence: 'medium' }), explain);
+  assert.equal(model.scoreFromCriteria(explain, parsed.verdicts), 1.5, '1 + 0.5 of 2 points, not the 2 the model claimed');
+});
+
+test('grading: unusable output keeps the answer pending (no guessed score)', () => {
+  for (const text of ['no json', '{"criteria":[]}', '{"criteria":[{"id":"c1","verdict":"great"}]}', '{"criteria":"x"}']) assert.equal(coach.parseVerdicts(text, explain).ok, false, text);
+});
+
+test('gradeOpenAnswer: prompt carries the rubric but not a score request; failures say what happens next', async () => {
+  let prompt = '';
+  const agents = { ready: async () => ({ id: 'g', name: 'Grader', model: 'm' }) };
+  const ecosystem = { getAgent: () => ({ config: { provider: { connectionId: 'ollama-local' } } }), runAgent: async (u, args) => { prompt = args.prompt; return JSON.stringify({ criteria: [{ id: 'c1', verdict: 'met' }, { id: 'c2', verdict: 'met' }], confidence: 'high' }); } };
+  const c = coach.createLearningCoach({ ecosystem, agents });
+  const out = await c.gradeOpenAnswer('u', { question: explain, answerText: 'Ions attract strongly.', sections });
+  assert.equal(out.ok, true); assert.match(prompt, /c1: Mentions ions/); assert.match(prompt, /Do not give a score/); assert.equal(out.provenance.model, 'm');
+  await assert.rejects(() => c.gradeOpenAnswer('u', { question: explain, answerText: '   ', sections }), /no answer to grade/);
+  await assert.rejects(() => c.gradeOpenAnswer('u', { question: { ...explain, payload: {} }, answerText: 'x', sections }), /no rubric/);
+  const bad = coach.createLearningCoach({ ecosystem: { ...ecosystem, runAgent: async () => 'rubbish' }, agents });
+  await assert.rejects(() => bad.gradeOpenAnswer('u', { question: explain, answerText: 'x', sections }), /stays waiting; you can grade it yourself/);
+});

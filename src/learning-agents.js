@@ -11,6 +11,56 @@
 const path = require('node:path');
 const { writeFileAtomic, readJsonFile } = require('./safe-file');
 
+const QUESTION_WRITING = `---
+name: Learning question writing
+description: Write study questions from the excerpts of a student's own file, each with a real quote as its source, as strict JSON.
+version: 1
+enabled: true
+activation: always
+triggers: question, quiz, test, exam, write questions
+outcome: One JSON object {"questions":[...]} whose questions use only facts and quotes from the given excerpts.
+---
+
+# Learning question writing
+
+Use this when you are given a topic and numbered excerpts [1], [2] … of the student's file and asked for questions.
+
+## Steps
+1. Read every excerpt. A question may only test something the excerpts state.
+2. Pick the requested types and skills (dimension). recognition = pick the right answer; recall = state it; understanding = explain why or how; application = use it in a new case.
+3. For every question copy a short quote (at least 12 characters) EXACTLY from one excerpt into "source.quote", and put that excerpt's number in "source.section".
+4. choice: 3-5 options, one clearly right, the others plausible but wrong. truefalse: the statement must be true or false by the excerpt. explain: a rubric of 2-4 criteria, 1 point each, each a fact from the excerpt.
+5. Never invent a fact, number, name or example. If the excerpts are too thin, return fewer questions.
+
+## Output format (exactly)
+One JSON object and nothing else: {"questions":[{"type","prompt","dimension","difficulty","explanation","payload","source":{"section","quote"}}]}
+`;
+const ANSWER_GRADING = `---
+name: Learning answer grading
+description: Rate a student's written answer against a rubric, one verdict per criterion, as strict JSON. Never give a score.
+version: 1
+enabled: true
+activation: always
+triggers: grade, mark, rubric, answer
+outcome: One JSON object {"criteria":[{"id","verdict","reason"}],"confidence"} with a verdict for every rubric criterion.
+---
+
+# Learning answer grading
+
+Use this when you receive a question, its rubric and a student's answer.
+
+## Steps
+1. Read the rubric criteria. Judge each one on its own.
+2. met = the answer clearly covers it; partly = it half does or is vague; missing = it does not.
+3. Judge only what the student wrote, not what they might know. Do not reward length.
+4. Give a one-sentence reason a student can learn from.
+5. confidence: high when the answer is clear-cut, low when it is ambiguous or off-topic.
+6. Do NOT output a score or total. The app computes it.
+
+## Output format (exactly)
+One JSON object and nothing else: {"criteria":[{"id":"c1","verdict":"met","reason":"..."}],"confidence":"medium"}
+`;
+
 const SKILLS = {
   'learning-key-points': {
     name: 'Learning key points',
@@ -59,6 +109,9 @@ KEY POINTS:
 `
     }
   },
+  // The AI question and grading helpers are made on first use (only when the student asks for them), not with the core agents.
+  'learning-question-writing': { name: 'Learning question writing', file: QUESTION_WRITING, references: {}, optional: true },
+  'learning-answer-grading': { name: 'Learning answer grading', file: ANSWER_GRADING, references: {}, optional: true },
   'learning-image-reading': {
     name: 'Learning image reading',
     file: `---
@@ -187,6 +240,39 @@ NOT_IN_FILE
 };
 
 const AGENTS = {
+  writer: {
+    optional: true,
+    name: 'Learning Question Writer',
+    description: 'Drafts study questions from your own files, each quoting its source. Drafts wait for your review.',
+    skills: ['learning-question-writing'],
+    identity: `You are the Learning Question Writer in Perflw. You turn the excerpts of a student's own study file into exam-style questions, and you never test anything the excerpts do not say.
+`,
+    instructions: `# How you work
+
+- Follow the "Learning question writing" skill and its JSON output format exactly.
+- Every question quotes the excerpt it came from, word for word.
+- Prefer clear, unambiguous questions over tricky ones.
+`,
+    capabilities: `- Writes choice, true/false and explain questions as JSON.
+- Has no tools: the excerpts come with the request.
+`
+  },
+  grader: {
+    optional: true,
+    name: 'Learning Answer Grader',
+    description: 'Rates written answers against a rubric, criterion by criterion. Its grades are provisional until you accept them.',
+    skills: ['learning-answer-grading'],
+    identity: `You are the Learning Answer Grader in Perflw. You rate a student's written answer against a rubric, one criterion at a time, fairly and briefly.
+`,
+    instructions: `# How you work
+
+- Follow the "Learning answer grading" skill and its JSON output format exactly.
+- Never output a score; only a verdict and a short reason for each criterion.
+`,
+    capabilities: `- Rates answers against a rubric.
+- Has no tools: the question, rubric and answer come with the request.
+`
+  },
   reader: {
     name: 'Learning Image Reader',
     description: 'Reads the pictures in study files (slides, infographics, diagrams, scanned pages) so their content reaches the notes and answers.',
@@ -280,10 +366,11 @@ function createLearningAgents({ ecosystem, root }) {
   function readRegistry(userId) { const value = readJsonFile(registryFile(userId), {}); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
   function writeRegistry(userId, value) { writeFileAtomic(registryFile(userId), `${JSON.stringify(value, null, 2)}\n`); }
 
-  function ensureSkills(userId) {
+  function ensureSkills(userId, wanted = []) {
     const existing = new Set(ecosystem.listSkills(userId).map(s => s.id));
     const version = text => Number((String(text).match(/^version:\s*(\d+)/m) || [])[1] || 1);
     for (const [id, def] of Object.entries(SKILLS)) {
+      if (def.optional && !wanted.includes(id) && !existing.has(id)) continue;
       if (existing.has(id)) {
         // A newer built-in version replaces an older one (the previous file stays in the skill's .history).
         let current = ''; try { current = ecosystem.readSkillFile(userId, id, 'SKILL.md'); } catch { current = ''; }
@@ -320,12 +407,13 @@ function createLearningAgents({ ecosystem, root }) {
   }
 
   /* Returns { analyzer, assistant, reader } agent ids, creating whatever is missing. */
-  async function ensure(userId) {
-    ensureSkills(userId);
+  async function ensure(userId, roles = []) {
+    ensureSkills(userId, roles.flatMap(role => (AGENTS[role] && AGENTS[role].skills) || []));
     const registry = readRegistry(userId);
     const present = new Set(ecosystem.listAgents(userId).map(a => a.id));
     let changed = false;
     for (const [role, def] of Object.entries(AGENTS)) {
+      if (def.optional && !roles.includes(role)) continue;
       if (registry[role] && present.has(registry[role])) continue;
       const model = (await chooseModel(userId, Boolean(def.vision))) || 'unset';
       const agent = ecosystem.createAgent(userId, { name: def.name, description: def.description, connectionId: 'ollama-local', model });
@@ -336,13 +424,13 @@ function createLearningAgents({ ecosystem, root }) {
       registry[role] = agent.id; changed = true;
     }
     if (changed) writeRegistry(userId, registry);
-    return { analyzer: registry.analyzer, assistant: registry.assistant, reader: registry.reader };
+    return { analyzer: registry.analyzer, assistant: registry.assistant, reader: registry.reader, writer: registry.writer, grader: registry.grader };
   }
 
   /* The agent for a role when it can run now: { id, name, model } or { missing: reason }. A Learning agent
      still on the placeholder model gets a local model as soon as one is available. */
   async function ready(userId, role) {
-    const ids = await ensure(userId);
+    const ids = await ensure(userId, [role]);
     const agent = ecosystem.getAgent(userId, ids[role]);
     let model = agent.config.provider.model;
     const vision = Boolean(AGENTS[role] && AGENTS[role].vision);

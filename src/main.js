@@ -9,6 +9,7 @@ const { createWorkspace } = require('./workspace');
 const { startupMessage } = require('./startup-error');
 const { registerLearningIpc } = require('./learning-ipc');
 const { registerStudySessionIpc, closeOpenSessions } = require('./learning-session-ipc');
+const { createLearningCoach } = require('./learning-coach');
 const learningImport = require('./learning-import');
 const { runWorkflow, LIMITS: AUTOMATION_LIMITS } = require('./automation/engine');
 const { createOllamaRuntime } = require('./automation/ollama');
@@ -347,7 +348,7 @@ app.whenReady().then(() => {
     removeLearningFiles(user, workspace.deleteSubject(user.id,id)); removeAnnotations(user, fileIds); learningFlow.subjectRemoved(user.id, id);
     for (const folder of [...journeyIds.map(j => path.join('journeys', j)), path.join('side-notes', String(id))]) { try { fs.rmSync(path.join(root, 'learning-files', user.id, folder), { recursive: true, force: true }); } catch { /* best effort */ } }
   });
-  registerLearningIpc({ handle, requireUser, workspace, dataDir: root, analysisOf: (userId, fileId) => learningFlow.fileAnalysis(userId, fileId) });
+  registerLearningIpc({ handle, requireUser, workspace, dataDir: root, analysisOf: (userId, fileId) => learningFlow.fileAnalysis(userId, fileId), coach: createLearningCoach({ ecosystem, agents: learningFlow.agents }) });
   registerStudySessionIpc({ handle, requireUser, workspace, dataDir: root });
   try { closeOpenSessions({ workspace }); } catch (error) { console.error('study sessions', error.message); } // a crash can leave a session open: close it at its last activity
   handle('learning:topics', subjectId => workspace.listTopics(requireUser().id, subjectId));

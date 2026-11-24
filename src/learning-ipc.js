@@ -61,7 +61,7 @@ const totals = assessment => assessment.items.reduce((t, i) => ({
   pending: t.pending + (i.answer && i.answer.gradeStatus === 'pending' ? 1 : 0),
 }), { score: 0, max: 0, pending: 0 });
 
-function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, analysisOf = null, now = () => Date.now() }) {
+function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, analysisOf = null, coach = null, now = () => Date.now() }) {
   const store = () => workspace.learningStore();
   const on = (channel, keys, work) => handle(channel, arg => {
     const user = requireUser();
@@ -382,6 +382,43 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
       });
   });
 
+  // ───────── AI helpers (optional, ADR-007): questions drafted from the student's own file, and provisional grades of written answers
+  const needCoach = () => coach || fail('AI is not available in this build.');
+  const sectionsFor = (u, subjectId, topicId) => {
+    const row = workspace.listTopics(u, subjectId).rows.find(r => String(r.id) === String(topicId));
+    if (!row || !row.fileId || !analysisOf) return { row, sections: [] };
+    try { const analysis = analysisOf(u, row.fileId); return { row, sections: analysis && analysis.status === 'ready' ? templates.sectionsOf({ id: row.id, title: row.title }, analysis) : [] }; } catch { return { row, sections: [] }; }
+  };
+  on('ai:status', [], async u => (coach ? coach.status(u) : { available: false, reason: 'AI is not available in this build.' }));
+  on('questions:generate', ['subjectId', 'topicId', 'types', 'dimensions', 'count'], async (u, a) => {
+    needCoach(); store().listQuestions(u, { subjectId: a.subjectId }); // ownership
+    const { row, sections } = sectionsFor(u, a.subjectId, a.topicId);
+    if (!row) fail('Topic not found.');
+    const types = (Array.isArray(a.types) && a.types.length ? a.types : ['choice', 'truefalse']).filter(x => ['choice', 'truefalse', 'explain'].includes(x));
+    const dimensions = (Array.isArray(a.dimensions) && a.dimensions.length ? a.dimensions : ['recognition', 'recall']).filter(x => model.DIMENSIONS.includes(x));
+    const count = Math.min(10, Math.max(1, Number.isInteger(a.count) ? a.count : 5));
+    const out = await coach.generateQuestions(u, { subjectId: a.subjectId, topic: { id: row.id, title: row.title }, fileId: row.fileId, sections, types, dimensions, count });
+    const saved = out.questions.map(q => store().saveQuestion(u, { question: q })); // saved as 'unreviewed': practice only until a person approves (D3)
+    return { saved, rejected: out.rejected, requested: count, provenance: out.provenance };
+  });
+  on('questions:review', ['questionId', 'review'], (u, a) => store().setReview(u, a));
+  const answerText = r => String((r && r.text) || '').trim();
+  on('assessment:aiGrade', ['itemId'], async (u, a) => {
+    needCoach();
+    const owner = store().assessmentOfItem(u, { itemId: a.itemId });
+    const item = store().getAssessment(u, { assessmentId: owner.id }).items.find(i => i.id === a.itemId);
+    const q = item.snapshot;
+    const justification = q.type === 'truefalse' ? String((item.answer && item.answer.response && item.answer.response.justification) || '').trim() : '';
+    const text = q.type === 'truefalse' ? justification : answerText(item.answer && item.answer.response);
+    const { sections } = sectionsFor(u, owner.subjectId, item.topicId);
+    const out = await coach.gradeOpenAnswer(u, { question: q, answerText: text, sections });
+    const graded = store().setAiGrade(u, { itemId: a.itemId, verdicts: out.verdicts, confidence: out.confidence, provenance: out.provenance });
+    const after = store().assessmentOfItem(u, { itemId: a.itemId });
+    if (after.status === 'graded') updateReviews(u, store().getAssessment(u, { assessmentId: after.id }));
+    return { answer: graded, reasons: Object.fromEntries(out.verdicts.map(v => [v.id, v.reason])) };
+  });
+  on('assessment:acceptGrade', ['itemId'], (u, a) => store().acceptAiGrade(u, a));
+
   // ───────── scheduled learning: an ordinary calendar event plus a link (ADR-008, spec §7)
   const KIND_TITLE = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
   on('schedule:create', ['journeyId', 'kind', 'startsAt', 'endsAt', 'topicIds'], (u, a) => {
@@ -505,7 +542,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
   const evidenceItems = (rows, topicId, onlyKinds) => rows
     .filter(r => String(r.topicId) === String(topicId) && (!onlyKinds || onlyKinds.includes(r.kind)))
     .map(r => ({ dimension: r.dimension, kind: r.kind, score: r.score, max: r.max, gradeStatus: r.gradeStatus, grader: r.grader,
-      confidence: r.confidence || undefined, answeredAt: r.answeredAt, abandoned: r.assessmentStatus === 'abandoned' }))
+      confidence: r.confidence || undefined, aiConfidence: r.aiConfidence, answeredAt: r.answeredAt, abandoned: r.assessmentStatus === 'abandoned' }))
     .filter(r => r.score !== null && r.score !== undefined);
   const latestFinalOnly = rows => {
     const latest = rows.filter(r => r.kind === 'final').reduce((m, r) => Math.max(m, r.attempt || 1), 0);

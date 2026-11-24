@@ -30,7 +30,7 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], allQuestions: [], ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
   const say = text => { try { H.announce(text); } catch { /* optional */ } };
@@ -47,6 +47,7 @@
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
+    S.ai = typeof D().aiStatus === 'function' ? await D().aiStatus().catch(error => ({ available: false, reason: error.message })) : { available: false, reason: 'AI is not available in this build.' };
     S.schedule = S.journey && typeof D().scheduleList === 'function' ? await D().scheduleList({ subjectId: S.subjectId }) : [];
     S.retention = S.journey && typeof D().retentionStatus === 'function' ? await D().retentionStatus({ journeyId: S.journey.id }) : null;
     if (typeof D().reviewDue === 'function') S.due = (await D().reviewDue({ subjectId: S.subjectId })).count;
@@ -178,10 +179,12 @@
     const list = S.allQuestions.filter(x => (!f.topicId || String(x.topicId) === String(f.topicId)) && (!f.type || x.type === f.type) && (f.retired ? true : x.status === 'active'));
     const topicTitle = id => (S.topics.find(t => String(t.id) === String(id)) || {}).title || 'No topic';
     const rows = list.map(x => `<li class="qz-q"><p class="qz-q-prompt">${esc(x.prompt)}</p><p class="ln-soon">${esc(TYPES[x.type] || x.type)} · ${esc(topicTitle(x.topicId))} · ${esc(x.dimension)} · ${['', 'easy', 'medium', 'hard'][x.difficulty] || ''}${x.used ? ' · used in an assessment' : ''}${x.status === 'retired' ? ' · retired' : ''}${x.review !== 'approved' ? ` · ${esc(x.review)}` : ''}</p>
-      <span class="qz-row">${ghost('edit', 'Edit', `data-id="${esc(x.id)}"`)}${x.status === 'active' ? ghost('retire', 'Retire', `data-id="${esc(x.id)}"`) : ghost('restore', 'Restore', `data-id="${esc(x.id)}"`)}${x.used ? '' : ghost('delete', 'Delete', `data-id="${esc(x.id)}"`)}</span>${S.confirmDelete === x.id ? `<span class="qz-confirm" role="alert">Delete this question for good? ${btn('delete-yes', 'Delete', `data-id="${esc(x.id)}"`)} ${ghost('delete-no', 'Keep')}</span>` : ''}</li>`).join('');
+      <span class="qz-row">${x.review === 'unreviewed' ? `<span class="qz-chip">AI · not reviewed</span>${btn('q-approve', 'Approve', `data-id="${esc(x.id)}"`)}${ghost('q-reject', 'Reject', `data-id="${esc(x.id)}"`)}` : ''}${ghost('edit', 'Edit', `data-id="${esc(x.id)}"`)}${x.status === 'active' ? ghost('retire', 'Retire', `data-id="${esc(x.id)}"`) : ghost('restore', 'Restore', `data-id="${esc(x.id)}"`)}${x.used ? '' : ghost('delete', 'Delete', `data-id="${esc(x.id)}"`)}</span>${S.confirmDelete === x.id ? `<span class="qz-confirm" role="alert">Delete this question for good? ${btn('delete-yes', 'Delete', `data-id="${esc(x.id)}"`)} ${ghost('delete-no', 'Keep')}</span>` : ''}</li>`).join('');
     const topics = S.topics.map(t => `<option value="${esc(t.id)}"${String(f.topicId) === String(t.id) ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
     const types = Object.keys(TYPES).map(k => `<option value="${k}"${f.type === k ? ' selected' : ''}>${TYPES[k]}</option>`).join('');
-    return `<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
+    const topicOpts = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
+    const ai = `<div class="qz-ai" role="group" aria-label="Write questions with AI"><span class="qz-opt-row"><label class="ln-field"><span>AI question writer</span><select class="field" data-qz-ai-topic>${topicOpts}</select></label><label class="ln-field"><span>How many</span><input class="field" data-qz-ai-count type="number" min="1" max="10" value="5"></label>${btn('ai-generate', 'Generate with AI', S.ai.available ? 'title="Drafts from your file, each quoting it; they wait for your review"' : `disabled title="${esc(S.ai.reason)}"`)}</span>${S.ai.available ? '' : `<p class="ln-soon">${esc(S.ai.reason)} You can still write your own questions and use the template drafts.</p>`}</div>`;
+    return `${ai}<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
       <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired questions</label></form>
       <p class="ln-soon" role="status">${list.length} question${list.length === 1 ? '' : 's'}.</p>
       ${rows ? `<ul class="qz-qlist">${rows}</ul>` : '<p class="ln-soon">No questions match. Write your first one with Add question.</p>'}
@@ -293,7 +296,7 @@
       const checks = (q.payload.rubric || []).map(c => `<label class="qz-choice"><input type="checkbox" name="${esc(item.id)}:${esc(c.id)}"><span>${esc(c.criterion)}</span></label>`).join('');
       return `<fieldset class="qz-fs"><legend>${esc(q.prompt)}</legend><p class="qz-yours">Your answer: ${esc((item.answer && item.answer.response && item.answer.response.text) || '—')}</p>${q.payload.modelAnswer ? `<p class="ln-soon">Model answer: ${esc(q.payload.modelAnswer)}</p>` : ''}<p>Tick what your answer covered:</p>${checks}</fieldset>`;
     }).join('');
-    return `<form class="qz-form" data-qz-form="grade" novalidate><p>Your written answers are graded by you. Be honest: this is how the app learns where you are.</p>${rows}<div class="qz-row"><button class="btn btn-sm" type="submit" data-qz-focus>Save my grades</button></div></form>`;
+    return `<form class="qz-form" data-qz-form="grade" novalidate><p>Your written answers are graded by you. Be honest: this is how the app learns where you are.</p>${rows}<div class="qz-row"><button class="btn btn-sm" type="submit" data-qz-focus>Save my grades</button>${ghost('ai-grade', 'Grade with AI', S.ai.available ? 'title="The AI rates each point; you can accept or adjust it"' : `disabled title="${esc(S.ai.reason)}"`)}</div></form>`;
   }
 
   function answerText(q, response) {
@@ -335,13 +338,19 @@
     const rows = g.topics.map(x => `<li><strong>${esc(x.title || x.topicId)}</strong> (${x.percent}%): ${x.missingSections.length ? `open ${x.missingSections.length} section${x.missingSections.length === 1 ? '' : 's'} (${esc(x.missingSections.join(', '))})` : 'all sections opened'}${x.missingNotes.length ? `; open ${x.missingNotes.length} targeted note${x.missingNotes.length === 1 ? '' : 's'}` : ''}</li>`).join('');
     return `<div class="qz-analysis" role="status"><p class="qz-journey-title"><strong>${g.ready ? 'Ready to retake' : 'Before you retake'}</strong></p><p class="ln-soon">${g.ready ? 'You reviewed everything below the pass mark.' : `Start a study session of type Review, open each section in the viewer and read each targeted note. The pass mark was ${g.passMarkPercent}%.`}</p><ul class="qz-cats">${rows}</ul></div>`;
   }
+  function aiGradeBlock(i, a) {
+    const f = a.feedback || {}; const reasons = f.reasons || {};
+    const crit = (a.criteria || []).map(c => `<li>${esc((i.snapshot.payload.rubric || []).find(r => r.id === c.id)?.criterion || c.id)}: <strong>${esc(c.verdict)}</strong>${reasons[c.id] ? ` · ${esc(reasons[c.id])}` : ''}</li>`).join('');
+    return `<div class="qz-feedback"><p><span class="qz-chip">AI grade · provisional</span> confidence ${esc(f.confidence || 'low')}${f.provenance ? ` · ${esc(f.provenance.model)}` : ''}</p><ul class="qz-cats">${crit}</ul>
+      <p class="qz-row">${btn('accept-grade', 'Accept', `data-item="${esc(i.id)}"`)}${ghost('adjust-grade', 'Adjust', `data-item="${esc(i.id)}"`)}</p></div>`;
+  }
   function resultsView(S) {
     const R = S.results; const items = R.assessment.items; const t = R.assessment.totals;
     const topics = (R.mastery.topics || []).map(x => `<tr><th scope="row">${esc(x.title || x.topicId)}</th><td><span class="qz-chip">${esc(LEVELS[x.level] || x.level)}</span></td><td>${x.items} item${x.items === 1 ? '' : 's'}</td></tr>`).join('');
     const review = items.map(i => {
       const a = i.answer || {}; const ok = a.score >= i.maxScore;
       const state = a.dontKnow ? "I don't know" : ok ? '✓ Correct' : a.score > 0 ? '◐ Partly correct' : '✗ Incorrect';
-      return `<li class="qz-rev"><p class="qz-prompt">${esc(i.snapshot.prompt)}</p><p><strong>${state}</strong> · ${a.score == null ? 0 : a.score}/${i.maxScore}${a.mistakeCategory ? ` · ${esc(a.mistakeCategory.replace('_', ' '))}` : ''}</p><p>You answered: ${esc(answerText(i.snapshot, a.response))}</p><p>Correct: ${esc(correctText(i.snapshot))}</p>${i.snapshot.explanation ? `<p class="ln-soon">${esc(i.snapshot.explanation)}</p>` : ''}</li>`;
+      return `<li class="qz-rev"><p class="qz-prompt">${esc(i.snapshot.prompt)}</p><p><strong>${state}</strong> · ${a.score == null ? 0 : a.score}/${i.maxScore}${a.mistakeCategory ? ` · ${esc(a.mistakeCategory.replace('_', ' '))}` : ''}${a.grader === 'self' ? ' · <span class="qz-chip">Self-graded</span>' : ''}</p>${a.gradeStatus === 'provisional' ? aiGradeBlock(i, a) : ''}<p>You answered: ${esc(answerText(i.snapshot, a.response))}</p><p>Correct: ${esc(correctText(i.snapshot))}</p>${i.snapshot.explanation ? `<p class="ln-soon">${esc(i.snapshot.explanation)}</p>` : ''}</li>`;
     }).join('');
     const failedFinal = R.assessment.kind === 'final' && R.assessment.exam && R.assessment.exam.passed === false;
     return `<p class="qz-score" tabindex="-1" data-qz-focus>${esc(KIND_LABEL[R.assessment.kind] || '')}: ${t.score} of ${t.max} points</p>
@@ -552,6 +561,23 @@
         S.study.summary = sum; S.study.active = null; S.study.notes = []; await load(S); paint(S); say('Study session saved.');
       }
       else if (action === 'bank') { S.editId = null; await load(S); S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); }
+      else if (action === 'ai-generate') {
+        const host = hostOf(S); target.disabled = true; H.toast('Writing questions… this can take a minute.');
+        const out = await D().questionsGenerate({ subjectId: S.subjectId, topicId: host.querySelector('[data-qz-ai-topic]').value, count: Number(host.querySelector('[data-qz-ai-count]').value) || 5 });
+        await load(S); S.mode = 'bank'; S.bankFilter = S.bankFilter || {}; paint(S);
+        H.toast(`${out.saved.length} draft${out.saved.length === 1 ? '' : 's'} saved for your review${out.rejected.length ? `; ${out.rejected.length} rejected (${out.rejected[0].reason})` : ''}.`);
+      }
+      else if (action === 'q-approve' || action === 'q-reject') { await D().questionsReview({ questionId: target.dataset.id, review: action === 'q-approve' ? 'approved' : 'rejected' }); await load(S); paint(S); }
+      else if (action === 'ai-grade') {
+        target.disabled = true; H.toast('The AI is grading your answers…');
+        for (const item of S.grade.items) await D().assessmentAiGrade({ itemId: item.id });
+        await showResults(S, S.grade.assessment.id);
+      }
+      else if (action === 'accept-grade') { await D().assessmentAcceptGrade({ itemId: target.dataset.item }); await showResults(S, S.results.assessment.id); }
+      else if (action === 'adjust-grade') {
+        const item = S.results.assessment.items.find(i => i.id === target.dataset.item);
+        S.grade = { assessment: S.results.assessment, items: [item] }; S.mode = 'grade'; paint(S);
+      }
       else if (action === 'templates') { S.templates = await D().questionsTemplates({ subjectId: S.subjectId }); S.mode = 'templates'; paint(S); }
       else if (action === 'tpl-skip') { S.templates.drafts = S.templates.drafts.filter(d => d.id !== target.dataset.id); paint(S); }
       else if (action === 'tpl-accept' || action === 'tpl-all') {

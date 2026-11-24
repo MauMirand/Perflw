@@ -169,6 +169,8 @@ async function main() {
   await waitFor("document.querySelectorAll('.qz-q').length === 1", 'type filter');
   await fill('[data-qz-form="bank-filter"] [name="type"]', '');
   await waitFor("document.querySelectorAll('.qz-q').length === 13", 'filter cleared');
+  assert.ok(await evaluate("(() => { const b = document.querySelector('[data-qz=ai-generate]'); return !!b && (!b.disabled || b.title.length > 5); })()"), 'Generate with AI is always visible; when disabled its tooltip says why');
+  step(`AI controls: Generate with AI is ${await evaluate("document.querySelector('[data-qz=ai-generate]').disabled ? 'disabled (no model here), with the reason as its tooltip' : 'enabled (a local model was found)'")}`);
   await click('[data-qz="templates"]');
   await waitFor("/These topics have no file yet/.test(document.querySelector('.qz').textContent)", 'template drafts explain there is no file yet');
   await click('[data-qz="bank"]');

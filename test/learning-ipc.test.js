@@ -30,6 +30,8 @@ function setup() {
   db.prepare("UPDATE subject_topics SET file_id='f1' WHERE id IN ('t1','t2')").run();
   const store = createLearningStore(db);
   const events = [];
+  const coachImpl = {};
+  const coach = { status: async u => (coachImpl.status ? coachImpl.status(u) : { available: false, reason: 'No AI model is available.' }), generateQuestions: (...a) => coachImpl.generate(...a), gradeOpenAnswer: (...a) => coachImpl.grade(...a) };
   const workspace = { learningStore: () => store,
     getSubject: (userId, id) => ({ name: id === 's1' ? 'Biology' : 'Other' }),
     createEvent: (userId, title, startsAt, endsAt) => { const id = `e${events.length + 1}`; db.prepare('INSERT INTO events (id,user_id,title,starts_at,ends_at) VALUES (?,?,?,?,?)').run(id, userId, title, startsAt, endsAt); events.push(id); return id; },
@@ -43,11 +45,11 @@ function setup() {
   registerLearningIpc({
     handle: (channel, action) => handlers.set(channel, action),
     requireUser: () => { userChecks += 1; if (!user) throw new Error('Your session has expired. Log in again.'); return user; },
-    workspace, dataDir: dir, analysisOf: (userId, fileId) => ({ status: 'ready', sections: [{ number: '1', title: 'Topic t1', page: 1, description: 'About t1.', keyPoints: ['Point one.', 'Point two.'] }, { number: '2', title: 'Topic t2', page: 2, description: 'About t2.', keyPoints: ['Point three.', 'Point four.'] }] }), now: () => clock.now,
+    workspace, dataDir: dir, coach, analysisOf: (userId, fileId) => ({ status: 'ready', sections: [{ number: '1', title: 'Topic t1', page: 1, description: 'About t1.', keyPoints: ['Point one.', 'Point two.'] }, { number: '2', title: 'Topic t2', page: 2, description: 'About t2.', keyPoints: ['Point three.', 'Point four.'] }] }), now: () => clock.now,
   });
   return {
     call: (channel, arg) => handlers.get(channel)(arg),
-    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock, dir, rawDb: db,
+    handlers, as: next => { user = next; }, checks: () => userChecks, store, clock, dir, rawDb: db, coachImpl,
   };
 }
 
@@ -85,12 +87,12 @@ test('every channel is registered and every preload learningData channel exists 
   const t = setup();
   const registered = [...t.handlers.keys()].sort();
   assert.deepEqual(registered, [
-    'assessment:abandon', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'retention:status',
+    'ai:status', 'assessment:abandon', 'assessment:acceptGrade', 'assessment:aiGrade', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
-    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:list', 'questions:retire', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list',
+    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:generate', 'questions:list', 'questions:retire', 'questions:review', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list',
   ].sort());
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
-  const used = [...preload.matchAll(/call\('((?:journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history)'/g)].map(m => m[1]).sort();
+  const used = [...preload.matchAll(/call\('((?:ai|journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history)'/g)].map(m => m[1]).sort();
   assert.deepEqual(used, registered, 'preload and handlers list the same channels');
 });
 
@@ -557,4 +559,71 @@ test('scheduling: the calendar event and its link are created together, rolled b
   assert.equal(t.call('schedule:list', { subjectId: 's1' }).length, 0);
   assert.equal(t.rawDb.prepare('SELECT count(*) AS n FROM events').get().n, eventsBefore - 1, 'the event is gone');
   assert.equal(t.rawDb.prepare('SELECT count(*) AS n FROM learning_schedule').get().n, 0, 'and so is the link (cascade)');
+});
+
+// ───────── AI helpers (optional): drafts wait for review; grades are provisional and computed by code
+const provenance = { provider: 'ollama-local', model: 'qwen2.5:7b', agentId: 'a1', promptVersion: 'coach-1', generatedAt: '2026-11-24T10:00:00.000Z' };
+
+test('AI status says why it is unavailable; generated questions are saved unreviewed and need approval for pre-tests and finals', async () => {
+  const t = setup();
+  assert.deepEqual(await t.call('ai:status', {}), { available: false, reason: 'No AI model is available.' });
+  t.coachImpl.status = async () => ({ available: true, reason: '', model: 'qwen2.5:7b' });
+  assert.equal((await t.call('ai:status', {})).available, true);
+  const draft = { id: 'ai-1', subjectId: 's1', topicId: 't1', type: 'truefalse', prompt: 'True or false: ions form by electron transfer?', dimension: 'recognition', difficulty: 1, explanation: 'x',
+    payload: { statement: 'Ions form when electrons transfer.', correct: true, requireJustification: false }, origin: 'generated', review: 'unreviewed', provenance, source: [{ quote: 'Ions form when electrons transfer.', section: '1' }] };
+  t.coachImpl.generate = async (u, args) => { assert.equal(args.topic.title, 'Topic t1'); assert.ok(args.sections.length >= 1); return { questions: [draft], rejected: [{ index: 1, reason: 'It cites no usable quote from the text.' }], provenance }; };
+  const out = await t.call('questions:generate', { subjectId: 's1', topicId: 't1', count: 3 });
+  assert.equal(out.saved.length, 1); assert.equal(out.saved[0].review, 'unreviewed'); assert.equal(out.saved[0].origin, 'generated'); assert.equal(out.saved[0].provenance.model, 'qwen2.5:7b');
+  assert.equal(out.rejected.length, 1);
+  // practice may use it at once; a pre-test refuses it until a person approves it (D3)
+  assert.equal(t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { count: 1 } }).assessment.items.length, 1);
+  assert.throws(() => t.call('assessment:create', { subjectId: 's1', kind: 'diagnostic', config: { count: 1 } }), /No questions are available yet/);
+  t.call('questions:review', { questionId: out.saved[0].id, review: 'approved' });
+  assert.equal(t.call('assessment:create', { subjectId: 's1', kind: 'diagnostic', config: { count: 1 } }).assessment.items.length, 1);
+  assert.throws(() => t.call('questions:review', { questionId: out.saved[0].id, review: 'unreviewed' }), /Review must be one of/);
+  t.as({ id: 'v' });
+  await assert.rejects(async () => t.call('questions:generate', { subjectId: 's1', topicId: 't1' }), /not found/i);
+  await assert.rejects(async () => t.call('questions:review', { questionId: out.saved[0].id, review: 'approved' }), /not found/i);
+});
+
+test('AI grade: the score is computed by code and ignores the model number; provisional until accepted; adjusting keeps the original', async () => {
+  const t = setup(); seed(t);
+  const explainQ2 = t.call('questions:list', { subjectId: 's1' }).find(q => q.type === 'explain');
+  const made = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { only: [explainQ2.id] } }).assessment;
+  t.call('assessment:start', { assessmentId: made.id });
+  const item = made.items[0];
+  t.call('assessment:saveAnswer', { itemId: item.id, response: { text: 'Ions attract strongly.' } });
+  t.call('assessment:submit', { assessmentId: made.id });
+  t.coachImpl.grade = async () => ({ ok: true, confidence: 'low', verdicts: [{ id: 'c1', verdict: 'met', reason: 'Names ions.' }, { id: 'c2', verdict: 'partly', reason: 'Half.' }], score: 99, provenance });
+  const out = await t.call('assessment:aiGrade', { itemId: item.id });
+  assert.equal(out.answer.gradeStatus, 'provisional'); assert.equal(out.answer.grader, 'ai');
+  assert.equal(out.answer.score, 1.5, '1 + 0.5 of 2 points: code computed it, not the model');
+  assert.equal(out.reasons.c1, 'Names ions.');
+  // low-confidence provisional grades stay out of mastery until accepted
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  void journey;
+  const evidence = t.store.getAssessment('u', { assessmentId: made.id }).items[0].answer;
+  assert.equal(evidence.feedback.confidence, 'low');
+  const accepted = t.call('assessment:acceptGrade', { itemId: item.id });
+  assert.equal(accepted.gradeStatus, 'final'); assert.equal(accepted.grader, 'ai_accepted');
+  assert.throws(() => t.call('assessment:acceptGrade', { itemId: item.id }), /no AI grade to accept/);
+});
+
+test('AI grade, then the student adjusts it: final, manual, the AI verdict kept for audit; failures leave the answer pending', async () => {
+  const t = setup(); seed(t);
+  const q = t.call('questions:list', { subjectId: 's1' }).find(x => x.type === 'explain');
+  const made = t.call('assessment:create', { subjectId: 's1', kind: 'practice', config: { only: [q.id] } }).assessment;
+  t.call('assessment:start', { assessmentId: made.id });
+  t.call('assessment:saveAnswer', { itemId: made.items[0].id, response: { text: 'Because ions.' } });
+  t.call('assessment:submit', { assessmentId: made.id });
+  t.coachImpl.grade = async () => { throw new Error('The model did not return usable JSON. The answer stays waiting; you can grade it yourself.'); };
+  await assert.rejects(async () => t.call('assessment:aiGrade', { itemId: made.items[0].id }), /stays waiting/);
+  assert.equal(t.store.getAssessment('u', { assessmentId: made.id }).items[0].answer.gradeStatus, 'pending');
+  t.coachImpl.grade = async () => ({ ok: true, confidence: 'high', verdicts: [{ id: 'c1', verdict: 'missing', reason: 'No.' }, { id: 'c2', verdict: 'missing', reason: 'No.' }], provenance });
+  await t.call('assessment:aiGrade', { itemId: made.items[0].id });
+  const adjusted = t.call('assessment:grade', { itemId: made.items[0].id, verdicts: { c1: 'met', c2: 'met' }, grader: 'manual' });
+  assert.equal(adjusted.gradeStatus, 'final'); assert.equal(adjusted.grader, 'manual'); assert.equal(adjusted.score, 2);
+  assert.deepEqual(adjusted.feedback.original.map(c => c.verdict), ['missing', 'missing'], 'the original AI verdicts are kept');
+  t.as({ id: 'v' });
+  await assert.rejects(async () => t.call('assessment:aiGrade', { itemId: made.items[0].id }), /not found/i);
 });

@@ -782,7 +782,7 @@ function createLearningWorkflow({ root, workspace, ecosystem, emit = () => {}, o
   }
   function cancelAsk(requestId) { const c = asks.get(requestId); if (c) c.abort(); return Boolean(c); }
 
-  return { close: () => files.close(), saveLearned, preferences, deletePreference, queueFile, fileAnalysis, reanalyze, notes, deleteNote, infoCenterPath, filesRemoved, subjectRemoved, ask, cancelAsk, ensureAgents: userId => agents.ensure(userId), idle: () => !busy && !queue.length && !enriching && !enrichQueue.length, parseAnswer, NOT_FOUND_MESSAGE };
+  return { agents, close: () => files.close(), saveLearned, preferences, deletePreference, queueFile, fileAnalysis, reanalyze, notes, deleteNote, infoCenterPath, filesRemoved, subjectRemoved, ask, cancelAsk, ensureAgents: userId => agents.ensure(userId), idle: () => !busy && !queue.length && !enriching && !enrichQueue.length, parseAnswer, NOT_FOUND_MESSAGE };
 }
 
 module.exports = { createLearningWorkflow, ollamaOcr };

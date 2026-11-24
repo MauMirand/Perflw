@@ -413,14 +413,50 @@ function createLearningStore(db) {
     });
     return getAssessment(userId, { assessmentId: row.id });
   }
+  /* The true/false half that was graded at submit. A provisional AI grade replaced the score with the total, so it is kept in feedback. */
+  const deterministicHalf = answer => { const f = parse(answer.feedback, {}); return typeof f.deterministicHalf === 'number' ? f.deterministicHalf : (answer.grade_status === 'pending' ? answer.score || 0 : 0); };
+  /* AI grade (ADR-007): per-criterion verdicts from the model; the SCORE IS COMPUTED HERE. Provisional until the student accepts or
+     adjusts it. Low-confidence provisional grades are left out of mastery by the mastery model until accepted. */
+  function setAiGrade(userId, input) {
+    const a = args(input);
+    const item = itemRow(userId, a.itemId); const assessment = assessmentRow(userId, item.assessment_id);
+    if (assessment.status !== 'submitted' && assessment.status !== 'graded') fail('Open answers can only be graded after the assessment is submitted.');
+    const answer = one('SELECT * FROM assessment_answers WHERE item_id=? AND user_id=?', item.id, userId);
+    if (!answer || !['pending', 'provisional'].includes(answer.grade_status)) fail('This answer is not waiting for a grade.');
+    const question = parse(item.question_snapshot, {});
+    const rubric = model.rubricOf(question);
+    if (!rubric.length || !Array.isArray(a.verdicts)) fail('This answer has no rubric to grade.');
+    const given = new Map(a.verdicts.filter(isObj).map(v => [String(v.id), v]));
+    const criteria = rubric.map(row => { const v = given.get(String(row.id)); return { id: String(row.id), verdict: v && Object.prototype.hasOwnProperty.call(model.VERDICTS, v.verdict) ? v.verdict : 'missing' }; });
+    const half = deterministicHalf(answer);
+    const part = model.scoreFromCriteria(question, criteria);
+    const score = Math.round(((question.type === 'truefalse' ? half : 0) + part) * 100) / 100;
+    const confidence = ['low', 'medium', 'high'].includes(a.confidence) ? a.confidence : 'low';
+    const feedback = JSON.stringify({ confidence, provenance: isObj(a.provenance) ? a.provenance : null, reasons: Object.fromEntries([...given].map(([id, v]) => [id, String(v.reason || '').slice(0, 300)])), deterministicHalf: half });
+    const stamp = now();
+    transaction(() => {
+      run("UPDATE assessment_answers SET score=?,grade_status='provisional',grader='ai',criteria=?,feedback=?,graded_at=?,updated_at=? WHERE id=?", score, JSON.stringify(criteria), feedback, stamp, stamp, answer.id);
+      finishIfGraded(userId, assessment.id, stamp);
+    });
+    return answerOut(one('SELECT * FROM assessment_answers WHERE id=?', answer.id));
+  }
+  function acceptAiGrade(userId, input) {
+    const item = itemRow(userId, args(input).itemId);
+    const answer = one('SELECT * FROM assessment_answers WHERE item_id=? AND user_id=?', item.id, userId);
+    if (!answer || answer.grade_status !== 'provisional' || answer.grader !== 'ai') fail('There is no AI grade to accept on this answer.');
+    run("UPDATE assessment_answers SET grade_status='final',grader='ai_accepted',updated_at=? WHERE id=?", now(), answer.id);
+    return answerOut(one('SELECT * FROM assessment_answers WHERE id=?', answer.id));
+  }
   function gradeOpenAnswer(userId, input) {
     const a = args(input);
     const item = itemRow(userId, a.itemId);
     const assessment = assessmentRow(userId, item.assessment_id);
     const grader = oneOf(a.grader, MANUAL_GRADERS, 'Grader');
-    if (assessment.status !== 'submitted') fail('Open answers can only be graded after the assessment is submitted.');
+    if (!['submitted', 'graded'].includes(assessment.status)) fail('Open answers can only be graded after the assessment is submitted.');
     const answer = one('SELECT * FROM assessment_answers WHERE item_id=? AND user_id=?', item.id, userId);
-    if (!answer || answer.grade_status !== 'pending') fail('This answer is not waiting for a grade.');
+    // Once everything is graded only a provisional AI grade can still be adjusted.
+    if (assessment.status === 'graded' && !(answer && answer.grade_status === 'provisional')) fail('Open answers can only be graded after the assessment is submitted.');
+    if (!answer || !['pending', 'provisional'].includes(answer.grade_status)) fail('This answer is not waiting for a grade.');
     const question = parse(item.question_snapshot, {});
     const rubric = model.rubricOf(question);
     if (!rubric.length) fail('This answer has no rubric to grade.');
@@ -432,11 +468,13 @@ function createLearningStore(db) {
       return { id: String(row.id), verdict: Object.prototype.hasOwnProperty.call(model.VERDICTS, verdict) ? verdict : 'missing' };
     });
     const part = model.scoreFromCriteria(question, criteria);
-    const score = Math.round(((question.type === 'truefalse' ? answer.score || 0 : 0) + part) * 100) / 100;
+    const score = Math.round(((question.type === 'truefalse' ? deterministicHalf(answer) : 0) + part) * 100) / 100;
     const stamp = now();
+    // Adjusting an AI grade keeps what the AI said, for audit (spec §4.4).
+    const feedback = answer.grade_status === 'provisional' ? JSON.stringify({ ...parse(answer.feedback, {}), original: parse(answer.criteria, null), adjustedAt: stamp }) : answer.feedback;
     transaction(() => {
-      run("UPDATE assessment_answers SET score=?,grade_status='final',grader=?,criteria=?,graded_at=?,updated_at=? WHERE id=?",
-        score, grader, JSON.stringify(criteria), stamp, stamp, answer.id);
+      run("UPDATE assessment_answers SET score=?,grade_status='final',grader=?,criteria=?,feedback=?,graded_at=?,updated_at=? WHERE id=?",
+        score, grader, JSON.stringify(criteria), feedback, stamp, stamp, answer.id);
       finishIfGraded(userId, assessment.id, stamp);
     });
     return answerOut(one('SELECT * FROM assessment_answers WHERE id=?', answer.id));
@@ -640,7 +678,7 @@ function createLearningStore(db) {
   function journeyEvidence(userId, input) {
     const journey = owned('learning_journeys', 'Journey', userId, args(input).journeyId);
     return all(`SELECT a.id AS assessment_id, a.kind, a.attempt, i.question_id, i.topic_id, i.dimension, i.max_score,
-        n.score, n.grade_status, n.grader, n.confidence, n.dont_know, n.mistake_category, n.saved_at
+        n.score, n.grade_status, n.grader, n.confidence, n.dont_know, n.mistake_category, n.saved_at, n.feedback
       FROM assessment_answers n
       JOIN assessment_items i ON i.id=n.item_id
       JOIN assessments a ON a.id=i.assessment_id
@@ -649,6 +687,7 @@ function createLearningStore(db) {
       assessmentId: r.assessment_id, kind: r.kind, attempt: r.attempt, questionId: r.question_id, topicId: r.topic_id,
       dimension: r.dimension, score: r.grade_status === 'pending' ? null : r.score, max: r.max_score, gradeStatus: r.grade_status,
       grader: r.grader, confidence: r.confidence, dontKnow: r.dont_know === 1, mistakeCategory: r.mistake_category, answeredAt: r.saved_at,
+      ...(r.grader === 'ai' ? { aiConfidence: parse(r.feedback, {}).confidence || 'low' } : {}),
     }));
   }
 
@@ -656,7 +695,7 @@ function createLearningStore(db) {
     createJourney, getJourney, listJourneys, updateJourney,
     saveQuestion, getQuestion, listQuestions, retireQuestion, deleteQuestion, setReview,
     createAssessment, startAssessment, getAssessment, assessmentOfItem, listAssessments, abandonAssessment,
-    saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer,
+    saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer, setAiGrade, acceptAiGrade,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
     recordReview, getReview, dueReviews, createSchedule, listSchedule, getSchedule,
