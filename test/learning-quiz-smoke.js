@@ -251,6 +251,7 @@ async function main() {
   step('no answer key in an open assessment');
 
   await answerAll();
+  assert.ok(await evaluate("!document.querySelector('.qz-feedback') && !document.querySelector('.qz-choice.right, .qz-choice.wrong')"), 'a test reveals nothing while you answer');
   await check('input[name="dontKnow"]'); // the last question: "I don't know", so the analysis has a mistake to name
   const graded = await submitAndGrade(1);
   const score = await evaluate("document.querySelector('.qz-score').textContent");
@@ -323,8 +324,10 @@ async function main() {
   await click('[data-qz="practice"]');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');
   await answerCurrent();
-  await click('[data-qz="check"]');
-  await waitFor("!!document.querySelector('.qz-feedback')", 'feedback after Check');
+  // A quiz reveals the answer by itself when it is complete; only written answers need the Check button.
+  await sleep(500);
+  if (!(await evaluate("!!document.querySelector('.qz-feedback')"))) await click('[data-qz=\"check\"]');
+  await waitFor("!!document.querySelector('.qz-feedback')", 'feedback in the practice quiz');
   assert.ok(await evaluate("[...document.querySelectorAll('.qz-card input, .qz-card textarea, .qz-card select')].every(el => el.disabled)"), 'a checked answer is locked');
   step('practice: feedback after Check, answer locked');
   await shoot('quiz-6-practice');
@@ -349,12 +352,13 @@ async function main() {
   await evaluate("[...document.querySelectorAll('[data-qz=\"resume\"]')].find(b => /Start/.test(b.textContent)).click()");
   await waitFor("!!document.querySelector('.qz-card') && /Practice · Question 1 of 1/.test(document.querySelector('.qz-head').textContent)", 'retry practice opened');
   await evaluate("(() => { const el = [...document.querySelectorAll('input[name=\"choice\"]')].find(i => i.nextElementSibling.textContent.includes('Covalent')); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
-  await click('[data-qz="check"]');
+  await waitFor("!!document.querySelector('.qz-feedback')", 'the quiz reveals a wrong answer at once, no Check press');
+  assert.ok(await evaluate("!!document.querySelector('.qz-choice.wrong') && !!document.querySelector('.qz-choice.right') && /Your answer/.test(document.querySelector('.qz-card').textContent) && /The answer/.test(document.querySelector('.qz-card').textContent)"), 'the wrong pick and the right answer are marked in place, with words');
+  assert.ok(await evaluate("!document.querySelector('[data-qz=\"check\"]')"), 'no Check button for a single-answer question');
   await waitFor("!!document.querySelector('[data-qz=\"retry\"]')", 'a wrong answer offers a second try');
   await click('[data-qz="retry"]');
   await waitFor("!document.querySelector('.qz-feedback')", 'the question unlocks');
   await evaluate("(() => { const el = [...document.querySelectorAll('input[name=\"choice\"]')].find(i => i.nextElementSibling.textContent.includes('NaCl')); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
-  await click('[data-qz="check"]');
   await waitFor("(document.querySelector('.qz-feedback') || {}).textContent && document.querySelector('.qz-feedback').textContent.includes('second try, counts half') && document.querySelector('.qz-feedback').textContent.includes('0.5/1')", 'a right second try counts half');
   assert.ok(await evaluate("!document.querySelector('[data-qz=\"retry\"]')"), 'no third try');
   step('practice retry: a second try after a wrong answer, scored half, only once');

@@ -164,7 +164,7 @@
     const chosen = S.setup.types; const usable = S.questions.filter(q => chosen.includes(q.type) && q.review === 'approved');
     const want = Math.max(1, Math.min(40, Number(S.setup.count) || 1));
     const short = usable.length < want;
-    return `<form class="qz-form" data-qz-form="setup" novalidate><p>Pre-test: a short check of where you stand before you study. About 2 questions per topic is a good start.</p>
+    return `<form class="qz-form" data-qz-form="setup" novalidate><p>Pre-test: a short check of where you stand before you study. About 2 questions per topic is a good start. You answer everything first; you see what was right and wrong after you submit.</p>
       <label class="ln-field"><span>How many questions (1–40)</span><input class="field" name="count" type="number" min="1" max="40" value="${esc(want)}" data-qz-focus></label>
       <fieldset class="qz-fs"><legend>Question types</legend>${types.map(t => `<label><input type="checkbox" name="type" value="${t}"${chosen.includes(t) ? ' checked' : ''}> ${esc(TYPES[t])}</label>`).join(' ')}</fieldset>
       <p class="${usable.length ? 'ln-soon' : 'qz-error'}" role="status">${usable.length} approved question${usable.length === 1 ? '' : 's'} match${short && usable.length ? `. Only ${usable.length} are available, so the pre-test will have ${usable.length}. Start with those, or add more in the question bank.` : usable.length ? ' your choice.' : ' nothing yet. Pick other types or add questions in the question bank.'}</p>
@@ -254,17 +254,21 @@
 
   // ───────── answering
   const hasAnswer = a => a && (a.dontKnow || (a.response && ((a.response.choice || []).length || (a.response.pairs || []).length || typeof a.response.value === 'boolean' || (a.response.text || '').trim())));
-  function control(item, answer, locked) {
+  function control(item, answer, locked, fb) {
     const q = item.question; const p = q.payload || {}; const r = (answer && answer.response) || {}; const dis = locked ? ' disabled' : '';
+    const mark = (right, picked) => (fb && fb.status === 'graded' ? (right ? ' right' : picked ? ' wrong' : '') : '');
+    const word = (right, picked) => (fb && fb.status === 'graded' ? (right && picked ? '<em class="qz-mark">✓ Correct</em>' : right ? '<em class="qz-mark">✓ The answer</em>' : picked ? '<em class="qz-mark">✗ Your answer</em>' : '') : '');
     if (q.type === 'choice') {
       const picked = new Set(r.choice || []);
-      return `<div role="${p.multiple ? 'group' : 'radiogroup'}" aria-label="Answers" class="qz-choices">${(p.options || []).map((o, i) => `<label class="qz-choice"><input type="${p.multiple ? 'checkbox' : 'radio'}" name="choice" value="${esc(o.id)}"${picked.has(o.id) ? ' checked' : ''}${dis}><span><kbd>${'ABCDEFGH'[i]}</kbd> ${esc(o.text)}</span></label>`).join('')}</div>`;
+      const correct = new Set((fb && fb.key && fb.key.correct) || []);
+      return `<div role="${p.multiple ? 'group' : 'radiogroup'}" aria-label="Answers" class="qz-choices">${(p.options || []).map((o, i) => `<label class="qz-choice${mark(correct.has(o.id), picked.has(o.id))}"><input type="${p.multiple ? 'checkbox' : 'radio'}" name="choice" value="${esc(o.id)}"${picked.has(o.id) ? ' checked' : ''}${dis}><span><kbd>${'ABCDEFGH'[i]}</kbd> ${esc(o.text)} ${word(correct.has(o.id), picked.has(o.id))}</span></label>`).join('')}</div>`;
     }
-    if (q.type === 'truefalse') return `<div role="radiogroup" aria-label="True or false" class="qz-choices"><p>${esc(p.statement)}</p>${['true', 'false'].map(v => `<label class="qz-choice"><input type="radio" name="tf" value="${v}"${typeof r.value === 'boolean' && r.value === (v === 'true') ? ' checked' : ''}${dis}><span><kbd>${v === 'true' ? 'T' : 'F'}</kbd> ${v === 'true' ? 'True' : 'False'}</span></label>`).join('')}</div>`;
+    if (q.type === 'truefalse') return `<div role="radiogroup" aria-label="True or false" class="qz-choices"><p>${esc(p.statement)}</p>${['true', 'false'].map(v => { const picked = typeof r.value === 'boolean' && r.value === (v === 'true'); const right = fb && fb.key && fb.key.correct === (v === 'true'); return `<label class="qz-choice${mark(right, picked)}"><input type="radio" name="tf" value="${v}"${picked ? ' checked' : ''}${dis}><span><kbd>${v === 'true' ? 'T' : 'F'}</kbd> ${v === 'true' ? 'True' : 'False'} ${word(right, picked)}</span></label>`; }).join('')}</div>`;
     if (q.type === 'matching') {
       const given = new Map((r.pairs || []).map(([l, rt]) => [l, rt]));
       const right = (p.right || []).map(o => `<option value="${esc(o.id)}">${esc(o.text)}</option>`).join('');
-      return `<div class="qz-choices" aria-label="Match each item">${(p.left || []).map(l => `<label class="qz-match"><span>${esc(l.text)}</span><select class="field" name="match:${esc(l.id)}"${dis}><option value="">Choose…</option>${right.replace(`value="${esc(given.get(l.id))}"`, `value="${esc(given.get(l.id))}" selected`)}</select></label>`).join('')}</div>`;
+      const truth = new Map(((fb && fb.key && fb.key.pairs) || []).map(([l, rt]) => [l, rt]));
+      return `<div class="qz-choices" aria-label="Match each item">${(p.left || []).map(l => `<label class="qz-match${fb && fb.status === 'graded' ? (given.get(l.id) === truth.get(l.id) ? ' right' : ' wrong') : ''}"><span>${esc(l.text)}${fb && fb.status === 'graded' ? (given.get(l.id) === truth.get(l.id) ? ' <em class="qz-mark">✓ Correct</em>' : ` <em class="qz-mark">✗ Should be ${esc(((p.right || []).find(x => x.id === truth.get(l.id)) || {}).text || '')}</em>`) : ''}</span><select class="field" name="match:${esc(l.id)}"${dis}><option value="">Choose…</option>${right.replace(`value="${esc(given.get(l.id))}"`, `value="${esc(given.get(l.id))}" selected`)}</select></label>`).join('')}</div>`;
     }
     if (q.type === 'essay' || q.type === 'explain') {
       const max = q.type === 'essay' ? p.maxWords : p.maxWords; const min = q.type === 'essay' ? p.minWords : 0;
@@ -284,6 +288,27 @@
     return `<div class="qz-feedback" role="status"><p><strong>${esc(state)}</strong>${f.status === 'graded' ? ` · ${f.score}/${f.max}${f.attempt === 2 ? ' (second try, counts half)' : ''}` : ''}</p>${f.retryable ? `<p class="qz-row">${btn('retry', 'Try again (counts half)', `data-item="${esc(item.id)}"`)}</p>` : ''}${key ? `<p>${f.status === 'pending' ? 'Model' : 'Correct'}: ${esc(key)}</p>` : ''}${f.explanation ? `<p class="ln-soon">${esc(f.explanation)}</p>` : ''}</div>`;
   }
 
+  /* Quizzes (practice) reveal the result the moment the answer is complete: one pick for single-answer choice and true/false, every
+     pair chosen for matching, or "I don't know". Written and multiple-answer questions keep a Check button. Tests and exams
+     (pre-test, final) do not reveal anything until everything is answered and submitted. */
+  const instantType = item => { const q = item.question; return (q.type === 'choice' && !(q.payload && q.payload.multiple)) || q.type === 'truefalse' || q.type === 'matching'; };
+  const completeNow = (item, response) => {
+    if (response.dontKnow) return true;
+    const q = item.question;
+    if (q.type === 'choice') return !(q.payload && q.payload.multiple) && (response.choice || []).length === 1;
+    if (q.type === 'truefalse') return typeof response.value === 'boolean';
+    if (q.type === 'matching') return (response.pairs || []).length === ((q.payload && q.payload.left) || []).length;
+    return false;
+  };
+  async function autoCheck(S) {
+    const Q = S.quiz; if (!Q || Q.checking) return; Q.checking = true;
+    try {
+      if (!(await saveNow(S))) { paint(S); return; }
+      const item = Q.assessment.items[Q.index];
+      Q.checked[item.id] = await D().assessmentCheck({ assessmentId: Q.assessment.id, itemId: item.id }); paint(S);
+      say(Q.checked[item.id].status === 'graded' ? (Q.checked[item.id].score >= Q.checked[item.id].max ? 'Correct.' : 'Not quite.') : 'Compare with the model answer.');
+    } catch (error) { fail(S, error); } finally { Q.checking = false; }
+  }
   function quizView(S) {
     const Q = S.quiz; const items = Q.assessment.items; const item = items[Q.index]; const answer = Q.answers[item.id];
     const answered = items.filter(i => hasAnswer(Q.answers[i.id])).length;
@@ -294,13 +319,13 @@
     const confirm = Q.confirm ? `<div class="qz-confirm" role="alert">${items.length - answered} unanswered. ${btn('submit-now', 'Submit anyway')} ${ghost('back-quiz', 'Go back')}</div>` : '';
     const dots = items.map((it, i) => `<button class="qz-dot${i === Q.index ? ' current' : ''}${hasAnswer(Q.answers[it.id]) ? ' done' : ''}${Q.flags.has(it.id) ? ' flagged' : ''}" type="button" data-qz="jump" data-i="${i}" aria-label="Question ${i + 1}${hasAnswer(Q.answers[it.id]) ? ', answered' : ''}${Q.flags.has(it.id) ? ', flagged' : ''}"${i === Q.index ? ' aria-current="step"' : ''}></button>`).join('');
     const timer = Q.left != null ? `<span class="qz-timer" data-qz-timer role="timer" aria-label="Time left">${clock(Q.left)}</span>` : '';
-    const nextBtn = practice && !checked ? btn('check', 'Check') : last ? btn('submit', 'Submit') : btn('next', 'Next');
+    const nextBtn = practice && !checked ? (instantType(item) ? '' : btn('check', 'Check')) : last ? btn('submit', 'Submit') : btn('next', 'Next');
     return `<div class="qz-head"><strong>${esc(KIND_LABEL[kind] || kind)}${Q.assessment.config && Q.assessment.config.test ? ' (test)' : ''}</strong> · Question ${Q.index + 1} of ${items.length} · ${answered} answered ${timer}<span class="qz-save" aria-live="polite">${esc(Q.saveText || '')}</span></div>
       <div class="qz-bar" aria-hidden="true"><i style="width:${Math.round((answered / items.length) * 100)}%"></i></div>
       <form class="qz-card" data-qz-form="answer" novalidate tabindex="-1">
         <p class="qz-meta">${esc(TYPES[item.question.type] || '')}${topic ? ` · ${esc(topic)}` : ''}${Q.flags.has(item.id) ? ' · ⚑ flagged' : ''}</p>
         <p class="qz-prompt" tabindex="-1" data-qz-focus>${esc(item.question.prompt)}</p>
-        ${control(item, answer, Boolean(checked))}
+        ${control(item, answer, Boolean(checked), checked)}
         <div class="qz-conf"><span>How sure are you?</span> ${confidence}</div>
         <label class="qz-dk"><input type="checkbox" name="dontKnow"${answer && answer.dontKnow ? ' checked' : ''}${checked ? ' disabled' : ''}> I don't know</label>
       </form>
@@ -441,6 +466,7 @@
   function onAnswerChange(S, form) {
     const Q = S.quiz; if (!Q) return; const item = Q.assessment.items[Q.index];
     Q.dirty = readResponse(form, item); Q.saveText = ''; clearTimeout(Q.timer);
+    if (Q.assessment.kind === 'practice' && !Q.checked[item.id] && completeNow(item, Q.dirty)) { autoCheck(S); return; } // quiz: reveal at once
     Q.timer = setTimeout(() => saveNow(S), 600);
     const count = form.querySelector('[data-qz-count]'); if (count && Q.dirty.text != null) count.textContent = `${words(Q.dirty.text)} words`;
   }

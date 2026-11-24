@@ -695,3 +695,10 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-dots { gap: 2px; }
 .qz [data-qz]:focus-visible, .qz .field:focus-visible, .qz input:focus-visible, .qz summary:focus-visible, .qz-table:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .qz-choice:focus-within { outline: 2px solid var(--text); outline-offset: 1px; }
+
+/* Instant reveal in quizzes: right and wrong shown in place, with words as well as colour. */
+.qz-choice.right, .qz-match.right { background: #1d2a21; box-shadow: inset 3px 0 0 #7FD08F; }
+.qz-choice.wrong, .qz-match.wrong { background: #2b2020; box-shadow: inset 3px 0 0 #E58A8A; }
+.qz-mark { font-style: normal; font-size: 12px; font-weight: 700; margin-left: 6px; color: var(--text); }
+.qz-feedback { transition: opacity 140ms ease; }
+@media (prefers-reduced-motion: reduce) { .qz-feedback { transition: none; } }
