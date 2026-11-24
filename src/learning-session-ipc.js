@@ -67,6 +67,10 @@ function registerStudySessionIpc({ handle, requireUser, workspace, dataDir, coac
       const topic = a.topicId ? topicTitle(u, a.subjectId, a.topicId) : '';
       workspace.startTimer(u, `Study: ${topic || subject.name}`.slice(0, 180));
     } catch (error) { store().discardSession(u, { sessionId: session.id }); throw error; } // no orphan session
+    if (a.journeyId && a.kind === 'supplementary') {
+      const journey = store().getJourney(u, { journeyId: a.journeyId });
+      if (['material', 'pretest_setup', 'pretest', 'diagnostic', 'targeted_notes', 'main_learning', 'practice', 'mistake_analysis'].includes(journey.stage)) store().updateJourney(u, { journeyId: a.journeyId, stage: 'supplementary' });
+    }
     if (a.journeyId && a.kind === 'main') {
       const journey = store().getJourney(u, { journeyId: a.journeyId });
       if (['material', 'pretest_setup', 'pretest', 'diagnostic', 'targeted_notes'].includes(journey.stage)) store().updateJourney(u, { journeyId: a.journeyId, stage: 'main_learning' });

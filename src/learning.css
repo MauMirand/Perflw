@@ -684,3 +684,14 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 
 .qz-hint { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: var(--raised); max-width: 760px; font-size: 13px; }
 .qz-hint p { margin: 0 0 8px; }
+
+/* Accessibility pass (LS-014, WCAG 2.1 AA): the quiz block never uses the dim token for text a student needs. */
+.qz .ln-soon, .qz .qz-meta, .qz .qz-step-state, .qz .qz-save, .qz .qz-keys, .qz .qz-table caption { color: var(--text-2); }
+.qz-step.later { opacity: 1; border: 1px dashed var(--line); background: transparent; }
+.qz-step.later .qz-step-label, .qz-step.later .qz-step-state { color: var(--text-2); }
+.qz-dot { width: 24px; height: 24px; padding: 5px; background-clip: content-box; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+.qz-dot.done { background-color: var(--text-2); }
+.qz-dot.flagged { border-radius: 6px; }
+.qz-dots { gap: 2px; }
+.qz [data-qz]:focus-visible, .qz .field:focus-visible, .qz input:focus-visible, .qz summary:focus-visible, .qz-table:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-choice:focus-within { outline: 2px solid var(--text); outline-offset: 1px; }

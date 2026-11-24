@@ -218,12 +218,31 @@ async function main() {
   await click('[data-qz="home"]');
   await waitFor("!!document.querySelector('[data-qz=\"start\"]') && !document.querySelector('[data-qz=\"start\"]').disabled", 'start enabled');
   await click('[data-qz="start"]');
+  await waitFor("!!document.querySelector('[data-qz-form=\"setup\"]')", 'pre-test setup sheet');
+  assert.ok(await evaluate("/approved questions? match/.test(document.querySelector('.qz').textContent) || /approved question/.test(document.querySelector('.qz').textContent)"), 'the setup sheet counts the questions that match');
+  await shoot('quiz-2c-setup');
+  await submit('[data-qz-form="setup"]');
   await waitFor("!!document.querySelector('.qz-card')", 'quiz opened');
   const n = await total();
   assert.ok(n >= 2, `pre-test has ${n} questions`);
   assert.match(await head(), /Pre-test · Question 1 of/);
   step(`pre-test started: ${n} questions`);
   assert.equal(await unnamedControls(), 0, 'every control on the quiz card has an accessible name');
+  // WCAG 2.1 AA: text contrast of the quiz block (4.5:1) and navigator targets of at least 24 px.
+  const lowContrast = await evaluate(`(() => {
+    const lum = c => { const v = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map(x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    const bgOf = el => { for (let e = el; e; e = e.parentElement) { const b = getComputedStyle(e).backgroundColor; const a = b.match(/[\\d.]+/g); if (a && (a.length < 4 || Number(a[3]) > 0.9)) return b; } return 'rgb(30,30,30)'; };
+    const bad = [];
+    for (const el of document.querySelectorAll('.qz .qz-meta, .qz .ln-soon, .qz .qz-head, .qz .qz-prompt, .qz .qz-conf, .qz .qz-keys, .qz-choice span')) {
+      if (!el.textContent.trim()) continue;
+      const f = lum(getComputedStyle(el).color), b = lum(bgOf(el)); const r = (Math.max(f, b) + 0.05) / (Math.min(f, b) + 0.05);
+      if (r < 4.5) bad.push(el.className + ' ' + r.toFixed(2));
+    }
+    return bad.join(', ');
+  })()`);
+  assert.equal(lowContrast, '', `text contrast below 4.5:1: ${lowContrast}`);
+  assert.ok(await evaluate("[...document.querySelectorAll('.qz-dot')].every(d => d.getBoundingClientRect().width >= 24 && d.getBoundingClientRect().height >= 24)"), 'navigator dots are at least 24 px');
+  step('accessibility: names, text contrast at least 4.5:1, navigator targets at least 24 px');
   await shoot('quiz-3-question');
 
   // The renderer never holds the answer key while the quiz is open.
@@ -298,8 +317,8 @@ async function main() {
   // Practice: feedback after Check, key shown only for that question (the study summary leaves us on the home screen).
   await waitFor("!!document.querySelector('.qz-stepper')", 'journey stepper on the home screen');
   assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Final learning', 'stepper shows the current stage (viewing the final learning evaluation moves the journey on)');
-  assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 2"), 'unbuilt stages read later');
-  step('journey stepper: Final learning current, 2 stages marked for a later update');
+  assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 0"), 'every stage is driven by the app');
+  step('journey stepper: Final learning current, all 13 stages driven by the app');
   await waitFor("!!document.querySelector('[data-qz=\"practice\"]') && !document.querySelector('[data-qz=\"practice\"]').disabled", 'practice enabled');
   await click('[data-qz="practice"]');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');

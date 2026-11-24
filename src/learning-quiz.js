@@ -15,13 +15,13 @@
   /* The journey's 13 stages (spec §2.2, stages 3–15). `built` = the app drives it today; the others read "later" and are skipped. */
   const STAGES = [
     ['material', 'Material', true, 'Add topics and write questions, then take the pre-test.'],
-    ['pretest_setup', 'Pre-test setup', false], ['pretest', 'Pre-test', true, 'Finish your pre-test.'],
+    ['pretest_setup', 'Pre-test setup', true, 'Choose how many questions and which types, then start the pre-test.'], ['pretest', 'Pre-test', true, 'Finish your pre-test.'],
     ['diagnostic', 'Diagnostic', true, 'See your results and mistakes, then generate targeted notes.'],
     ['targeted_notes', 'Targeted notes', true, 'Read your targeted notes, then start a study session.'],
     ['main_learning', 'Main learning', true, 'Study, then practice your mistakes.'],
     ['practice', 'Practice', true, 'Keep practising; mistakes that are due come first. Look at your final learning evaluation when ready.'],
     ['mistake_analysis', 'Mistake analysis', true, 'Review your mistakes, then do the final learning.'],
-    ['supplementary', 'Supplementary', false],
+    ['supplementary', 'Supplementary', true, 'Extra study for the topics that are still weak, then practice again.'],
     ['final_learning', 'Final learning', true, 'Finish a Review study session, then take the final exam.'],
     ['final_exam', 'Final exam', true, 'Finish or review your final exam.'],
     ['report', 'Report', true, 'Open the report. Start the next cycle when you are ready.'], ['retention', 'Retention check', true, 'Your retention check result is in; start the next cycle when ready.'],
@@ -30,10 +30,11 @@
   const states = new Map(); // subjectId → state, so a re-render of the page keeps the quiz where it was
 
   function stateOf(subject) {
-    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], loading: true, hint: false, allQuestions: [], ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
+    if (!states.has(subject.id)) states.set(subject.id, { mode: 'home', subjectId: subject.id, name: subject.name, topics: [], questions: [], loading: true, hint: false, allQuestions: [], setup: { count: 2, types: ['choice', 'truefalse', 'matching', 'explain', 'essay'] }, ai: { available: false, reason: 'Checking…' }, retention: null, schedule: [], due: 0, targeted: [], study: { active: null, notes: [], summary: null, base: 0, t0: 0 }, journey: null, assessments: [], form: { type: 'choice' }, errors: '', busy: false, exam: { count: 50, test: false, multiplier: 1 } });
     return states.get(subject.id);
   }
-  const say = text => { try { H.announce(text); } catch { /* optional */ } };
+  /* Screen-reader announcements go through the app's polite live region (#sr-live), the same one the Home cards use. */
+  const say = text => { const live = document.querySelector('#sr-live'); if (!live) return; live.textContent = ''; setTimeout(() => { live.textContent = text; }, 40); };
   const clock = seconds => { const s = Math.max(0, Math.round(seconds)); const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, '0')}`; };
   const minutes = seconds => (seconds == null ? 'untimed' : `${Math.round(seconds / 60)} min`);
   const fail = (S, error) => { S.errors = error && error.message ? error.message : String(error); S.busy = false; paint(S); };
@@ -63,7 +64,7 @@
 
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
-  const VIEWS = { history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  const VIEWS = { setup: setupView, history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
@@ -150,7 +151,7 @@
     const sum = st.summary;
     const done = sum ? `<div class="qz-feedback" role="status"><p><strong>Session saved</strong> · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${esc(sum.topics.join(', '))}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}</p>${sum.message ? `<p class="ln-soon">${esc(sum.message)}</p>` : ''}<p class="qz-row">${btn('practice', 'Practice now')}</p></div>` : '';
     const topics = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
-    return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" data-qz-study-kind><option value="main">Learning</option><option value="review">Review (for a retake)</option></select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
+    return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" data-qz-study-kind><option value="main">Learning</option><option value="supplementary">Extra study (weak topics)</option><option value="review">Review (for a retake)</option></select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
   }
 
   /* D13: notes opened during a study session count as visited (the retake gate reads them). */
@@ -158,13 +159,24 @@
     if (!S.study.active || !S.notesShown || !S.notesShown.length) return;
     try { await D().studyVisit({ sessionId: S.study.active.session.id, materials: S.notesShown.map(n => n.id) }); } catch { /* the notes stay readable */ }
   }
+  function setupView(S) {
+    const types = ['choice', 'truefalse', 'matching', 'explain', 'essay'];
+    const chosen = S.setup.types; const usable = S.questions.filter(q => chosen.includes(q.type) && q.review === 'approved');
+    const want = Math.max(1, Math.min(40, Number(S.setup.count) || 1));
+    const short = usable.length < want;
+    return `<form class="qz-form" data-qz-form="setup" novalidate><p>Pre-test: a short check of where you stand before you study. About 2 questions per topic is a good start.</p>
+      <label class="ln-field"><span>How many questions (1–40)</span><input class="field" name="count" type="number" min="1" max="40" value="${esc(want)}" data-qz-focus></label>
+      <fieldset class="qz-fs"><legend>Question types</legend>${types.map(t => `<label><input type="checkbox" name="type" value="${t}"${chosen.includes(t) ? ' checked' : ''}> ${esc(TYPES[t])}</label>`).join(' ')}</fieldset>
+      <p class="${usable.length ? 'ln-soon' : 'qz-error'}" role="status">${usable.length} approved question${usable.length === 1 ? '' : 's'} match${short && usable.length ? `. Only ${usable.length} are available, so the pre-test will have ${usable.length}. Start with those, or add more in the question bank.` : usable.length ? ' your choice.' : ' nothing yet. Pick other types or add questions in the question bank.'}</p>
+      <div class="qz-row"><button class="btn btn-sm" type="submit"${usable.length ? '' : ' disabled'}>Start pre-test</button>${ghost('home', 'Cancel')}</div></form>`;
+  }
   function evaluationView(S) {
     const E = S.evaluation;
     const rows = E.topics.map(t => `<tr><th scope="row">${esc(t.title || t.topicId)}</th><td><span class="qz-chip">${esc(LEVELS[t.level] || t.level)}</span></td><td>${t.items} item${t.items === 1 ? '' : 's'}</td></tr>`).join('');
     const weak = E.weak.map(w => `<li>${esc(w.title || w.topicId)} · ${esc(LEVELS[w.level] || w.level)}</li>`).join('');
     return `<p class="qz-score" tabindex="-1" data-qz-focus>Final learning · cycle ${E.cycle}</p>
       <p>${E.studySessions} study session${E.studySessions === 1 ? '' : 's'} · ${E.studyMinutes} minute${E.studyMinutes === 1 ? '' : 's'} · ${E.notes} note${E.notes === 1 ? '' : 's'} · evidence: ${Object.entries(E.evidenceByKind).map(([k, n]) => `${n} ${esc(KIND_LABEL[k] || k)}`).join(', ') || 'none yet'}</p>
-      <table class="qz-table"><caption>Where you stand now, by topic</caption><thead><tr><th scope="col">Topic</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${rows}</tbody></table>
+      <table class="qz-table" tabindex="0"><caption>Where you stand now, by topic</caption><thead><tr><th scope="col">Topic</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${rows}</tbody></table>
       ${weak ? `<p class="qz-journey-title"><strong>Weakest first</strong></p><ol class="qz-cats">${weak}</ol>` : ''}
       <p class="${E.ready ? 'qz-pass' : 'ln-soon'}" role="status">${E.ready ? 'Final learning done: the final exam is open.' : 'To open the final exam: look through this evaluation, then run and end a Review study session (it records the sections and notes you open). A test final skips this step.'}</p>
       <div class="qz-row">${E.ready ? btn('exam', 'Set up the final') : ''}${ghost('home', 'Back')}</div>`;
@@ -172,7 +184,7 @@
   function historyView(S) {
     const blocks = S.history.map(j => {
       const rows = j.assessments.map(x => `<tr${x.excluded ? ' class="qz-excluded"' : ''}><th scope="row">${esc((x.submittedAt || x.startedAt || '').slice(0, 10) || '—')}</th><td>${esc(KIND_LABEL[x.kind] || x.kind)}${x.attempt > 1 ? ` (attempt ${x.attempt})` : ''}</td><td>${x.excluded ? `${esc(x.status.replace('_', ' '))} · not counted` : `${x.score} of ${x.max} (${x.percent}%)`}</td><td>${x.levels ? x.levels.map(l => `${esc(l.title || l.topicId)}: ${esc(LEVELS[l.level])}`).join(' · ') : '—'}</td></tr>`).join('');
-      return `<section aria-label="Cycle ${j.cycle}"><p class="qz-journey-title"><strong>Cycle ${j.cycle}</strong> · ${esc(j.title)} · ${esc(j.status)}</p>${rows ? `<table class="qz-table"><caption>Every assessment, with your levels right after it</caption><thead><tr><th scope="col">Date</th><th scope="col">What</th><th scope="col">Score</th><th scope="col">Levels after it</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="ln-soon">Nothing taken in this cycle yet.</p>'}</section>`;
+      return `<section aria-label="Cycle ${j.cycle}"><p class="qz-journey-title"><strong>Cycle ${j.cycle}</strong> · ${esc(j.title)} · ${esc(j.status)}</p>${rows ? `<table class="qz-table" tabindex="0"><caption>Every assessment, with your levels right after it</caption><thead><tr><th scope="col">Date</th><th scope="col">What</th><th scope="col">Score</th><th scope="col">Levels after it</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="ln-soon">Nothing taken in this cycle yet.</p>'}</section>`;
     }).join('');
     return `<p class="qz-score" tabindex="-1" data-qz-focus>History</p>${blocks || '<p class="ln-soon">No journey yet.</p>'}<p class="ln-soon">Earlier cycles stay as they were; each cycle's statistics start at zero.</p><div class="qz-row">${ghost('home', 'Back')}</div>`;
   }
@@ -329,7 +341,7 @@
   function attemptsTable(R) {
     if (!R.attempts || !R.attempts.length) return '';
     const rows = R.attempts.map(a => `<tr><th scope="row">${a.attempt}${a.result.test ? ' (test)' : ''}</th><td>${a.result.percent}%</td><td>${a.result.passMarkPercent == null ? '—' : `${a.result.passMarkPercent}%`}</td><td>${a.result.passed === null ? '—' : a.result.passed ? 'Passed' : 'Not passed'}</td><td>${a.result.timeUsedSeconds == null ? '—' : clock(a.result.timeUsedSeconds)}</td><td>${a.topics.map(t => `${esc(t.title || t.topicId)} ${t.percent == null ? '—' : `${t.percent}%`}`).join(' · ')}</td></tr>`).join('');
-    return `<table class="qz-table"><caption>Every final attempt, side by side</caption><thead><tr><th scope="col">Attempt</th><th scope="col">Score</th><th scope="col">Pass mark</th><th scope="col">Result</th><th scope="col">Time</th><th scope="col">By topic</th></tr></thead><tbody>${rows}</tbody></table>`;
+    return `<table class="qz-table" tabindex="0"><caption>Every final attempt, side by side</caption><thead><tr><th scope="col">Attempt</th><th scope="col">Score</th><th scope="col">Pass mark</th><th scope="col">Result</th><th scope="col">Time</th><th scope="col">By topic</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   function analysisBlock(R) {
     const A = R.analysis; if (!A) return '';
@@ -363,7 +375,7 @@
     const failedFinal = R.assessment.kind === 'final' && R.assessment.exam && R.assessment.exam.passed === false;
     return `<p class="qz-score" tabindex="-1" data-qz-focus>${esc(KIND_LABEL[R.assessment.kind] || '')}: ${t.score} of ${t.max} points</p>
       ${examBanner(R)}
-      ${topics ? `<table class="qz-table"><caption>Where you stand by topic</caption><thead><tr><th scope="col">Topic</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${topics}</tbody></table>
+      ${topics ? `<table class="qz-table" tabindex="0"><caption>Where you stand by topic</caption><thead><tr><th scope="col">Topic</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${topics}</tbody></table>
       <p class="ln-soon">A level needs at least 3 graded items on a topic; below that it reads Not assessed.</p>` : ''}
       ${analysisBlock(R)}
       ${attemptsTable(R)}
@@ -396,7 +408,7 @@
       return `<tr><th scope="row">${esc(t.title || t.topicId)}</th><td>${esc(LEVELS[t.pre.level])} (${t.pre.items})</td><td>${esc(LEVELS[t.post.level])} (${t.post.items})</td><td>${arrow(t.pre.level, t.post.level)}</td><td>${dims ? esc(dims) : 'Not enough items on both sides'}</td></tr>`;
     }).join('');
     return `<p class="qz-score" tabindex="-1" data-qz-focus>Report, cycle ${R.cycle}</p>${R.provisional ? '<p class="ln-soon">Provisional: some counted grades are not final yet.</p>' : ''}
-      <table class="qz-table"><caption>Pre-test vs now, by topic (items counted in brackets)</caption><thead><tr><th scope="col">Topic</th><th scope="col">Pre-test</th><th scope="col">Now</th><th scope="col">Change</th><th scope="col">By skill</th></tr></thead><tbody>${rows}</tbody></table>
+      <table class="qz-table" tabindex="0"><caption>Pre-test vs now, by topic (items counted in brackets)</caption><thead><tr><th scope="col">Topic</th><th scope="col">Pre-test</th><th scope="col">Now</th><th scope="col">Change</th><th scope="col">By skill</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="ln-soon">A change needs a level on both sides; a skill change needs at least 2 items in that skill on both sides. There is no single score for the whole subject.</p>
       <div class="qz-row">${ghost('home', 'Back')}</div>`;
   }
@@ -614,7 +626,10 @@
         S.journey = next; await load(S); S.journey = next; paint(S); H.toast(`Cycle ${next.cycle} started. Its statistics start at zero; cycle ${parent.cycle} stays as it was.`);
       }
       else if (action === 'home') { stopTimer(S); await load(S); S.mode = 'home'; paint(S); }
-      else if (action === 'start') { target.disabled = true; await begin(S, 'diagnostic', 'Pre-test', { count: Math.max(1, S.topics.length * 2) }); }
+      else if (action === 'start') {
+        S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S);
+        if (S.journey && S.journey.stage === 'material') { try { await D().journeyUpdate({ journeyId: S.journey.id, stage: 'pretest_setup' }); S.journey.stage = 'pretest_setup'; } catch { /* informational */ } }
+      }
       else if (action === 'practice') { target.disabled = true; await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) }); }
       else if (action === 'exam') { S.exam = { ...S.exam, retakeOf: undefined, count: Math.min(100, Math.max(50, S.exam.count || 50)), preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
       else if (action === 'retake') { S.exam = { ...S.exam, retakeOf: target.dataset.id, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
@@ -719,6 +734,11 @@
           await D().assessmentGrade({ itemId: item.id, verdicts, grader: 'self' });
         }
         await showResults(S, S.grade.assessment.id);
+      } else if (kind === 'setup') {
+        const f = form.elements; const types = [...form.querySelectorAll('input[name="type"]:checked')].map(i => i.value);
+        S.setup = { count: Number(f.count.value) || 1, types };
+        if (!types.length) throw new Error('Choose at least one question type.');
+        await begin(S, 'diagnostic', 'Pre-test', { count: Math.min(40, S.setup.count), types });
       } else if (kind === 'schedule') {
         const f = form.elements; if (!f.startsAt.value) throw new Error('Choose when it starts.');
         const startsAt = new Date(f.startsAt.value); const endsAt = new Date(startsAt.getTime() + Number(f.minutes.value || 45) * 60000);
@@ -745,6 +765,9 @@
       host.addEventListener('submit', event => onSubmit(S, event));
       host.addEventListener('keydown', event => onKey(S, event));
       host.addEventListener('change', event => {
+        if (S.mode === 'setup' && event.target.form && event.target.form.dataset.qzForm === 'setup') {
+          const f = event.target.form.elements; S.setup = { count: Number(f.count.value) || 1, types: [...event.target.form.querySelectorAll('input[name="type"]:checked')].map(i => i.value) }; paint(S); return;
+        }
         if (S.mode === 'bank' && event.target.form && event.target.form.dataset.qzForm === 'bank-filter') {
           const f = event.target.form.elements; S.bankFilter = { topicId: f.topicId.value, type: f.type.value, retired: f.retired.checked }; paint(S); return;
         }
