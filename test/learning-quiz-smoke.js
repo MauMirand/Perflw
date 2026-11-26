@@ -46,10 +46,12 @@ async function shoot(name) {
   await cdp('Emulation.clearDeviceMetricsOverride', {}); await sleep(200);
 }
 const step = label => console.log(`PASS ${label}`);
+/* Start a new test of a kind: Take Test, or "Start new" when Take Test offers to resume an unfinished one. */
 async function take(kind) {
   await click(`[data-qz-cytab="${kind}"]`);
   await waitFor("!!document.querySelector('[data-qz-take]') && !document.querySelector('[data-qz-take]').disabled", `Take enabled for ${kind}`);
-  await click('[data-qz-take]');
+  await sleep(150);
+  if (await evaluate("!document.querySelector('[data-qz-take-new]').hidden")) await click('[data-qz-take-new]'); else await click('[data-qz-take]');
 }
 /* Controls inside the quiz block with no accessible name (label, aria-label, aria-labelledby or visible button text). */
 const unnamedControls = () => evaluate(`[...document.querySelectorAll('.qz input, .qz select, .qz textarea, .qz button')].filter(el => {
@@ -155,7 +157,7 @@ async function main() {
   assert.ok(await evaluate("!document.querySelector('[data-qz-study-topic]') && !document.querySelector('[data-qz=\"study-start\"]')"), 'no Start studying in the Learning Cycle (parked)');
   await shoot('quiz-0b-cycle');
   step('subject page: Study, Start your session, Evaluation Cycle card with tabs; expand opens everything');
-  await waitFor("/0 questions in your bank/.test(document.querySelector('.qz').textContent)", 'empty bank message');
+  await waitFor("/Nothing taken yet/.test(document.querySelector('.qz').textContent)", 'empty Cycle status');
   assert.ok(await evaluate("/How this works/.test(document.querySelector('.qz').textContent)"), 'the first-use hint is shown on a fresh subject');
   await click('[data-qz="hint-dismiss"]');
   assert.ok(await evaluate("!/How this works/.test(document.querySelector('.qz').textContent)"), 'the hint is dismissible');
@@ -275,7 +277,7 @@ async function main() {
     return bad.join(', ');
   })()`);
   assert.equal(lowContrast, '', `text contrast below 4.5:1: ${lowContrast}`);
-  assert.ok(await evaluate("[...document.querySelectorAll('.qz-dot')].every(d => d.getBoundingClientRect().width >= 24 && d.getBoundingClientRect().height >= 24)"), 'navigator dots are at least 24 px');
+  assert.ok(await evaluate("[...document.querySelectorAll('.qz-seg')].every(d => d.getBoundingClientRect().height >= 24)"), 'question segments are at least 24 px tall');
   step('accessibility: names, text contrast at least 4.5:1, navigator targets at least 24 px');
   await shoot('quiz-3-question');
 
@@ -325,8 +327,8 @@ async function main() {
   // A second timer cannot start while the session runs.
   assert.match(await evaluate("window.learningData.studyStart({ subjectId: " + q(subjectId) + ", kind: 'main' }).then(() => 'started', e => e.message)"), /timer is already running/);
   await click('[data-qz="study-end"]');
-  await waitFor("/Session saved/.test((document.querySelector('.qz-feedback') || {}).textContent || '')", 'session summary');
-  assert.ok(await evaluate("/1 note/.test(document.querySelector('.qz-feedback').textContent)"), 'summary counts the note');
+  await waitFor("[...document.querySelectorAll('.toast')].some(t => /Session saved/.test(t.textContent) && /1 note/.test(t.textContent))", 'session summary as a toast, counting the note');
+  assert.ok(await evaluate("!/Session saved/.test(document.querySelector('[data-qz-content]').textContent)"), 'no summary block in Cycle status');
   const entries = await evaluate("window.workspaceData.focus()");
   assert.equal(entries.filter(e => e.source === 'learning').length, 1, 'exactly one focus entry from the session');
   assert.equal(await evaluate("window.learningData.studyActive()"), null, 'no open session and no ghost timer');
@@ -397,12 +399,16 @@ async function main() {
   await click('[data-qz="bank"]'); // leave and come back so the home screen reloads its list
   await waitFor("!!document.querySelector('.qz-qlist')", 'bank');
   await click('[data-qz="home"]');
-  await waitFor("[...document.querySelectorAll('[data-qz=\"resume\"]')].some(b => /Start/.test(b.textContent))", 'the draft practice set is listed');
-  await evaluate("[...document.querySelectorAll('[data-qz=\"resume\"]')].find(b => /Start/.test(b.textContent)).click()");
+  await click('[data-qz-cytab="practice"]');
+  await waitFor("document.querySelector('[data-qz-take]').textContent === 'Resume' && !document.querySelector('[data-qz-take-new]').hidden", 'Take Test turns into Resume for the unfinished practice set');
+  assert.ok(await evaluate("!document.querySelector('.qz-ov-continue') && !/questions in your bank/.test(document.querySelector('[data-qz-content]').textContent)"), 'no Not finished list or bank count in Cycle status');
+  await click('[data-qz-take]');
   await waitFor("!!document.querySelector('.qz-card') && /Practice · Question 1 of 1/.test(document.querySelector('.qz-head').textContent)", 'retry practice opened');
   await evaluate("(() => { const el = [...document.querySelectorAll('input[name=\"choice\"]')].find(i => i.nextElementSibling.textContent.includes('Covalent')); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); })()");
   await waitFor("!!document.querySelector('.qz-feedback')", 'the quiz reveals a wrong answer at once, no Check press');
   assert.ok(await evaluate("!!document.querySelector('.qz-choice.wrong') && !!document.querySelector('.qz-choice.right') && /Your answer/.test(document.querySelector('.qz-card').textContent) && /The answer/.test(document.querySelector('.qz-card').textContent)"), 'the wrong pick and the right answer are marked in place, with words');
+  assert.ok(await evaluate("document.querySelector('.qz-card').classList.contains('fx-wrong') && document.querySelector('.qz-play').classList.contains('fx-wrong') && /✕ 1/.test(document.querySelector('.qz-pill.no').textContent) && document.querySelector('.qz-seg.current').classList.contains('wrong')"), 'wrong: shake and red flash play, the ✕ counter and the segment turn red');
+  await shoot('quiz-6c-wrong');
   assert.ok(await evaluate("!document.querySelector('[data-qz=\"check\"]')"), 'no Check button for a single-answer question');
   await waitFor("!!document.querySelector('[data-qz=\"retry\"]')", 'a wrong answer offers a second try');
   await click('[data-qz="retry"]');
