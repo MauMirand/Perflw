@@ -728,3 +728,19 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-ev-none { margin: 0; font-size: 13px; color: var(--text-2); }
 .qz-titlebar .ln-block-title { margin: 0; }
 @media (max-width: 600px) { .qz-ev-body { grid-template-columns: 1fr; } .qz-ev-cols { grid-template-columns: 1fr; } }
+
+/* Learning Cycle overlay: covers the main panel (position set in JS from #main-panel), no part of it sits below the page. */
+[data-qz-host] { z-index: 40; box-sizing: border-box; padding: 28px; border-radius: 20px; background: var(--main); overflow: hidden; }
+[data-qz-host][hidden] { display: none; }
+.qz-cycle { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+.qz-cycle-head { display: flex; align-items: center; justify-content: space-between; }
+.qz-cycle-head h2 { margin: 0; font-size: 30px; font-weight: 800; outline: none; }
+.qz-cycle-close { font-size: 20px; }
+.qz-cycle-tabs { align-self: flex-start; }
+.qz-cycle-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 32%) 1fr; gap: 24px; }
+.qz-cycle-side { overflow-y: auto; padding: 4px 8px; }
+.qz-side-gauge { background: #232222; border-radius: 12px; padding: 18px 24px; margin-bottom: 14px; }
+.qz-cycle-side .qz-ev-h { margin-top: 14px; }
+.qz-cycle-main { min-height: 0; overflow-y: auto; background: var(--ink); border-radius: 16px; padding: 22px; }
+.qz-cycle-main .qz { margin: 0; }
+@media (max-width: 760px) { .qz-cycle-body { grid-template-columns: 1fr; overflow-y: auto; } .qz-cycle-main { overflow: visible; } }

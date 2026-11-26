@@ -131,7 +131,10 @@ async function main() {
   assert.ok(await evaluate("document.querySelector('[data-qz-host]').hidden"), 'the full workspace is closed until asked for');
   await shoot('quiz-0-card');
   await click('[data-qz-evexpand]');
-  await waitFor("!document.querySelector('[data-qz-host]').hidden && !!document.querySelector('.qz')", 'full workspace open');
+  await waitFor("!document.querySelector('[data-qz-host]').hidden && !!document.querySelector('.qz-cycle .qz')", 'Learning Cycle open');
+  assert.ok(await evaluate("(() => { const a = document.querySelector('[data-qz-host]').getBoundingClientRect(), b = document.getElementById('main-panel').getBoundingClientRect(); return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; })()"), 'the Learning Cycle covers the main panel');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-cytab]')].map(b => b.textContent)"), ['Pre-Test', 'Practice', 'Final Exam']);
+  await shoot('quiz-0b-cycle');
   step('subject page: Study, Start your session, Evaluation Cycle card with tabs; expand opens everything');
   await waitFor("/0 questions in your bank/.test(document.querySelector('.qz').textContent)", 'empty bank message');
   assert.ok(await evaluate("/How this works/.test(document.querySelector('.qz').textContent)"), 'the first-use hint is shown on a fresh subject');
@@ -151,7 +154,11 @@ async function main() {
   step('invalid question rejected with a plain message, input kept');
   assert.equal(await unnamedControls(), 0, 'every control in the question form has an accessible name');
 
-  const saved = n => waitFor(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.length === ${n})`, `question ${n} saved`);
+  // A save is done when the bank has the question AND the form has been redrawn empty (typing into the old form would be lost).
+  const saved = async n => {
+    await waitFor(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.length === ${n})`, `question ${n} saved`);
+    await waitFor("(() => { const f = document.querySelector('[data-qz-form=add]'); return !!f && f.elements.prompt.value === '' && !f.querySelector('button[type=submit]').disabled; })()", `form ready after question ${n}`);
+  };
   await fill('[data-qz-form="add"] [name="opt0"]', 'Covalent'); await fill('[data-qz-form="add"] [name="opt1"]', 'NaCl');
   await check('[data-qz-form="add"] input[name="correct"][value="1"]');
   await submit('[data-qz-form="add"]'); await saved(1);

@@ -65,13 +65,49 @@
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
   const VIEWS = { setup: setupView, history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  /* The expanded "Learning Cycle" (owner mock-up, 2026-11-26): it covers the main panel; tabs on top, the latest result on the left,
+     the workspace (start, answer, results, bank, notes, history, schedule) on the right. Nothing is added below the subject page. */
+  const CYCLE_TABS = [['diagnostic', 'Pre-Test'], ['practice', 'Practice'], ['final', 'Final Exam']];
+  function cycleFrame() {
+    return `<div class="qz-cycle" role="region" aria-labelledby="qz-cycle-title">
+      <header class="qz-cycle-head"><h2 id="qz-cycle-title" tabindex="-1">Learning Cycle</h2><button class="icon-btn qz-cycle-close" type="button" data-qz="collapse" aria-label="Close the learning cycle" title="Close (Esc)">⤡</button></header>
+      <div class="qz-tabs qz-cycle-tabs" role="tablist" aria-label="Kind"></div>
+      <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Latest result"></aside><div class="qz-cycle-main"></div></div>
+    </div>`;
+  }
+  const cycleTabs = S => CYCLE_TABS.map(([k, l]) => `<button class="qz-tab${k === S.evalTab ? ' on' : ''}" type="button" role="tab" aria-selected="${k === S.evalTab}" data-qz-cytab="${k}">${l}</button>`).join('');
+  function placeOverlay(host) {
+    const panel = document.getElementById('main-panel'); if (!panel || !host) return;
+    const r = panel.getBoundingClientRect();
+    Object.assign(host.style, { position: 'fixed', top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` });
+  }
+  window.addEventListener('resize', () => { for (const S of states.values()) if (S.expanded) placeOverlay(hostOf(S)); });
+  async function paintSide(S) {
+    const host = hostOf(S); const side = host && host.querySelector('[data-qz-side]'); if (!side) return;
+    const label = (CYCLE_TABS.find(t => t[0] === S.evalTab) || [])[1];
+    let d = null; try { d = await evalData(S, S.evalTab); } catch { d = null; }
+    const list = items => (items && items.length ? `<ul class="qz-ev-list">${items.slice(0, 6).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="qz-ev-none">—</p>');
+    const time = d ? (d.minutes == null ? 'Untimed' : `${d.minutes} min${d.limit ? ` of ${Math.round(d.limit / 60)}` : ''}`) : '';
+    side.innerHTML = `<div class="qz-side-gauge">${gauge(d ? d.correct : 0, d ? d.total : 0)}</div>
+      <p class="qz-ev-title">${esc(label)}</p>
+      <p class="qz-ev-sub">${d ? esc(d.level) : 'Not taken yet'}</p>
+      <p class="qz-ev-meta">${d ? `${d.total} item${d.total === 1 ? '' : 's'}${d.attempts > 1 ? ` · attempt ${d.attempts}` : ''}` : `${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank`}</p>
+      <p class="qz-ev-meta">${esc(time)}</p>
+      ${d && d.exam && d.exam.passed !== null ? `<p class="${d.exam.passed ? 'qz-pass' : 'qz-fail'} qz-ev-verdict">${d.exam.passed ? '✓ Passed' : '✗ Not passed'} · pass mark ${d.exam.passMarkPercent}%</p>` : ''}
+      <p class="qz-ev-h">Strengths</p>${list(d && d.strengths)}
+      <p class="qz-ev-h">Focus Area</p>${list(d && d.focus)}`;
+  }
   function paint(S) {
     const host = hostOf(S); if (!host) return;
     const body = (VIEWS[S.mode] || homeView)(S);
     host.hidden = !S.expanded;
-    host.innerHTML = `<section class="ln-block qz" aria-labelledby="qz-title"><div class="qz-titlebar"><h3 class="ln-block-title" id="qz-title">Quizzes and exams</h3>${ghost('collapse', 'Close', 'title="Back to the evaluation card"')}</div>${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
-    // Bring the block into view when the screen changes (it sits below the topics), without smooth scrolling under reduced motion.
-    if (S.shown !== S.mode) { S.shown = S.mode; if (S.mode !== 'home') host.scrollIntoView({ block: 'start' }); }
+    if (S.expanded) placeOverlay(host);
+    if (!host.querySelector('.qz-cycle')) host.innerHTML = cycleFrame();
+    host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S);
+    const main = host.querySelector('.qz-cycle-main');
+    main.innerHTML = `<section class="qz" aria-label="Quizzes and exams">${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
+    if (S.shown !== S.mode) { S.shown = S.mode; main.scrollTop = 0; }
+    paintSide(S).catch(() => {});
     const focus = host.querySelector('[data-qz-focus]'); if (focus) focus.focus({ preventScroll: true });
     syncStudyTimer(S);
     if (S.mode === 'home' || S.mode === 'results') paintEval(S).catch(() => {});
@@ -574,10 +610,12 @@
   const move = (S, delta) => { S.quiz.index = Math.min(S.quiz.assessment.items.length - 1, Math.max(0, S.quiz.index + delta)); S.quiz.confirm = false; paint(S); };
 
   async function onClick(S, event) {
+    const cytab = event.target.closest('[data-qz-cytab]');
+    if (cytab) { S.evalTab = cytab.dataset.qzCytab; const host = hostOf(S); host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S); paintSide(S); paintEval(S); const b = host.querySelector(`[data-qz-cytab="${S.evalTab}"]`); if (b) b.focus(); return; }
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';
     try {
-      if (action === 'collapse') { stopTimer(S); S.expanded = false; paint(S); paintEval(S); const card = document.querySelector('[data-qz-eval]'); if (card) card.scrollIntoView({ block: 'nearest' }); return; }
+      if (action === 'collapse') { stopTimer(S); S.expanded = false; const host = hostOf(S); if (host) host.hidden = true; paintEval(S).then(() => { const b = document.querySelector('[data-qz-evexpand]'); if (b) b.focus(); }); return; }
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
       else if (action === 'sched-cancel') { await D().scheduleCancel({ scheduleId: target.dataset.id }); await load(S); paint(S); H.toast('Removed from your calendar.'); }
       else if (action === 'sched-start') {
@@ -692,6 +730,7 @@
 
   /* Keyboard (spec §3.3). Attached to the host element only; letter keys are ignored while a text field has focus. */
   async function onKey(S, event) {
+    if (event.key === 'Escape' && S.expanded && S.mode !== 'quiz') { event.preventDefault(); const c = hostOf(S).querySelector('[data-qz="collapse"]'); if (c) c.click(); return; }
     if (S.mode !== 'quiz' || !S.quiz) return;
     const typing = /^(TEXTAREA|SELECT)$/.test(event.target.tagName) || (event.target.tagName === 'INPUT' && event.target.type === 'text');
     const host = hostOf(S); const key = event.key;
@@ -857,7 +896,8 @@
       <div class="qz-ev-cols"><div><p class="qz-ev-h">Strengths</p>${d ? list(d.strengths) : '<p class="qz-ev-none">—</p>'}</div><div><p class="qz-ev-h">Focus Area</p>${d ? list(d.focus) : '<p class="qz-ev-none">—</p>'}</div></div>`;
   }
   function expand(S, then) {
-    S.expanded = true; const host = hostOf(S); if (host) { host.hidden = false; host.scrollIntoView({ block: 'start' }); }
+    S.expanded = true; const host = hostOf(S); if (host) { host.hidden = false; placeOverlay(host); }
+    setTimeout(() => { const t = hostOf(S) && hostOf(S).querySelector('#qz-cycle-title'); if (t) t.focus({ preventScroll: true }); }, 0);
     Promise.resolve(then ? then() : null).catch(error => fail(S, error));
   }
   function mountEval(el, subject) {
