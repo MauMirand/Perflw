@@ -599,6 +599,19 @@ function createLearningStore(db) {
     const row = owned('learning_schedule', 'Scheduled session', userId, args(input).scheduleId);
     return listScheduleRows(userId, 'ls.id=?', row.id)[0];
   }
+  /* Editing a scheduled item: `updateEvent()` changes the calendar event on this same connection; the link's kind changes with it,
+     in ONE transaction, so the calendar and the learning link never disagree. */
+  function updateSchedule(userId, input) {
+    const a = args(input);
+    const row = owned('learning_schedule', 'Scheduled session', userId, a.scheduleId);
+    const kind = oneOf(a.kind, SCHEDULE_KINDS, 'Schedule kind');
+    if (typeof a.updateEvent !== 'function') fail('The event could not be changed.');
+    transaction(() => {
+      a.updateEvent(row.event_id);
+      run('UPDATE learning_schedule SET kind=?, updated_at=? WHERE id=? AND user_id=?', kind, now(), row.id, userId);
+    });
+    return listScheduleRows(userId, 'ls.id=?', row.id)[0];
+  }
   /* Study time of a subject: the sum of the focus entries its learning sessions saved (ADR-006, D2). */
   function studySeconds(userId, input) {
     const subject = subjectOf(userId, args(input).subjectId);
@@ -703,7 +716,7 @@ function createLearningStore(db) {
     saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer, setAiGrade, acceptAiGrade,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
-    recordReview, getReview, dueReviews, studySeconds, createSchedule, listSchedule, getSchedule,
+    recordReview, getReview, dueReviews, studySeconds, createSchedule, listSchedule, getSchedule, updateSchedule,
     journeyEvidence,
   };
 }

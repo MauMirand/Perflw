@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('learningData', Object.freeze({
   scheduleCreate: arg => call('schedule:create', arg),
   scheduleList: arg => call('schedule:list', arg),
   scheduleCancel: arg => call('schedule:cancel', arg),
+  scheduleUpdate: arg => call('schedule:update', arg),
   examPreview: arg => call('exam:preview', arg),
   examAttempts: arg => call('exam:attempts', arg),
   topics: subjectId => call('learning:topics', subjectId),

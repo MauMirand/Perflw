@@ -744,3 +744,34 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-cycle-main { min-height: 0; overflow-y: auto; background: var(--ink); border-radius: 16px; padding: 22px; }
 .qz-cycle-main .qz { margin: 0; }
 @media (max-width: 760px) { .qz-cycle-body { grid-template-columns: 1fr; overflow-y: auto; } .qz-cycle-main { overflow: visible; } }
+
+/* Learning Cycle, second layout (owner mock-up 2026-11-26): Status and Your Performance cards on the left; on the right the
+   section toggles (Cycle status, Question bank, Schedule) above a scrolling content area. */
+.qz-cycle-sub { font-size: 16px; font-weight: 500; color: var(--text-2); margin-left: 6px; }
+.qz-cycle-side { display: flex; flex-direction: column; gap: 18px; padding: 0; }
+.qz-card-panel { background: #232222; border-radius: 14px; padding: 16px 18px; }
+.qz-panel-h { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 22px; font-weight: 700; }
+.qz-status-gauge { max-width: 280px; margin: 0 auto; }
+.qz-status-rows { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--raised); }
+.qz-status-rows div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 4px; font-size: 13px; }
+.qz-status-rows dt { display: flex; align-items: center; gap: 12px; color: var(--text-2); font-weight: 600; }
+.qz-status-rows dd { margin: 0; color: var(--text-2); }
+.qz-status-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.qz-take { border-radius: 999px; min-width: 88px; }
+.qz-perf { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 4px 4px 14px; margin-bottom: 12px; border-bottom: 1px solid var(--raised); }
+.qz-perf-stat { display: flex; flex-direction: column; gap: 2px; }
+.qz-perf-num { font-size: 22px; font-weight: 700; }
+.qz-perf-lbl { font-size: 12px; color: var(--text-2); }
+.qz-card-panel .qz-ev-h { margin-top: 10px; }
+.qz-card-panel .qz-ev-list, .qz-card-panel .qz-ev-none { padding-left: 24px; }
+.qz-cycle-main { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.qz-sections { align-self: flex-start; flex-shrink: 0; }
+.qz-sections[hidden] { display: none; }
+.qz-cycle-content { flex: 1; min-height: 0; overflow-y: auto; }
+.qz-sched-form { margin-bottom: 14px; }
+.qz-sched-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; }
+.qz-sched-row.editing { outline: 1px solid var(--raised); border-radius: 10px; padding: 8px; }
+.qz-sched-row .qz-q-prompt { margin: 0; }
+.qz-sched-row .ln-soon { margin: 2px 0 0; }
+.qz-sched-row .qz-confirm { flex-basis: 100%; }
+@media (max-width: 760px) { .qz-cycle-main { overflow: visible; } .qz-cycle-content { overflow: visible; } }
