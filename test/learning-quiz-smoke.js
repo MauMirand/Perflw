@@ -140,7 +140,7 @@ async function main() {
   assert.ok(await evaluate("(() => { const a = document.querySelector('[data-qz-host]').getBoundingClientRect(), b = document.getElementById('main-panel').getBoundingClientRect(); return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; })()"), 'the Learning Cycle covers the main panel');
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-cytab]')].map(b => b.textContent)"), ['Pre-Test', 'Practice', 'Final Exam']);
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-sections] .qz-tab')].map(b => b.textContent)"), ['Cycle status', 'Question bank', 'Schedule']);
-  await waitFor("/Status/.test(document.querySelector('[data-qz-side]').textContent) && /Your Performance/.test(document.querySelector('[data-qz-side]').textContent) && /Not taken/.test(document.querySelector('[data-qz-side]').textContent)", 'Status and Your Performance cards');
+  await waitFor("!!document.querySelector('[data-qz-side] [aria-label=Status]') && /Your Performance/.test(document.querySelector('[data-qz-side]').textContent) && /Not taken/.test(document.querySelector('[data-qz-side]').textContent)", 'Status and Your Performance cards');
   assert.ok(await evaluate("!document.querySelector('[data-qz-study-topic]') && !document.querySelector('[data-qz=\"study-start\"]')"), 'no Start studying in the Learning Cycle (parked)');
   await shoot('quiz-0b-cycle');
   step('subject page: Study, Start your session, Evaluation Cycle card with tabs; expand opens everything');
@@ -337,10 +337,19 @@ async function main() {
   await click('[data-qz="home"]');
 
   // Practice: feedback after Check, key shown only for that question (the study summary leaves us on the home screen).
-  await waitFor("!!document.querySelector('.qz-stepper')", 'journey stepper on the home screen');
-  await waitFor("(document.querySelector('.qz-step.current .qz-step-label') || {}).textContent === 'Final learning'", 'stepper shows the current stage (viewing the final learning evaluation moves the journey on; the section reloads after it switches)');
-  assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 0"), 'every stage is driven by the app');
-  step('journey stepper: Final learning current, all 13 stages driven by the app');
+  await waitFor("(document.querySelector('.qz-track .qz-stop.now') || { getAttribute: () => '' }).getAttribute('aria-label') === 'Final learning: In progress'", 'the cycle track shows Final learning as on going (viewing the final learning evaluation moves the journey on)');
+  assert.equal(await evaluate("[...document.querySelectorAll('.qz-track .qz-stop')].map(e => e.classList.contains('done') ? 'd' : e.classList.contains('now') ? 'n' : 't').join('')"), 'dddddddddnttt', 'stages before it completed (green), it on going (blue), the rest not completed (gray)');
+  assert.ok(await evaluate("getComputedStyle(document.querySelector('.qz-stop.done')).backgroundColor !== getComputedStyle(document.querySelector('.qz-stop.now')).backgroundColor && getComputedStyle(document.querySelector('.qz-stop.now')).backgroundColor !== getComputedStyle(document.querySelector('.qz-stop.todo')).backgroundColor"), 'three distinct colours');
+  const stopAt = await evaluate("(() => { const r = document.querySelector('.qz-stop.now').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()");
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: stopAt.x, y: stopAt.y });
+  await waitFor("getComputedStyle(document.querySelector('.qz-stop.now .qz-tip')).opacity === '1'", 'tooltip shows on hover');
+  assert.equal(await evaluate("document.querySelector('.qz-stop.now .qz-tip').textContent"), 'Final learningIn progress', 'tooltip: name and status');
+  assert.equal(await evaluate("document.querySelector('.qz-stop.done .qz-tip').textContent"), 'MaterialCompleted');
+  assert.equal(await evaluate("document.querySelector('.qz-stop.todo .qz-tip').textContent"), 'Final examNot complete');
+  await shoot('quiz-4d-track');
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+  await waitFor("getComputedStyle(document.querySelector('.qz-stop.now .qz-tip')).visibility === 'hidden'", 'tooltip hides when the pointer leaves');
+  step('cycle track: 13 stages, completed green, on going blue, not completed gray');
   await take('practice');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');
   await answerCurrent();
