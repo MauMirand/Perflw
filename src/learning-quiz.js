@@ -108,7 +108,7 @@
       <div class="qz-tabs qz-cycle-tabs" role="tablist" aria-label="Kind"></div>
       <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Status and performance"></aside>
         <div class="qz-cycle-main"><div class="qz-track-wrap" data-qz-track></div>
-          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-actions-end"><div class="qz-scope" data-qz-scope></div><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div></div>
+          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-actions-end"><div class="qz-scope" data-qz-scope></div><button class="btn btn-sm btn-ghost qz-take-new" type="button" data-qz-take-new hidden>Start new</button><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div></div>
           <div class="qz-cycle-content" data-qz-content></div></div></div>
     </div>`;
   }
@@ -196,6 +196,7 @@
     const main = host.querySelector('[data-qz-content]');
     main.innerHTML = `<section class="qz" aria-label="Quizzes and exams">${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
     if (S.shown !== S.mode) { S.shown = S.mode; main.scrollTop = 0; }
+    runFx(S);
     paintSide(S).catch(() => {});
     const focus = host.querySelector('[data-qz-focus]'); if (focus) focus.focus({ preventScroll: true });
     syncStudyTimer(S);
@@ -270,6 +271,8 @@
     if (S.mode === 'setup') paint(S);
     const host = hostOf(S); const el = focusSel && host && host.querySelector(focusSel); if (el) el.focus();
   }
+  /* The newest unfinished test of a kind (left mid-way, or made but not started): Take Test resumes it. */
+  const resumable = (S, kind) => S.assessments.filter(a => a.kind === kind && ['in_progress', 'draft'].includes(a.status)).pop() || null;
   function paintBar(S) {
     const host = hostOf(S); if (!host) return;
     const bar = host.querySelector('[data-qz-bar]'); if (!bar) return;
@@ -278,7 +281,14 @@
     const label = (CYCLE_TABS.find(t => t[0] === S.evalTab) || [])[1] || 'test';
     const pool = S.questions.filter(q => inScope(S, q)).length;
     const b = bar.querySelector('[data-qz-take]'); const can = pool > 0;
-    b.disabled = !can; b.title = can ? `Take the ${label} · ${scopeLabel(S)}` : S.questions.length ? 'No questions in the chosen topics' : 'Add questions in the Question bank first'; b.setAttribute('aria-label', `Take the ${label}`);
+    const open = resumable(S, S.evalTab); const fresh = bar.querySelector('[data-qz-take-new]');
+    if (open) {
+      b.disabled = false; b.textContent = 'Resume'; b.title = `Resume ${open.title || label} (${open.status === 'draft' ? 'not started' : 'in progress'})`; b.setAttribute('aria-label', `Resume ${open.title || label}`);
+      fresh.hidden = false; fresh.disabled = !can; fresh.title = can ? `Start a new ${label} · ${scopeLabel(S)}; the unfinished one stays` : 'No questions in the chosen topics';
+    } else {
+      b.textContent = 'Take Test'; fresh.hidden = true;
+      b.disabled = !can; b.title = can ? `Take the ${label} · ${scopeLabel(S)}` : S.questions.length ? 'No questions in the chosen topics' : 'Add questions in the Question bank first'; b.setAttribute('aria-label', `Take the ${label}`);
+    }
     bar.querySelector('[data-qz-scope]').innerHTML = scopeView(S);
   }
 
@@ -295,8 +305,6 @@
     if (!S.topics.length) return '<p class="ln-soon">Add topics or import a file first, then write questions for them in the Question bank.</p>';
     if (!S.overview && !S.overviewLoading) loadOverview(S);
     const O = S.overview; const hasDone = S.assessments.some(a => ['submitted', 'graded'].includes(a.status));
-    const next = S.schedule.find(x => Date.parse(x.endsAt || x.startsAt) >= Date.now());
-    const open = S.assessments.filter(a => ['in_progress', 'draft'].includes(a.status));
     const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
     const date = iso => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
     const card = (title, sub, body, extra = '') => `<section class="qz-ov-card" aria-label="${esc(title)}"><div class="qz-ov-head"><h4>${esc(title)}${sub ? ` <span class="qz-ov-sub">${esc(sub)}</span>` : ''}</h4>${extra}</div>${body}</section>`;
@@ -314,7 +322,6 @@
         <p class="qz-ov-h">Topics</p><ul class="qz-ov-topics">${rows || '<li>—</li>'}</ul>`,
         `<span class="qz-row">${S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : ''}${ghost('results', 'Open results', `data-id="${esc(L.id)}"`)}</span>`);
     }
-    const continueRow = open.length ? `<div class="qz-ov-continue"><p class="qz-ov-h">Not finished</p><ul class="qz-list">${open.map(a => `<li>${esc(a.title || KIND_LABEL[a.kind])} · ${esc(a.status === 'draft' ? 'not started' : 'in progress')} ${ghost('resume', a.status === 'draft' ? 'Start' : 'Resume', `data-id="${esc(a.id)}"`)}</li>`).join('')}</ul></div>` : '';
 
     // Final Learning: where each topic stands now, and what unlocks the final
     let final;
@@ -344,9 +351,7 @@
         .map(x => `<tr${x.excluded ? ' class="qz-excluded"' : ''}><th scope="row">${esc(date(x.submittedAt || x.startedAt))}</th><td>${esc(KIND_LABEL[x.kind] || x.kind)}${x.attempt > 1 ? ` (attempt ${x.attempt})` : ''}${Hs.length > 1 ? ` · cycle ${x.cycle}` : ''}</td><td>${x.excluded ? `${esc(x.status.replace('_', ' '))} · not counted` : `${fmt(x.score)} of ${fmt(x.max)} (${x.percent}%)`}</td><td>${x.levels ? x.levels.map(l => `${esc(l.title || l.topicId)}: ${esc(LEVELS[l.level])}`).join(' · ') : '—'}</td></tr>`).join('');
       history = card('History', '', rows ? `<table class="qz-table qz-ov-table"><thead><tr><th scope="col">Date</th><th scope="col">What</th><th scope="col">Score</th><th scope="col">Levels after it</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="ln-soon">Nothing submitted yet.</p>');
     }
-    return `${hintView(S)}${studyView(S)}
-      <p class="ln-soon qz-ov-meta">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank.${S.due ? ` ${S.due} practice item${S.due === 1 ? ' is' : 's are'} due.` : ''}${next ? ` Next scheduled: ${esc(SCHED_KIND[next.kind] || next.kind)} · ${esc(when(next.startsAt))}.` : ''}</p>
-      ${continueRow}<div class="qz-ov">${latest}${final}${history}</div>`;
+    return `${hintView(S)}${studyView(S)}<div class="qz-ov">${latest}${final}${history}</div>`;
   }
   const fmt = n => (Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toString());
   /* The data behind the Cycle status cards; read once per load, repainted when it arrives. The evaluation is read with `peek`
@@ -415,9 +420,7 @@
           <div class="qz-row"><button class="btn btn-sm" type="submit">Add note</button>${btn('study-end', 'End session')}</div></form>
         ${notes ? `<ul class="qz-notes" aria-label="Notes from this session">${notes}</ul>` : ''}</div>`;
     }
-    const sum = st.summary;
-    const done = sum ? `<div class="qz-feedback" role="status"><p><strong>Session saved</strong> · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${esc(sum.topics.join(', '))}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}</p>${sum.message ? `<p class="ln-soon">${esc(sum.message)}</p>` : ''}<p class="qz-row">${btn('practice', 'Practice now')}</p></div>` : '';
-    return done; // starting a session from here is parked (owner, 2026-11-26); the header's Start your session still works
+    return ''; // a running session only; starting one is parked (owner, 2026-11-26) and the summary is a toast
   }
 
   /* D13: notes opened during a study session count as visited (the retake gate reads them). */
@@ -519,6 +522,9 @@
 
   // ───────── answering
   const hasAnswer = a => a && (a.dontKnow || (a.response && ((a.response.choice || []).length || (a.response.pairs || []).length || typeof a.response.value === 'boolean' || (a.response.text || '').trim())));
+  /* The mark at the end of a checked answer row: a check that draws itself (right) or a cross (wrong pick). */
+  const fxIcon = (right, picked, fb) => (fb && fb.status === 'graded' && (right || picked)
+    ? `<svg class="qz-fx-icon ${right ? 'ok' : 'no'}" viewBox="0 0 24 24" aria-hidden="true">${right ? '<path d="M5 12.5l4.5 4.5L19 7.5"/>' : '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'}</svg>` : '');
   function control(item, answer, locked, fb) {
     const q = item.question; const p = q.payload || {}; const r = (answer && answer.response) || {}; const dis = locked ? ' disabled' : '';
     const mark = (right, picked) => (fb && fb.status === 'graded' ? (right ? ' right' : picked ? ' wrong' : '') : '');
@@ -526,9 +532,9 @@
     if (q.type === 'choice') {
       const picked = new Set(r.choice || []);
       const correct = new Set((fb && fb.key && fb.key.correct) || []);
-      return `<div role="${p.multiple ? 'group' : 'radiogroup'}" aria-label="Answers" class="qz-choices">${(p.options || []).map((o, i) => `<label class="qz-choice${mark(correct.has(o.id), picked.has(o.id))}"><input type="${p.multiple ? 'checkbox' : 'radio'}" name="choice" value="${esc(o.id)}"${picked.has(o.id) ? ' checked' : ''}${dis}><span><kbd>${'ABCDEFGH'[i]}</kbd> ${esc(o.text)} ${word(correct.has(o.id), picked.has(o.id))}</span></label>`).join('')}</div>`;
+      return `<div role="${p.multiple ? 'group' : 'radiogroup'}" aria-label="Answers" class="qz-choices">${(p.options || []).map((o, i) => `<label class="qz-choice${mark(correct.has(o.id), picked.has(o.id))}${picked.has(o.id) ? ' picked' : ''}"><input type="${p.multiple ? 'checkbox' : 'radio'}" name="choice" value="${esc(o.id)}"${picked.has(o.id) ? ' checked' : ''}${dis}><span><kbd>${'ABCDEFGH'[i]}.</kbd> ${esc(o.text)} ${word(correct.has(o.id), picked.has(o.id))}</span>${fxIcon(correct.has(o.id), picked.has(o.id), fb)}</label>`).join('')}</div>`;
     }
-    if (q.type === 'truefalse') return `<div role="radiogroup" aria-label="True or false" class="qz-choices"><p>${esc(p.statement)}</p>${['true', 'false'].map(v => { const picked = typeof r.value === 'boolean' && r.value === (v === 'true'); const right = fb && fb.key && fb.key.correct === (v === 'true'); return `<label class="qz-choice${mark(right, picked)}"><input type="radio" name="tf" value="${v}"${picked ? ' checked' : ''}${dis}><span><kbd>${v === 'true' ? 'T' : 'F'}</kbd> ${v === 'true' ? 'True' : 'False'} ${word(right, picked)}</span></label>`; }).join('')}</div>`;
+    if (q.type === 'truefalse') return `<div role="radiogroup" aria-label="True or false" class="qz-choices"><p>${esc(p.statement)}</p>${['true', 'false'].map(v => { const picked = typeof r.value === 'boolean' && r.value === (v === 'true'); const right = fb && fb.key && fb.key.correct === (v === 'true'); return `<label class="qz-choice${mark(right, picked)}${picked ? ' picked' : ''}"><input type="radio" name="tf" value="${v}"${picked ? ' checked' : ''}${dis}><span><kbd>${v === 'true' ? 'T.' : 'F.'}</kbd> ${v === 'true' ? 'True' : 'False'} ${word(right, picked)}</span>${fxIcon(right, picked, fb)}</label>`; }).join('')}</div>`;
     if (q.type === 'matching') {
       const given = new Map((r.pairs || []).map(([l, rt]) => [l, rt]));
       const right = (p.right || []).map(o => `<option value="${esc(o.id)}">${esc(o.text)}</option>`).join('');
@@ -565,12 +571,13 @@
     if (q.type === 'matching') return (response.pairs || []).length === ((q.payload && q.payload.left) || []).length;
     return false;
   };
+  const markFx = (S, item) => { const c = S.quiz.checked[item.id]; if (c && c.status === 'graded') S.quiz.fx = { id: item.id, kind: c.score >= c.max ? 'right' : 'wrong' }; };
   async function autoCheck(S) {
     const Q = S.quiz; if (!Q || Q.checking) return; Q.checking = true;
     try {
       if (!(await saveNow(S))) { paint(S); return; }
       const item = Q.assessment.items[Q.index];
-      Q.checked[item.id] = await D().assessmentCheck({ assessmentId: Q.assessment.id, itemId: item.id }); paint(S);
+      Q.checked[item.id] = await D().assessmentCheck({ assessmentId: Q.assessment.id, itemId: item.id }); markFx(S, item); paint(S);
       say(Q.checked[item.id].status === 'graded' ? (Q.checked[item.id].score >= Q.checked[item.id].max ? 'Correct.' : 'Not quite.') : 'Compare with the model answer.');
     } catch (error) { fail(S, error); } finally { Q.checking = false; }
   }
@@ -580,24 +587,71 @@
     const last = Q.index === items.length - 1; const kind = Q.assessment.kind;
     const practice = kind === 'practice'; const checked = Q.checked[item.id];
     const topic = (S.topics.find(t => String(t.id) === String(item.topicId)) || {}).title || '';
-    const confidence = [[1, 'Guessing'], [2, 'Fairly sure'], [3, 'Certain']].map(([v, label]) => `<label><input type="radio" name="confidence" value="${v}"${answer && answer.confidence === v ? ' checked' : ''}${checked ? ' disabled' : ''}> ${label}</label>`).join(' ');
+    const scope = (/ · (.+)$/.exec(Q.assessment.title || '') || [])[1];
+    const result = it => { const c = Q.checked[it.id]; return !c ? null : c.status !== 'graded' ? 'pending' : c.score >= c.max ? 'right' : 'wrong'; };
+    const rights = items.filter(it => result(it) === 'right').length; const wrongs = items.filter(it => result(it) === 'wrong').length;
+    let streak = 0; if (practice) for (let i = Q.index; i >= 0 && result(items[i]) === 'right'; i--) streak++;
+    const fx = Q.fx && Q.fx.id === item.id ? Q.fx.kind : ''; // 'right' | 'wrong' just now: play the motion once
+    // "How sure are you?" removed from the play screen (owner, 2026-11-26); confidence stays optional in the data.
     const confirm = Q.confirm ? `<div class="qz-confirm" role="alert">${items.length - answered} unanswered. ${btn('submit-now', 'Submit anyway')} ${ghost('back-quiz', 'Go back')}</div>` : '';
-    const dots = items.map((it, i) => `<button class="qz-dot${i === Q.index ? ' current' : ''}${hasAnswer(Q.answers[it.id]) ? ' done' : ''}${Q.flags.has(it.id) ? ' flagged' : ''}" type="button" data-qz="jump" data-i="${i}" aria-label="Question ${i + 1}${hasAnswer(Q.answers[it.id]) ? ', answered' : ''}${Q.flags.has(it.id) ? ', flagged' : ''}"${i === Q.index ? ' aria-current="step"' : ''}></button>`).join('');
+    const segs = items.map((it, i) => {
+      const r = practice ? result(it) : null; const done = hasAnswer(Q.answers[it.id]);
+      const state = r === 'right' ? 'right' : r === 'wrong' ? 'wrong' : r === 'pending' ? 'pending' : done ? 'done' : 'todo';
+      const mark = state === 'right' ? '✓' : state === 'wrong' ? '✕' : Q.flags.has(it.id) ? '⚑' : '';
+      const say = { right: 'correct', wrong: 'wrong', pending: 'to compare', done: 'answered', todo: 'not answered' }[state];
+      return `<button class="qz-seg ${state}${i === Q.index ? ' current' : ''}${fx && i === Q.index ? ` fx-${fx}` : ''}" type="button" data-qz="jump" data-i="${i}" aria-label="Question ${i + 1}, ${say}${Q.flags.has(it.id) ? ', flagged' : ''}"${i === Q.index ? ' aria-current="step"' : ''}><span class="qz-seg-mark" aria-hidden="true">${mark}</span><span class="qz-seg-line" aria-hidden="true"></span></button>`;
+    }).join('');
+    const pills = practice
+      ? `<span class="qz-pill no${fx === 'wrong' ? ' bump' : ''}" aria-label="${wrongs} wrong">✕ ${wrongs}</span><span class="qz-pill ok${fx === 'right' ? ' bump' : ''}" aria-label="${rights} correct">✓ ${rights}</span>`
+      : `<span class="qz-pill" aria-label="${answered} of ${items.length} answered">${answered} answered</span>`;
     const timer = Q.left != null ? `<span class="qz-timer" data-qz-timer role="timer" aria-label="Time left">${clock(Q.left)}</span>` : '';
-    const nextBtn = practice && !checked ? (instantType(item) ? '' : btn('check', 'Check')) : last ? btn('submit', 'Submit') : btn('next', 'Next');
-    return `<div class="qz-head"><strong>${esc(KIND_LABEL[kind] || kind)}${Q.assessment.config && Q.assessment.config.test ? ' (test)' : ''}</strong>${(/ · (.+)$/.exec(Q.assessment.title || '') || [])[1] ? ` · ${esc(/ · (.+)$/.exec(Q.assessment.title)[1])}` : ''} · Question ${Q.index + 1} of ${items.length} · ${answered} answered ${timer}<span class="qz-save" aria-live="polite">${esc(Q.saveText || '')}</span></div>
-      <div class="qz-bar" aria-hidden="true"><i style="width:${Math.round((answered / items.length) * 100)}%"></i></div>
-      <form class="qz-card" data-qz-form="answer" novalidate tabindex="-1">
+    const primary = practice && !checked ? (instantType(item) ? '' : btn('check', 'Check', '', 'btn qz-go')) : last ? btn('submit', practice ? 'Finish' : 'Submit', '', 'btn qz-go') : btn('next', 'Next', '', 'btn qz-go');
+    const enter = Q.shownIndex === Q.index ? '' : Q.shownIndex == null || Q.shownIndex < Q.index ? ' enter-next' : ' enter-prev';
+    Q.shownIndex = Q.index;
+    const verdict = checked && checked.status === 'graded' ? (checked.score >= checked.max ? 'right' : 'wrong') : '';
+    return `<div class="qz-play${fx ? ` fx-${fx}` : ''}" data-qz-play>
+      <div class="qz-play-top">
+        <div class="qz-head"><strong>${esc(KIND_LABEL[kind] || kind)}${Q.assessment.config && Q.assessment.config.test ? ' (test)' : ''}</strong>${scope ? ` · ${esc(scope)}` : ''} · Question ${Q.index + 1} of ${items.length} · ${answered} answered <span class="qz-save" aria-live="polite">${esc(Q.saveText || '')}</span></div>
+        <div class="qz-play-tools">${timer}${btn('flag', Q.flags.has(item.id) ? '⚑ Unflag' : '⚑ Flag', `aria-pressed="${Q.flags.has(item.id)}" title="Flag to come back to it (F)"`, 'btn btn-sm btn-ghost qz-tool')}${btn('leave', kind === 'final' ? 'Leave · clock runs' : 'Leave · saved', `title="${kind === 'final' ? 'Leave; the exam clock keeps running' : 'Leave; your answers are saved'}"`, 'btn btn-sm btn-ghost qz-tool')}</div>
+      </div>
+      <div class="qz-progress"><div class="qz-segs" role="group" aria-label="Questions">${segs}</div><span class="qz-count-of">${Q.index + 1}/${items.length}</span>${pills}</div>
+      ${streak >= 2 ? `<p class="qz-streak${fx === 'right' ? ' pop' : ''}" role="status">${streak} in a row</p>` : '<p class="qz-streak empty" aria-hidden="true"></p>'}
+      <form class="qz-card${enter}${verdict ? ` is-${verdict}` : ''}${fx ? ` fx-${fx}` : ''}" data-qz-form="answer" novalidate tabindex="-1">
+        <p class="qz-qnum">Question ${Q.index + 1}</p>
         <p class="qz-meta">${esc(TYPES[item.question.type] || '')}${topic ? ` · ${esc(topic)}` : ''}${Q.flags.has(item.id) ? ' · ⚑ flagged' : ''}</p>
         <p class="qz-prompt" tabindex="-1" data-qz-focus>${esc(item.question.prompt)}</p>
         ${control(item, answer, Boolean(checked), checked)}
-        <div class="qz-conf"><span>How sure are you?</span> ${confidence}</div>
-        <label class="qz-dk"><input type="checkbox" name="dontKnow"${answer && answer.dontKnow ? ' checked' : ''}${checked ? ' disabled' : ''}> I don't know</label>
+        <div class="qz-extra"><label class="qz-dk"><input type="checkbox" name="dontKnow"${answer && answer.dontKnow ? ' checked' : ''}${checked ? ' disabled' : ''}> I don't know</label></div>
       </form>
       ${checked ? feedbackView(S, item, checked) : ''}${confirm}
-      <div class="qz-row">${ghost('prev', 'Previous', Q.index === 0 ? 'disabled' : '')}${nextBtn}${practice && checked && !last ? '' : ''}${ghost('flag', Q.flags.has(item.id) ? 'Unflag' : 'Flag')}${ghost('leave', kind === 'final' ? 'Leave (the clock keeps running)' : 'Leave (answers are saved)')}${practice && checked && last ? btn('submit', 'Finish') : ''}</div>
-      <div class="qz-dots" role="group" aria-label="Questions">${dots}</div>
-      <p class="qz-keys ln-soon">Keys: 1–9 or A–D choose · T / F true or false · ← → move · F flag · Ctrl+Enter ${practice ? 'check or next' : 'next or submit'}</p>`;
+      <div class="qz-play-foot"><p class="qz-keys ln-soon">1–9 or A–D choose · ← → move · F flag · Ctrl+Enter ${practice ? 'check or next' : 'next or submit'}</p>
+        <div class="qz-row">${ghost('prev', 'Back', Q.index === 0 ? 'disabled' : '')}${primary}</div></div>
+    </div>`;
+  }
+  /* Motion after a check (owner: "addicting and satisfying" when right, "intense" when wrong). Runs once per check; reduced motion
+     keeps only the colours. Right: the row pops, a check draws itself, a burst of sparks, the segment fills, the counter bumps.
+     Wrong: the row and card shake, a red flash pulses over the screen, the counter bumps; the right answer is then outlined. */
+  const calm = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+  function runFx(S) {
+    const Q = S.quiz; if (S.mode !== 'quiz' || !Q || !Q.fx) return;
+    const fx = Q.fx; Q.fx = null; // once
+    const host = hostOf(S); if (!host || calm()) return;
+    if (fx.kind === 'right') {
+      const row = host.querySelector('.qz-choice.right.picked, .qz-choice.right') || host.querySelector('.qz-card');
+      burst(row, 22); const seg = host.querySelector('.qz-seg.current'); if (seg) burst(seg, 8, true);
+    }
+  }
+  function burst(el, n, small) {
+    if (!el) return;
+    const box = document.createElement('span'); box.className = `qz-burst${small ? ' small' : ''}`; box.setAttribute('aria-hidden', 'true');
+    const colors = ['#4ade80', '#22c55e', '#a7f3d0', '#facc15', '#7FA7F5', '#ffffff'];
+    for (let i = 0; i < n; i++) {
+      const p = document.createElement('i'); const a = (Math.PI * 2 * i) / n + Math.random() * 0.6; const d = (small ? 18 : 46) + Math.random() * (small ? 14 : 46);
+      p.style.setProperty('--x', `${Math.cos(a) * d}px`); p.style.setProperty('--y', `${Math.sin(a) * d}px`); p.style.setProperty('--c', colors[i % colors.length]);
+      p.style.setProperty('--s', `${(small ? 3 : 4) + Math.random() * (small ? 2 : 4)}px`); p.style.animationDelay = `${Math.random() * 60}ms`;
+      box.appendChild(p);
+    }
+    el.appendChild(box); setTimeout(() => box.remove(), 1000);
   }
 
   function gradeView(S) {
@@ -844,7 +898,12 @@
     const cytab = event.target.closest('[data-qz-cytab]');
     if (cytab) { S.evalTab = cytab.dataset.qzCytab; const host = hostOf(S); host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S); paintBar(S); paintSide(S); paintEval(S); const b = host.querySelector(`[data-qz-cytab="${S.evalTab}"]`); if (b) b.focus(); return; }
     if (S.scopeOpen && !event.target.closest('.qz-scope')) { S.scopeOpen = false; paintBar(S); }
-    if (event.target.closest('[data-qz-take]')) { S.errors = ''; try { await take(S, S.evalTab); } catch (error) { fail(S, error); } return; }
+    if (event.target.closest('[data-qz-take-new]')) { S.errors = ''; try { await take(S, S.evalTab); } catch (error) { fail(S, error); } return; }
+    if (event.target.closest('[data-qz-take]')) {
+      S.errors = ''; const open = resumable(S, S.evalTab);
+      try { if (open) { const got = await D().assessmentGet({ assessmentId: open.id }); await openQuiz(S, got.status === 'draft' ? await D().assessmentStart({ assessmentId: got.id }) : got); } else await take(S, S.evalTab); } catch (error) { fail(S, error); }
+      return;
+    }
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';
     try {
@@ -890,7 +949,8 @@
       }
       else if (action === 'study-end') {
         const sum = await D().studyEnd({ sessionId: S.study.active.session.id });
-        S.study.summary = sum; S.study.active = null; S.study.notes = []; await load(S); paint(S); say('Study session saved.');
+        S.study.summary = null; S.study.active = null; S.study.notes = []; await load(S); paint(S);
+        H.toast(`Session saved · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${sum.topics.join(', ')}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}`); say('Study session saved.');
       }
       else if (action === 'bank') { const from = S.mode; await load(S); if (S.mode !== from) return; S.editId = null; S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); } // a click made during the reload wins
       else if (action === 'hint-dismiss') { try { localStorage.setItem(hintKey(), '1'); } catch { /* the hint may return next time */ } paint(S); }
@@ -951,7 +1011,7 @@
       else if (action === 'check') {
         if (!(await saveNow(S))) { paint(S); return; }
         const item = S.quiz.assessment.items[S.quiz.index];
-        S.quiz.checked[item.id] = await D().assessmentCheck({ assessmentId: S.quiz.assessment.id, itemId: item.id }); paint(S);
+        S.quiz.checked[item.id] = await D().assessmentCheck({ assessmentId: S.quiz.assessment.id, itemId: item.id }); markFx(S, item); paint(S);
       }
       else if (action === 'retry') {
         const item = S.quiz.assessment.items[S.quiz.index];

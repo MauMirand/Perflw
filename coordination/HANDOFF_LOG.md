@@ -1896,6 +1896,16 @@ Not pushed, not merged.
 - **Taking a test** (setup, answering, grading, results) now fills the Learning Cycle: the side cards, track, section bar and kind tabs hide; the test is centred.
 - **Checks:** `npm test` 307/307 (new peek test); `npm run test:ml1` PASS (cards and the full-width test are asserted); `npm run test:electron` PASS.
 
+### HO-047 — Claude A: play screen redesign, Resume on Take Test, leaner Cycle status (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-26 · **Status:** SUBMITTED (not reviewed) · merged and pushed (standing "always push live" rule)
+
+- **Play screen (owner mock-up):** title line, a segment bar (one segment per question, click to jump; practice segments turn green ✓ / red ✕; tests show answered), counter "n/N", ✕/✓ pills (practice) or "answered" pill (tests), "Question n", large prompt, A–D answer rows, Back + blue Next/Check/Submit, Flag and Leave as small tools top right, "n in a row" streak.
+- **Motion (owner: "addicting and satisfying" when right, "intense" when wrong):** right = row pop, glow ring, self-drawing check, spark burst, segment shine, pill bump, soft green wash; wrong = card and row shake, cross snaps in, red edge flash, pill bump. Plays once per check; `prefers-reduced-motion` keeps colours only. Question change slides in.
+- **Removed (owner):** "How sure are you?" row (confidence is optional in the data; misconception/guess categories now rarely fire); Cycle status's session summary (now a toast), bank count and "Not finished" list.
+- **Take Test → Resume** when a test of the selected kind is unfinished (newest in-progress or not-started); "Start new" beside it starts a fresh one.
+- **Checks:** `npm test` 307/307; `npm run test:ml1` PASS (wrong-answer motion classes, counters, Resume, toast asserted; segments ≥ 24 px tall); `npm run test:electron` PASS.
+
 ---
 
 ## 5. Review Decision Definitions
