@@ -539,6 +539,17 @@ test('practice retry: one second try on a wrong deterministic answer, scored hal
   assert.throws(() => t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }), /not found/i);
 });
 
+test('journey:evaluation with peek reads the evaluation without moving the journey on', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  t.call('journey:update', { journeyId: journey.id, stage: 'diagnostic' });
+  const seen = t.call('journey:evaluation', { journeyId: journey.id, peek: true });
+  assert.equal(seen.cycle, 1);
+  assert.equal(t.call('journey:list', { subjectId: 's1' })[0].stage, 'diagnostic', 'peek leaves the stage');
+  t.call('journey:evaluation', { journeyId: journey.id });
+  assert.equal(t.call('journey:list', { subjectId: 's1' })[0].stage, 'final_learning', 'a full look still moves it on');
+});
+
 test('topic scope: a test uses only the chosen topics, inside the cycle\'s topics', () => {
   const t = setup(); seed(t);
   const journey = t.call('journey:create', { subjectId: 's1' });

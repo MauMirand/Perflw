@@ -46,7 +46,7 @@
       D().journeyList({ subjectId: S.subjectId }), D().assessmentList({ subjectId: S.subjectId }),
     ]);
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
-    S.periods = periodsOf(topics.rows || []); restoreScope(S);
+    S.periods = periodsOf(topics.rows || []); restoreScope(S); S.overview = null;
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
     S.ai = typeof D().aiStatus === 'function' ? await D().aiStatus().catch(error => ({ available: false, reason: error.message })) : { available: false, reason: 'AI is not available in this build.' };
@@ -100,6 +100,7 @@
   const VIEWS = { setup: setupView, history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView, schedule: scheduleView };
   /* The expanded "Learning Cycle" (owner mock-up, 2026-11-26): it covers the main panel; tabs on top, the latest result on the left,
      the workspace (start, answer, results, bank, notes, history, schedule) on the right. Nothing is added below the subject page. */
+  const FOCUS_MODES = ['setup', 'examSetup', 'quiz', 'grade', 'results'];
   const CYCLE_TABS = [['diagnostic', 'Pre-Test'], ['practice', 'Practice'], ['final', 'Final Exam']];
   function cycleFrame() {
     return `<div class="qz-cycle" role="region" aria-labelledby="qz-cycle-title">
@@ -188,6 +189,7 @@
     if (S.expanded) placeOverlay(host);
     if (!host.querySelector('.qz-cycle')) host.innerHTML = cycleFrame();
     host.querySelector('.qz-cycle-sub').textContent = S.name || '';
+    host.querySelector('.qz-cycle').classList.toggle('qz-focus', FOCUS_MODES.includes(S.mode)); // setup, answering, grading, results: full width
     host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S);
     host.querySelector('[data-qz-track]').innerHTML = trackView(S);
     paintBar(S);
@@ -291,29 +293,88 @@
   function homeView(S) {
     if (S.loading) return '<p class="ln-soon" role="status">Loading your quizzes…</p>';
     if (!S.topics.length) return '<p class="ln-soon">Add topics or import a file first, then write questions for them in the Question bank.</p>';
-    const perTopic = S.topics.map(t => `${esc(t.title)}: ${S.questions.filter(q => String(q.topicId) === String(t.id)).length}`).join(' · ');
-    const row = a => {
-      const done = ['submitted', 'graded'].includes(a.status);
-      const label = `${esc(a.title || KIND_LABEL[a.kind] || a.kind)}${a.attempt > 1 ? ` (attempt ${a.attempt})` : ''}`;
-      const action = done ? ghost('results', 'Results', `data-id="${esc(a.id)}"`) : ['in_progress', 'draft'].includes(a.status) ? ghost('resume', a.status === 'draft' ? 'Start' : 'Resume', `data-id="${esc(a.id)}"`) : '';
-      return `<li>${label} · ${esc(KIND_LABEL[a.kind] || a.kind)} · ${esc(a.status.replace('_', ' '))} ${action}</li>`;
-    };
-    const past = S.assessments.filter(a => a.status !== 'abandoned').map(row).join('');
-    const hasDone = S.assessments.some(a => ['submitted', 'graded'].includes(a.status));
+    if (!S.overview && !S.overviewLoading) loadOverview(S);
+    const O = S.overview; const hasDone = S.assessments.some(a => ['submitted', 'graded'].includes(a.status));
     const next = S.schedule.find(x => Date.parse(x.endsAt || x.startsAt) >= Date.now());
-    const links = [
-      hasDone && S.journey ? ghost('evaluation', 'Final learning', 'title="Your evidence for this cycle, and what to review before the final"') : '',
-      S.assessments.length ? ghost('history', 'History') : '',
-      S.retention && S.retention.eligible ? btn('retention', 'Retention check', 'title="A short recall check of what you should still know"') : '',
-      S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : '',
-      hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : '',
-      S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''].join('');
+    const open = S.assessments.filter(a => ['in_progress', 'draft'].includes(a.status));
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    const date = iso => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
+    const card = (title, sub, body, extra = '') => `<section class="qz-ov-card" aria-label="${esc(title)}"><div class="qz-ov-head"><h4>${esc(title)}${sub ? ` <span class="qz-ov-sub">${esc(sub)}</span>` : ''}</h4>${extra}</div>${body}</section>`;
+    const waiting = '<p class="ln-soon" role="status">Loading…</p>';
+
+    // Latest result: the last submitted test, with each topic's score
+    let latest;
+    const L = O && O.latest;
+    if (!hasDone) latest = card('Latest result', '', '<p class="ln-soon">Nothing taken yet. Pick Pre-Test, Practice or Final Exam, then press Take Test.</p>');
+    else if (!L) latest = card('Latest result', '', waiting);
+    else {
+      const verdict = L.exam && L.exam.passed !== null && L.exam.passed !== undefined ? `<span class="${L.exam.passed ? 'qz-pass' : 'qz-fail'}">${L.exam.passed ? '✓ Passed' : '✗ Not passed'}</span> · ` : '';
+      const rows = L.topics.map(t => `<li><span>${esc(t.title)}</span><span class="qz-ov-bar" aria-hidden="true"><i style="width:${pct(t.score, t.max)}%"></i></span><span class="qz-ov-num">${fmt(t.score)}/${fmt(t.max)} · ${pct(t.score, t.max)}%</span></li>`).join('');
+      latest = card('Latest result', KIND_LABEL[L.kind] || L.kind, `<p class="qz-ov-line"><strong>${esc(L.title)}</strong> · ${esc(date(L.submittedAt))} · ${verdict}${fmt(L.score)} of ${fmt(L.max)} points (${pct(L.score, L.max)}%)</p>
+        <p class="qz-ov-h">Topics</p><ul class="qz-ov-topics">${rows || '<li>—</li>'}</ul>`,
+        `<span class="qz-row">${S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : ''}${ghost('results', 'Open results', `data-id="${esc(L.id)}"`)}</span>`);
+    }
+    const continueRow = open.length ? `<div class="qz-ov-continue"><p class="qz-ov-h">Not finished</p><ul class="qz-list">${open.map(a => `<li>${esc(a.title || KIND_LABEL[a.kind])} · ${esc(a.status === 'draft' ? 'not started' : 'in progress')} ${ghost('resume', a.status === 'draft' ? 'Start' : 'Resume', `data-id="${esc(a.id)}"`)}</li>`).join('')}</ul></div>` : '';
+
+    // Final Learning: where each topic stands now, and what unlocks the final
+    let final;
+    const E = O && O.evaluation;
+    if (!S.journey || !hasDone) final = card('Final Learning', S.journey ? `Cycle ${S.journey.cycle}` : '', '<p class="ln-soon">Your levels by topic appear after your first test.</p>');
+    else if (!E) final = card('Final Learning', `Cycle ${S.journey.cycle}`, waiting);
+    else {
+      const rows = E.topics.map(t => `<tr><th scope="row">${esc(t.title || t.topicId)}</th><td><span class="qz-chip lv-${esc(t.level)}">${esc(LEVELS[t.level] || t.level)}</span></td><td>${t.items} item${t.items === 1 ? '' : 's'}</td></tr>`).join('');
+      const actions = [
+        S.retention && S.retention.eligible ? btn('retention', 'Retention check', 'title="A short recall check of what you should still know"') : '',
+        ghost('report', 'Report', 'title="Pre-test vs now, by topic"'),
+        S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''].join('');
+      final = card('Final Learning', `Cycle ${E.cycle}`, `<table class="qz-table qz-ov-table"><thead><tr><th scope="col">Topics</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${rows}</tbody></table>
+        <p class="qz-ov-line">${E.studySessions} study session${E.studySessions === 1 ? '' : 's'} · ${E.studyMinutes} minute${E.studyMinutes === 1 ? '' : 's'} · ${E.notes} note${E.notes === 1 ? '' : 's'}</p>
+        <p class="${E.ready ? 'qz-pass' : 'ln-soon'}" role="status">${E.ready ? 'Final learning done: the final exam is open.' : 'To open the final exam: finish a Review study session (it records the sections and notes you open). A test final skips this step.'}</p>
+        ${S.retention && !S.retention.eligible && S.retention.eligibleOn ? `<p class="ln-soon">${esc(S.retention.reason)}</p>` : ''}`,
+        `<span class="qz-row">${actions}</span>`);
+    }
+
+    // History: every assessment, newest first, with the levels right after it
+    let history;
+    const Hs = O && O.history;
+    if (!S.assessments.length) history = card('History', '', '<p class="ln-soon">Your tests will be listed here.</p>');
+    else if (!Hs) history = card('History', '', waiting);
+    else {
+      const rows = Hs.flatMap(j => j.assessments.map(x => ({ ...x, cycle: j.cycle }))).sort((a, b) => String(b.submittedAt || b.startedAt || '').localeCompare(String(a.submittedAt || a.startedAt || '')))
+        .map(x => `<tr${x.excluded ? ' class="qz-excluded"' : ''}><th scope="row">${esc(date(x.submittedAt || x.startedAt))}</th><td>${esc(KIND_LABEL[x.kind] || x.kind)}${x.attempt > 1 ? ` (attempt ${x.attempt})` : ''}${Hs.length > 1 ? ` · cycle ${x.cycle}` : ''}</td><td>${x.excluded ? `${esc(x.status.replace('_', ' '))} · not counted` : `${fmt(x.score)} of ${fmt(x.max)} (${x.percent}%)`}</td><td>${x.levels ? x.levels.map(l => `${esc(l.title || l.topicId)}: ${esc(LEVELS[l.level])}`).join(' · ') : '—'}</td></tr>`).join('');
+      history = card('History', '', rows ? `<table class="qz-table qz-ov-table"><thead><tr><th scope="col">Date</th><th scope="col">What</th><th scope="col">Score</th><th scope="col">Levels after it</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="ln-soon">Nothing submitted yet.</p>');
+    }
     return `${hintView(S)}${studyView(S)}
-      <p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.${S.due ? ` ${S.due} practice item${S.due === 1 ? ' is' : 's are'} due.` : ''}</p>
-      ${next ? `<p class="ln-soon">Next scheduled: ${esc(SCHED_KIND[next.kind] || next.kind)} · ${esc(when(next.startsAt))}</p>` : ''}
-      ${links ? `<div class="qz-row">${links}</div>` : ''}
-      ${S.retention && !S.retention.eligible && S.retention.eligibleOn ? `<p class="ln-soon">${esc(S.retention.reason)}</p>` : ''}
-      ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : `<p class="ln-soon">Nothing taken yet. Pick Pre-Test, Practice or Final Exam above and press Take.</p>`}`;
+      <p class="ln-soon qz-ov-meta">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank.${S.due ? ` ${S.due} practice item${S.due === 1 ? ' is' : 's are'} due.` : ''}${next ? ` Next scheduled: ${esc(SCHED_KIND[next.kind] || next.kind)} · ${esc(when(next.startsAt))}.` : ''}</p>
+      ${continueRow}<div class="qz-ov">${latest}${final}${history}</div>`;
+  }
+  const fmt = n => (Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toString());
+  /* The data behind the Cycle status cards; read once per load, repainted when it arrives. The evaluation is read with `peek`
+     right after a pre-test, so seeing the card does not count as the final-learning step until you have studied. */
+  async function loadOverview(S) {
+    S.overviewLoading = true;
+    try {
+      const done = S.assessments.filter(a => ['submitted', 'graded'].includes(a.status)).sort((a, b) => String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')));
+      const last = done[done.length - 1];
+      const [results, evaluation, history] = await Promise.all([
+        last ? D().assessmentResults({ assessmentId: last.id }) : null,
+        S.journey && done.length ? D().journeyEvaluation({ journeyId: S.journey.id, peek: S.journey.stage !== 'main_learning' }) : null,
+        S.assessments.length ? D().learningHistory({ subjectId: S.subjectId }) : null,
+      ]);
+      let latest = null;
+      if (results) {
+        const byTopic = new Map();
+        for (const i of results.items) { const k = String(i.topicId); const t = byTopic.get(k) || { score: 0, max: 0 }; t.score += (i.answer && i.answer.score) || 0; t.max += i.maxScore; byTopic.set(k, t); }
+        const title = id => (S.topics.find(t => String(t.id) === id) || {}).title || 'Topic';
+        const tot = [...byTopic.values()].reduce((a, t) => ({ score: a.score + t.score, max: a.max + t.max }), { score: 0, max: 0 });
+        latest = { id: last.id, kind: last.kind, title: last.title || KIND_LABEL[last.kind], submittedAt: results.submittedAt || last.submittedAt, exam: results.exam || null, score: tot.score, max: tot.max,
+          topics: [...byTopic].map(([id, t]) => ({ title: title(id), ...t })) };
+      }
+      if (evaluation && S.journey && S.journey.stage === 'main_learning') S.journey.stage = 'final_learning'; // the full look moved it on
+      S.overview = { latest, evaluation, history };
+    } catch (error) { S.overview = { latest: null, evaluation: null, history: null, error: error.message }; }
+    S.overviewLoading = false;
+    if (S.mode === 'home') paint(S);
   }
 
   const SCHED_KIND = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };

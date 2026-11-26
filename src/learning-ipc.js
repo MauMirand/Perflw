@@ -219,7 +219,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
   on('retention:status', ['journeyId'], (u, a) => retentionStatus(u, a.journeyId));
 
   /* Final learning (D9, spec §5.6): the cycle's evidence, computed. Viewing it moves the journey to the final-learning stage. */
-  on('journey:evaluation', ['journeyId'], (u, a) => {
+  on('journey:evaluation', ['journeyId', 'peek'], (u, a) => {
     const s = store(); const journey = s.getJourney(u, { journeyId: a.journeyId });
     const levels = topicLevels(u, journey);
     const rows = s.journeyEvidence(u, { journeyId: journey.id });
@@ -229,7 +229,8 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const answers = rows.filter(r => r.score !== null).map(r => ({ topicId: String(r.topicId), category: r.mistakeCategory || (r.dontKnow ? 'not_known' : r.score < r.max ? 'incorrect' : null), pending: false }));
     const weak = insight.rankWeakTopics({ topics: levels.map((l, position) => ({ id: String(l.topicId), position, level: l.level })), answers })
       .map(w => ({ topicId: w.topicId, title: (levels.find(l => String(l.topicId) === String(w.topicId)) || {}).title || '', level: w.level, score: w.score }));
-    if (['diagnostic', 'main_learning'].includes(journey.stage)) s.updateJourney(u, { journeyId: journey.id, stage: 'final_learning' });
+    // Looking at the evaluation is the final-learning step; `peek` reads it for the always-visible Cycle status card without that.
+    if (a.peek !== true && ['diagnostic', 'main_learning'].includes(journey.stage)) s.updateJourney(u, { journeyId: journey.id, stage: 'final_learning' });
     const byKind = {}; for (const r of rows) byKind[r.kind] = (byKind[r.kind] || 0) + 1;
     return { journeyId: journey.id, cycle: journey.cycle, topics: levels, weak, evidenceByKind: byKind, studySessions: sessions.length, studyMinutes: minutes, notes: notes.length,
       below: levels.filter(l => ['not_assessed', 'emerging', 'developing'].includes(l.level)).map(l => l.topicId), ready: sessions.some(x => x.kind === 'review') };
