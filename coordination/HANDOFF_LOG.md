@@ -1869,6 +1869,16 @@ Not pushed, not merged.
 - **Revised same day (owner: "better UI design" + hover tooltip with name and status):** track in its own card with "Stage N of 13 · N completed"; completed = green-tinted ring, in progress = solid blue with a soft ping (off with reduced motion), not complete = gray outline; links green up to the current stage. Words now "Not complete / In progress / Completed". Each stop is focusable; a small tooltip (name + status dot) shows on hover or focus, below the stop.
 - **Checks:** `npm test` 305/305; `npm run test:ml1` PASS (track step asserts states and three distinct colors); `npm run test:electron` PASS on rerun (first run failed once at the unrelated profile-header height check, `electron-smoke.js:877`, flaky).
 
+### HO-044 — Claude A: topic scope for tests (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-26 · **Status:** SUBMITTED (not reviewed) · merged to `main` and pushed under the owner's standing "always push live" rule
+
+- **Owner decision:** no new cycle per scope. Questions stay tagged by topic; the chosen topics only decide which questions a pre-test, practice or final uses.
+- **UI:** "Topics" control beside Take Test: Entire subject, periods from the topic list's milestones (Prelim, Midterm, Prefi, Finals or custom), or single topics, with question counts. Remembered per subject in this browser profile (`localStorage`). Status card counts, the pre-test sheet and the exam preview follow it; a scoped test's title and header name the scope (e.g. "Practice · Prelim").
+- **Main process:** `select()` honours `config.topicIds` inside a journey, narrowed to the journey's topics (error if none overlap). Topics added after a cycle began are added to the running cycle on load (`journey:update`).
+- **Fix:** Escape in the Learning Cycle no longer also leaves the subject page (the page's capture-phase handler now yields while the overlay is open).
+- **Checks:** `npm test` 306/306 (new scope test); `npm run test:ml1` PASS with a scope step; `npm run test:electron` PASS.
+
 ---
 
 ## 5. Review Decision Definitions

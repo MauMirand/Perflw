@@ -46,6 +46,7 @@
       D().journeyList({ subjectId: S.subjectId }), D().assessmentList({ subjectId: S.subjectId }),
     ]);
     S.topics = (topics.rows || []).filter(r => r.kind === 'topic');
+    S.periods = periodsOf(topics.rows || []); restoreScope(S);
     S.questions = questions; S.assessments = assessments;
     S.allQuestions = await D().questionsList({ subjectId: S.subjectId });
     S.ai = typeof D().aiStatus === 'function' ? await D().aiStatus().catch(error => ({ available: false, reason: error.message })) : { available: false, reason: 'AI is not available in this build.' };
@@ -60,6 +61,38 @@
       if (S.study.active) { S.study.base = S.study.active.elapsedSeconds || 0; S.study.t0 = Date.now(); }
     }
     S.journey = journeys.filter(j => j.status !== 'archived').pop() || null;
+    // Topics added after the cycle began (a new period, a new upload) join the running cycle, so a scope can include them.
+    if (S.journey && S.journey.status === 'active') {
+      const own = new Set((S.journey.topicIds || []).map(String)); const missing = S.topics.filter(t => !own.has(String(t.id)));
+      if (missing.length) { try { S.journey = await D().journeyUpdate({ journeyId: S.journey.id, topicIds: [...own, ...missing.map(t => String(t.id))] }); } catch { /* the cycle keeps its topics */ } }
+    }
+  }
+  /* Periods are the topic list's milestones (Prelim, Midterm, Prefi, Finals, or the student's own): each owns the topics below it. */
+  function periodsOf(rows) {
+    const out = []; let cur = null;
+    for (const r of rows) {
+      if (r.kind === 'milestone') { cur = { id: String(r.id), title: r.title, topicIds: [] }; out.push(cur); }
+      else if (r.kind === 'topic' && cur) cur.topicIds.push(String(r.id));
+    }
+    return out.filter(x => x.topicIds.length);
+  }
+  // ───────── topic scope: which topics the next test draws from (empty = the entire subject). Remembered per subject in this profile.
+  const scopeKey = S => `perflw-scope:${accountKey}:${S.subjectId}`;
+  function restoreScope(S) {
+    if (!S.scopeSel) { let saved = []; try { saved = JSON.parse(localStorage.getItem(scopeKey(S)) || '[]'); } catch { saved = []; } S.scopeSel = new Set(Array.isArray(saved) ? saved.map(String) : []); }
+    const live = new Set(S.topics.map(t => String(t.id)));
+    for (const id of [...S.scopeSel]) if (!live.has(id)) S.scopeSel.delete(id);
+  }
+  function saveScope(S) { try { localStorage.setItem(scopeKey(S), JSON.stringify([...S.scopeSel])); } catch { /* kept for this session only */ } }
+  const scopeIds = S => (S.scopeSel && S.scopeSel.size ? [...S.scopeSel] : null);
+  const inScope = (S, q) => !S.scopeSel || !S.scopeSel.size || S.scopeSel.has(String(q.topicId));
+  function scopeLabel(S) {
+    const sel = S.scopeSel; if (!sel || !sel.size) return 'Entire subject';
+    const full = (S.periods || []).filter(p => p.topicIds.every(id => sel.has(id)));
+    const covered = new Set(full.flatMap(p => p.topicIds));
+    if (full.length && covered.size === sel.size) return full.map(p => p.title).join(' + ');
+    if (sel.size === 1) { const t = S.topics.find(x => String(x.id) === [...sel][0]); return t ? t.title : '1 topic'; }
+    return `${sel.size} topics`;
   }
 
   // ───────── rendering
@@ -74,7 +107,7 @@
       <div class="qz-tabs qz-cycle-tabs" role="tablist" aria-label="Kind"></div>
       <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Status and performance"></aside>
         <div class="qz-cycle-main"><div class="qz-track-wrap" data-qz-track></div>
-          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div>
+          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-actions-end"><div class="qz-scope" data-qz-scope></div><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div></div>
           <div class="qz-cycle-content" data-qz-content></div></div></div>
     </div>`;
   }
@@ -94,11 +127,12 @@
   const ICON_CHART = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="2" fill="currentColor"/><path d="M5 12V8M8 12V4.5M11 12V6.5" stroke="var(--ink)" stroke-width="1.8" stroke-linecap="round"/></svg>';
   /* What the next attempt of a kind would be: its item count and a time estimate (finals use the exam's own time limit). */
   async function plannedFor(S, kind) {
-    const approved = S.questions.filter(q => q.review === 'approved').length;
-    if (kind === 'diagnostic') { const n = Math.min(approved, Math.min(40, Math.max(1, S.topics.length * 2))); return { items: n, time: n ? `About ${n} min` : '—' }; }
-    if (kind === 'practice') { const n = Math.min(S.questions.length, Math.min(10, Math.max(5, S.topics.length * 3))); return { items: n, time: n ? `About ${n} min` : '—' }; }
+    const pool = S.questions.filter(q => inScope(S, q)); const approved = pool.filter(q => q.review === 'approved').length;
+    const nTopics = scopeIds(S) ? scopeIds(S).length : S.topics.length;
+    if (kind === 'diagnostic') { const n = Math.min(approved, Math.min(40, Math.max(1, nTopics * 2))); return { items: n, time: n ? `About ${n} min` : '—' }; }
+    if (kind === 'practice') { const n = Math.min(pool.length, Math.min(10, Math.max(5, nTopics * 3))); return { items: n, time: n ? `About ${n} min` : '—' }; }
     let pv = null;
-    try { pv = await D().examPreview({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, config: { count: Number(S.exam.count) || 50, test: S.exam.test, timeMultiplier: Number(S.exam.multiplier) || 1 } }); } catch { pv = null; }
+    try { pv = await D().examPreview({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, config: { count: Number(S.exam.count) || 50, test: S.exam.test, timeMultiplier: Number(S.exam.multiplier) || 1, topicIds: scopeIds(S) || undefined } }); } catch { pv = null; }
     const limit = pv && pv.ok && pv.timeLimitSeconds ? `${Math.round(pv.timeLimitSeconds / 60)} min limit` : 'Timed';
     return { items: pv ? pv.count : Math.min(approved, 50), time: limit };
   }
@@ -125,8 +159,9 @@
   }
   /* Take Test: the right panel's button starts the kind of the selected tab (pre-test sheet, practice set, or the exam setup). */
   async function take(S, kind) {
-    if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S); }
-    else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) });
+    const nTopics = scopeIds(S) ? scopeIds(S).length : S.topics.length;
+    if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, nTopics * 2)) }; S.mode = 'setup'; paint(S); }
+    else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, nTopics * 3)) });
     else { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
   }
   function paint(S) {
@@ -192,14 +227,40 @@
       <div class="qz-track-foot"><p class="qz-track-now">${now ? `<span class="qz-now-dot" aria-hidden="true"></span><strong>${esc(now[1])}</strong><span>${esc(now[3])}</span>` : 'This cycle is complete.'}</p>
         <span class="qz-track-key" aria-hidden="true"><i class="todo"></i>Not complete<i class="now"></i>In progress<i class="done"></i>Completed</span></div></div>`;
   }
+  /* Topic picker (owner, 2026-11-26): Entire subject, whole periods (Prelim, Midterm, Prefi, Finals), or single topics. */
+  function scopeView(S) {
+    const sel = S.scopeSel || new Set(); const count = id => S.questions.filter(q => String(q.topicId) === String(id)).length;
+    const n = S.questions.filter(q => inScope(S, q)).length;
+    const button = `<button class="btn btn-sm btn-ghost qz-scope-btn" type="button" data-qz="scope" aria-haspopup="dialog" aria-expanded="${!!S.scopeOpen}" title="Choose the topics your tests use"><span class="qz-scope-k">Topics</span><span class="qz-scope-v">${esc(scopeLabel(S))}</span><span aria-hidden="true">▾</span></button>`;
+    if (!S.scopeOpen) return button;
+    const periods = (S.periods || []).map(p => { const on = p.topicIds.every(id => sel.has(id)); const qn = p.topicIds.reduce((a, id) => a + count(id), 0);
+      return `<button class="qz-chip-btn${on ? ' on' : ''}" type="button" data-qz="scope-period" data-id="${esc(p.id)}" aria-pressed="${on}">${esc(p.title)}<span>${qn}</span></button>`; }).join('');
+    const grouped = new Set((S.periods || []).flatMap(p => p.topicIds));
+    const row = t => `<label class="qz-scope-topic"><input type="checkbox" data-qz-scope-topic="${esc(t.id)}"${sel.has(String(t.id)) ? ' checked' : ''}><span>${esc(t.title)}</span><span class="qz-scope-n">${count(t.id)}</span></label>`;
+    const byId = new Map(S.topics.map(t => [String(t.id), t]));
+    const groups = (S.periods || []).map(p => `<p class="qz-scope-h">${esc(p.title)}</p>${p.topicIds.map(id => byId.get(id)).filter(Boolean).map(row).join('')}`).join('');
+    const loose = S.topics.filter(t => !grouped.has(String(t.id)));
+    return `${button}<div class="qz-scope-pop" role="dialog" aria-label="Choose topics">
+      <button class="qz-chip-btn wide${sel.size ? '' : ' on'}" type="button" data-qz="scope-all" aria-pressed="${!sel.size}">Entire subject<span>${S.questions.length}</span></button>
+      ${periods ? `<p class="qz-scope-h">Periods</p><div class="qz-scope-chips">${periods}</div>` : ''}
+      <div class="qz-scope-list">${groups}${loose.length ? `${groups ? '<p class="qz-scope-h">Other topics</p>' : '<p class="qz-scope-h">Topics</p>'}${loose.map(row).join('')}` : ''}</div>
+      <div class="qz-scope-foot"><span>${n} question${n === 1 ? '' : 's'} in scope</span>${btn('scope-done', 'Done')}</div></div>`;
+  }
+  function scopeChanged(S, focusSel) {
+    saveScope(S); paintBar(S); paintSide(S).catch(() => {});
+    if (S.mode === 'setup') paint(S);
+    const host = hostOf(S); const el = focusSel && host && host.querySelector(focusSel); if (el) el.focus();
+  }
   function paintBar(S) {
     const host = hostOf(S); if (!host) return;
     const bar = host.querySelector('[data-qz-bar]'); if (!bar) return;
     bar.hidden = ['quiz', 'grade'].includes(S.mode);
     bar.querySelector('[data-qz-sections]').innerHTML = sectionTabs(S);
     const label = (CYCLE_TABS.find(t => t[0] === S.evalTab) || [])[1] || 'test';
-    const b = bar.querySelector('[data-qz-take]'); const can = S.questions.length > 0;
-    b.disabled = !can; b.title = can ? `Take the ${label}` : 'Add questions in the Question bank first'; b.setAttribute('aria-label', `Take the ${label}`);
+    const pool = S.questions.filter(q => inScope(S, q)).length;
+    const b = bar.querySelector('[data-qz-take]'); const can = pool > 0;
+    b.disabled = !can; b.title = can ? `Take the ${label} · ${scopeLabel(S)}` : S.questions.length ? 'No questions in the chosen topics' : 'Add questions in the Question bank first'; b.setAttribute('aria-label', `Take the ${label}`);
+    bar.querySelector('[data-qz-scope]').innerHTML = scopeView(S);
   }
 
 
@@ -288,7 +349,7 @@
   }
   function setupView(S) {
     const types = ['choice', 'truefalse', 'matching', 'explain', 'essay'];
-    const chosen = S.setup.types; const usable = S.questions.filter(q => chosen.includes(q.type) && q.review === 'approved');
+    const chosen = S.setup.types; const usable = S.questions.filter(q => chosen.includes(q.type) && q.review === 'approved' && inScope(S, q));
     const want = Math.max(1, Math.min(40, Number(S.setup.count) || 1));
     const short = usable.length < want;
     return `<form class="qz-form" data-qz-form="setup" novalidate><p>Pre-test: a short check of where you stand before you study. About 2 questions per topic is a good start. You answer everything first; you see what was right and wrong after you submit.</p>
@@ -446,7 +507,7 @@
     const dots = items.map((it, i) => `<button class="qz-dot${i === Q.index ? ' current' : ''}${hasAnswer(Q.answers[it.id]) ? ' done' : ''}${Q.flags.has(it.id) ? ' flagged' : ''}" type="button" data-qz="jump" data-i="${i}" aria-label="Question ${i + 1}${hasAnswer(Q.answers[it.id]) ? ', answered' : ''}${Q.flags.has(it.id) ? ', flagged' : ''}"${i === Q.index ? ' aria-current="step"' : ''}></button>`).join('');
     const timer = Q.left != null ? `<span class="qz-timer" data-qz-timer role="timer" aria-label="Time left">${clock(Q.left)}</span>` : '';
     const nextBtn = practice && !checked ? (instantType(item) ? '' : btn('check', 'Check')) : last ? btn('submit', 'Submit') : btn('next', 'Next');
-    return `<div class="qz-head"><strong>${esc(KIND_LABEL[kind] || kind)}${Q.assessment.config && Q.assessment.config.test ? ' (test)' : ''}</strong> · Question ${Q.index + 1} of ${items.length} · ${answered} answered ${timer}<span class="qz-save" aria-live="polite">${esc(Q.saveText || '')}</span></div>
+    return `<div class="qz-head"><strong>${esc(KIND_LABEL[kind] || kind)}${Q.assessment.config && Q.assessment.config.test ? ' (test)' : ''}</strong>${(/ · (.+)$/.exec(Q.assessment.title || '') || [])[1] ? ` · ${esc(/ · (.+)$/.exec(Q.assessment.title)[1])}` : ''} · Question ${Q.index + 1} of ${items.length} · ${answered} answered ${timer}<span class="qz-save" aria-live="polite">${esc(Q.saveText || '')}</span></div>
       <div class="qz-bar" aria-hidden="true"><i style="width:${Math.round((answered / items.length) * 100)}%"></i></div>
       <form class="qz-card" data-qz-form="answer" novalidate tabindex="-1">
         <p class="qz-meta">${esc(TYPES[item.question.type] || '')}${topic ? ` · ${esc(topic)}` : ''}${Q.flags.has(item.id) ? ' · ⚑ flagged' : ''}</p>
@@ -680,6 +741,9 @@
     S.mode = 'grade'; S.errors = ''; paint(S);
   }
   async function begin(S, kind, title, config, extra = {}) {
+    if (['diagnostic', 'practice', 'final'].includes(kind) && !config.only && !config.topicIds && scopeIds(S)) {
+      config = { ...config, topicIds: scopeIds(S) }; title = `${title} · ${scopeLabel(S)}`.slice(0, 120);
+    }
     const journey = S.journey || await D().journeyCreate({ subjectId: S.subjectId });
     const made = await D().assessmentCreate({ subjectId: S.subjectId, journeyId: journey.id, kind, title, config, ...extra });
     const started = await D().assessmentStart({ assessmentId: made.assessment.id });
@@ -692,7 +756,7 @@
   async function refreshPreview(S) {
     const E = S.exam; E.preview = null; paint(S);
     try {
-      E.preview = await D().examPreview({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, retakeOf: E.retakeOf, config: { count: Number(E.count) || 1, test: E.test, timeMultiplier: Number(E.multiplier) } });
+      E.preview = await D().examPreview({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, retakeOf: E.retakeOf, config: { count: Number(E.count) || 1, test: E.test, timeMultiplier: Number(E.multiplier), topicIds: scopeIds(S) || undefined } });
     } catch (error) { E.preview = { ok: false, problem: error.message, min: 50, max: 100 }; }
     if (S.mode === 'examSetup') paint(S);
   }
@@ -701,11 +765,20 @@
   async function onClick(S, event) {
     const cytab = event.target.closest('[data-qz-cytab]');
     if (cytab) { S.evalTab = cytab.dataset.qzCytab; const host = hostOf(S); host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S); paintBar(S); paintSide(S); paintEval(S); const b = host.querySelector(`[data-qz-cytab="${S.evalTab}"]`); if (b) b.focus(); return; }
+    if (S.scopeOpen && !event.target.closest('.qz-scope')) { S.scopeOpen = false; paintBar(S); }
     if (event.target.closest('[data-qz-take]')) { S.errors = ''; try { await take(S, S.evalTab); } catch (error) { fail(S, error); } return; }
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'collapse') { stopTimer(S); S.expanded = false; const host = hostOf(S); if (host) host.hidden = true; paintEval(S).then(() => { const b = document.querySelector('[data-qz-evexpand]'); if (b) b.focus(); }); return; }
+      if (action === 'scope') { S.scopeOpen = !S.scopeOpen; paintBar(S); if (S.scopeOpen) { const f = hostOf(S).querySelector('.qz-scope-pop button'); if (f) f.focus(); } return; }
+      if (action === 'scope-done') { S.scopeOpen = false; paintBar(S); const b = hostOf(S).querySelector('[data-qz="scope"]'); if (b) b.focus(); return; }
+      if (action === 'scope-all') { S.scopeSel.clear(); scopeChanged(S, '[data-qz="scope-all"]'); return; }
+      if (action === 'scope-period') {
+        const p = (S.periods || []).find(x => x.id === target.dataset.id); if (!p) return;
+        const on = p.topicIds.every(id => S.scopeSel.has(id)); for (const id of p.topicIds) { if (on) S.scopeSel.delete(id); else S.scopeSel.add(id); }
+        scopeChanged(S, `[data-qz="scope-period"][data-id="${CSS.escape(p.id)}"]`); return;
+      }
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
       else if (action === 'schedule') { const from = S.mode; await load(S); if (S.mode !== from) return; S.schedEdit = null; S.confirmSched = null; S.mode = 'schedule'; paint(S); }
       else if (action === 'sched-edit') { S.schedEdit = target.dataset.id; S.confirmSched = null; paint(S); }
@@ -819,6 +892,7 @@
 
   /* Keyboard (spec §3.3). Attached to the host element only; letter keys are ignored while a text field has focus. */
   async function onKey(S, event) {
+    if (event.key === 'Escape' && S.scopeOpen) { event.preventDefault(); event.stopPropagation(); S.scopeOpen = false; paintBar(S); const b = hostOf(S).querySelector('[data-qz="scope"]'); if (b) b.focus(); return; }
     if (event.key === 'Escape' && S.expanded && S.mode !== 'quiz') { event.preventDefault(); const c = hostOf(S).querySelector('[data-qz="collapse"]'); if (c) c.click(); return; }
     if (S.mode !== 'quiz' || !S.quiz) return;
     const typing = /^(TEXTAREA|SELECT)$/.test(event.target.tagName) || (event.target.tagName === 'INPUT' && event.target.type === 'text');
@@ -935,6 +1009,7 @@
         if (S.mode === 'bank' && event.target.form && event.target.form.dataset.qzForm === 'bank-filter') {
           const f = event.target.form.elements; S.bankFilter = { topicId: f.topicId.value, type: f.type.value, retired: f.retired.checked }; paint(S); return;
         }
+        if (event.target.matches('[data-qz-scope-topic]')) { const id = event.target.dataset.qzScopeTopic; if (event.target.checked) S.scopeSel.add(id); else S.scopeSel.delete(id); scopeChanged(S, `[data-qz-scope-topic="${CSS.escape(id)}"]`); return; }
         if (event.target.matches('[data-qz-type]')) { const form = event.target.form; S.form = { type: event.target.value, topicId: form.elements.topicId.value, prompt: form.elements.prompt.value }; paint(S); return; }
         if (S.mode === 'examSetup' && event.target.form && event.target.form.dataset.qzForm === 'exam') {
           const f = event.target.form.elements; Object.assign(S.exam, { count: f.count.value, test: f.test.checked, multiplier: Number(f.multiplier.value) }); refreshPreview(S); return;
