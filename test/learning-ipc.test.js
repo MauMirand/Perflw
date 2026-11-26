@@ -35,6 +35,7 @@ function setup() {
   const workspace = { learningStore: () => store,
     getSubject: (userId, id) => ({ name: id === 's1' ? 'Biology' : 'Other' }),
     createEvent: (userId, title, startsAt, endsAt) => { const id = `e${events.length + 1}`; db.prepare('INSERT INTO events (id,user_id,title,starts_at,ends_at) VALUES (?,?,?,?,?)').run(id, userId, title, startsAt, endsAt); events.push(id); return id; },
+    updateEvent: (userId, id, { title, startsAt, endsAt }) => { if (Date.parse(endsAt) <= Date.parse(startsAt)) throw new Error('Event end must be after its start.'); db.prepare('UPDATE events SET title=?,starts_at=?,ends_at=? WHERE id=? AND user_id=?').run(title, startsAt, endsAt, id, userId); },
     deleteEvent: (userId, id) => { db.prepare('DELETE FROM events WHERE id=? AND user_id=?').run(id, userId); }, listTopics: (userId, subjectId) => ({
     rows: db.prepare('SELECT id, title, kind, file_id AS fileId FROM subject_topics WHERE user_id=? AND subject_id=?').all(userId, subjectId) }) };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perflw-ipc-'));
@@ -89,7 +90,7 @@ test('every channel is registered and every preload learningData channel exists 
   assert.deepEqual(registered, [
     'ai:status', 'assessment:abandon', 'assessment:acceptGrade', 'assessment:aiGrade', 'assessment:analysis', 'assessment:check', 'assessment:create', 'assessment:get', 'assessment:grade', 'assessment:list', 'assessment:results', 'assessment:retakeStatus', 'assessment:retry', 'journey:evaluation', 'learning:history', 'learning:home', 'learning:summary', 'retention:status',
     'assessment:saveAnswer', 'assessment:start', 'assessment:submit', 'exam:attempts', 'exam:preview', 'journey:create', 'journey:get', 'journey:list', 'journey:update',
-    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:generate', 'questions:list', 'questions:retire', 'questions:review', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list',
+    'mastery:journey', 'mastery:report', 'mastery:subject', 'notes:list', 'notes:targeted', 'questions:delete', 'questions:generate', 'questions:list', 'questions:retire', 'questions:review', 'questions:save', 'questions:templates', 'review:due', 'schedule:cancel', 'schedule:create', 'schedule:list', 'schedule:update',
   ].sort());
   const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8');
   const used = [...preload.matchAll(/call\('((?:ai|journey|questions|assessment|mastery|exam|notes|review|retention|schedule):[A-Za-z]+|learning:history|learning:home|learning:summary)'/g)].map(m => m[1]).sort();
@@ -546,6 +547,13 @@ test('scheduling: the calendar event and its link are created together, rolled b
   assert.equal(made.kind, 'practice'); assert.deepEqual(made.topicIds, ['t1']); assert.match(made.title, /^Practice: Biology/);
   const rows = db => db.prepare('SELECT count(*) AS n FROM events').get().n;
   assert.equal(t.call('schedule:list', { subjectId: 's1' }).length, 1);
+  // editing: kind, start and duration change on the event and the link together; a bad time changes nothing
+  const later = new Date(t.clock.now + 86400e3).toISOString(); const laterEnd = new Date(t.clock.now + 86400e3 + 5400e3).toISOString();
+  const edited = t.call('schedule:update', { scheduleId: made.id, kind: 'retention', startsAt: later, endsAt: laterEnd });
+  assert.equal(edited.kind, 'retention'); assert.equal(edited.startsAt, later); assert.equal(edited.endsAt, laterEnd); assert.match(edited.title, /^Retention check: Biology/);
+  assert.throws(() => t.call('schedule:update', { scheduleId: made.id, kind: 'final', startsAt: laterEnd, endsAt: later }), /end must be after/);
+  assert.equal(t.call('schedule:list', { subjectId: 's1' })[0].kind, 'retention', 'the failed edit was rolled back');
+  assert.throws(() => t.call('schedule:update', { scheduleId: made.id, kind: 'party', startsAt: later, endsAt: laterEnd }), /Kind must be one of/);
   // a bad topic id: nothing is left behind, not even the event
   const eventsBefore = t.store.constructor && t.rawDb.prepare('SELECT count(*) AS n FROM events').get().n;
   assert.throws(() => t.call('schedule:create', { journeyId: journey.id, kind: 'final', startsAt: at, endsAt: end, topicIds: ['tv'] }), /not found/i);

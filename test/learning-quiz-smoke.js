@@ -46,6 +46,11 @@ async function shoot(name) {
   await cdp('Emulation.clearDeviceMetricsOverride', {}); await sleep(200);
 }
 const step = label => console.log(`PASS ${label}`);
+async function take(kind) {
+  await click(`[data-qz-cytab="${kind}"]`);
+  await waitFor("!!document.querySelector('[data-qz-take]') && !document.querySelector('[data-qz-take]').disabled", `Take enabled for ${kind}`);
+  await click('[data-qz-take]');
+}
 /* Controls inside the quiz block with no accessible name (label, aria-label, aria-labelledby or visible button text). */
 const unnamedControls = () => evaluate(`[...document.querySelectorAll('.qz input, .qz select, .qz textarea, .qz button')].filter(el => {
   if (el.type === 'hidden') return false;
@@ -134,6 +139,9 @@ async function main() {
   await waitFor("!document.querySelector('[data-qz-host]').hidden && !!document.querySelector('.qz-cycle .qz')", 'Learning Cycle open');
   assert.ok(await evaluate("(() => { const a = document.querySelector('[data-qz-host]').getBoundingClientRect(), b = document.getElementById('main-panel').getBoundingClientRect(); return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; })()"), 'the Learning Cycle covers the main panel');
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-cytab]')].map(b => b.textContent)"), ['Pre-Test', 'Practice', 'Final Exam']);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-sections] .qz-tab')].map(b => b.textContent)"), ['Cycle status', 'Question bank', 'Schedule']);
+  await waitFor("/Status/.test(document.querySelector('[data-qz-side]').textContent) && /Your Performance/.test(document.querySelector('[data-qz-side]').textContent) && /Not taken/.test(document.querySelector('[data-qz-side]').textContent)", 'Status and Your Performance cards');
+  assert.ok(await evaluate("!document.querySelector('[data-qz-study-topic]') && !document.querySelector('[data-qz=\"study-start\"]')"), 'no Start studying in the Learning Cycle (parked)');
   await shoot('quiz-0b-cycle');
   step('subject page: Study, Start your session, Evaluation Cycle card with tabs; expand opens everything');
   await waitFor("/0 questions in your bank/.test(document.querySelector('.qz').textContent)", 'empty bank message');
@@ -141,11 +149,12 @@ async function main() {
   await click('[data-qz="hint-dismiss"]');
   assert.ok(await evaluate("!/How this works/.test(document.querySelector('.qz').textContent)"), 'the hint is dismissible');
   step('first-use hint: shown once, dismissed, remembered');
-  for (const action of ['start', 'practice', 'exam']) assert.ok(await evaluate(`document.querySelector('[data-qz="${action}"]').disabled`), `${action} is disabled with no questions`);
+  for (const kind of ['diagnostic', 'practice', 'final']) { await click(`[data-qz-cytab="${kind}"]`); await waitFor("!!document.querySelector('[data-qz-take]') && document.querySelector('[data-qz-take]').disabled", `Take is disabled for ${kind} with no questions`); }
   step('quiz block on the subject page, empty bank');
   await shoot('quiz-1-home');
 
   // An invalid question shows the validator's text and keeps what was typed.
+  await click('[data-qz="bank"]'); await waitFor("!!document.querySelector('[data-qz=\"add\"]')", 'Question bank section');
   await click('[data-qz="add"]'); await waitFor("!!document.querySelector('[data-qz-form=\"add\"]')", 'form');
   await fill('[data-qz-form="add"] [name="prompt"]', 'Which bond is ionic?');
   await submit('[data-qz-form="add"]');
@@ -231,8 +240,7 @@ async function main() {
   step('question bank: filter, edit, retire/restore, delete with confirm');
 
   await click('[data-qz="home"]');
-  await waitFor("!!document.querySelector('[data-qz=\"start\"]') && !document.querySelector('[data-qz=\"start\"]').disabled", 'start enabled');
-  await click('[data-qz="start"]');
+  await take('diagnostic');
   await waitFor("!!document.querySelector('[data-qz-form=\"setup\"]')", 'pre-test setup sheet');
   assert.ok(await evaluate("/approved questions? match/.test(document.querySelector('.qz').textContent) || /approved question/.test(document.querySelector('.qz').textContent)"), 'the setup sheet counts the questions that match');
   await shoot('quiz-2c-setup');
@@ -294,9 +302,7 @@ async function main() {
   assert.equal(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => j[0].stage)`), 'targeted_notes', 'the journey moved from the diagnostic to the targeted-notes stage when the notes were written');
 
   // Study session (LS-012): the account timer runs it, a side note is the student's own text, one focus entry with source learning.
-  await waitFor("!!document.querySelector('[data-qz=\"study-start\"]')", 'study panel');
-  await fill('[data-qz-study-topic]', topicId);
-  await click('[data-qz="study-start"]');
+  await evaluate(`window.PerflwQuiz.startSession(${q(subjectId)}, { topicId: ${q(topicId)} })`);
   await waitFor("!!document.querySelector('[data-qz-study-time]') && /Studying: Ionic bonds/.test(document.querySelector('.qz-study').textContent)", 'study session started');
   assert.equal(await evaluate("window.workspaceData.focus().then(() => window.learningData.studyActive()).then(a => !!a && a.topicTitle)"), 'Ionic bonds', 'the main process reports the open session');
   const clockA = await evaluate("document.querySelector('[data-qz-study-time]').textContent"); await sleep(2200);
@@ -332,11 +338,10 @@ async function main() {
 
   // Practice: feedback after Check, key shown only for that question (the study summary leaves us on the home screen).
   await waitFor("!!document.querySelector('.qz-stepper')", 'journey stepper on the home screen');
-  assert.equal(await evaluate("document.querySelector('.qz-step.current .qz-step-label').textContent"), 'Final learning', 'stepper shows the current stage (viewing the final learning evaluation moves the journey on)');
+  await waitFor("(document.querySelector('.qz-step.current .qz-step-label') || {}).textContent === 'Final learning'", 'stepper shows the current stage (viewing the final learning evaluation moves the journey on; the section reloads after it switches)');
   assert.ok(await evaluate("document.querySelectorAll('.qz-step.later').length === 0"), 'every stage is driven by the app');
   step('journey stepper: Final learning current, all 13 stages driven by the app');
-  await waitFor("!!document.querySelector('[data-qz=\"practice\"]') && !document.querySelector('[data-qz=\"practice\"]').disabled", 'practice enabled');
-  await click('[data-qz="practice"]');
+  await take('practice');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');
   await answerCurrent();
   // A quiz reveals the answer by itself when it is complete; only written answers need the Check button.
@@ -347,15 +352,27 @@ async function main() {
   step('practice: feedback after Check, answer locked');
   await shoot('quiz-6-practice');
   await click('[data-qz="leave"]');
-  // Scheduling: an ordinary calendar event plus a link; cancelling removes it.
+  // Schedule section: add, edit (kind, start, duration), remove with a confirm; each one is a calendar event with a link.
+  await waitFor("!!document.querySelector('[data-qz=\"schedule\"]')", 'Schedule section toggle');
+  await click('[data-qz="schedule"]');
   await waitFor("!!document.querySelector('[data-qz-form=\"schedule\"]')", 'schedule form');
   await fill('[data-qz-form="schedule"] [name="startsAt"]', '2030-01-15T10:00');
   await submit('[data-qz-form="schedule"]');
-  await waitFor("!!document.querySelector('[data-qz=\"sched-cancel\"]')", 'scheduled session listed');
-  assert.ok(await evaluate("window.workspaceData.events ? true : true"), 'calendar api present');
+  await waitFor("!!document.querySelector('[data-qz=\"sched-cancel\"]') && /45 min/.test(document.querySelector('.qz-sched-list').textContent)", 'scheduled session listed with its duration');
+  await shoot('quiz-6b-schedule');
+  await click('[data-qz="sched-edit"]');
+  await waitFor("/Edit scheduled item/.test(document.querySelector('.qz').textContent)", 'edit form');
+  await fill('[data-qz-form="schedule"] [name="kind"]', 'practice');
+  await fill('[data-qz-form="schedule"] [name="minutes"]', '90');
+  await submit('[data-qz-form="schedule"]');
+  await waitFor("/Practice/.test(document.querySelector('.qz-sched-list').textContent) && /90 min/.test(document.querySelector('.qz-sched-list').textContent)", 'edit saved');
+  assert.equal(await evaluate(`window.learningData.scheduleList({ subjectId: ${q(subjectId)} }).then(l => l.length + ':' + l[0].kind + ':' + Math.round((Date.parse(l[0].endsAt) - Date.parse(l[0].startsAt)) / 60000))`), '1:practice:90', 'the calendar event and the link changed together');
   await click('[data-qz="sched-cancel"]');
-  await waitFor("!document.querySelector('[data-qz=\"sched-cancel\"]')", 'scheduled session cancelled');
-  step('schedule: added to the calendar as an event with a link, then cancelled');
+  await waitFor("!!document.querySelector('[data-qz=\"sched-remove-yes\"]')", 'remove asks first');
+  await click('[data-qz="sched-remove-yes"]');
+  await waitFor("!document.querySelector('[data-qz=\"sched-cancel\"]')", 'scheduled session removed');
+  step('schedule section: added to the calendar, edited (kind, duration), removed after a confirm');
+  await click('[data-qz="home"]');
 
   // Practice retry: a wrong answer, one second try that counts half.
   const one = await evaluate(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.find(x => /NaCl-like 1[?]$/.test(x.prompt)).id)`);
@@ -380,8 +397,7 @@ async function main() {
   await click('[data-qz="leave"]');
 
   // Final exam: a real one needs 50–100 questions; a test final does not; time options; pass mark; attempts table.
-  await waitFor("!!document.querySelector('[data-qz=\"exam\"]') && !document.querySelector('[data-qz=\"exam\"]').disabled", 'exam enabled');
-  await click('[data-qz="exam"]');
+  await take('final');
   await waitFor("!!document.querySelector('[data-qz-form=\"exam\"]') && /50–100 questions/.test((document.querySelector('.qz-error') || {}).textContent || '')", 'a real final needs 50–100 questions');
   assert.ok(await evaluate("document.querySelector('[data-qz-form=\"exam\"] button[type=\"submit\"]').disabled"), 'Start is disabled while the setup is invalid');
   await check('[data-qz-form="exam"] input[name="test"]');
@@ -427,7 +443,7 @@ async function main() {
   await waitFor("document.querySelectorAll('[data-ln-subject]').length === 1", 'subjects list');
   await evaluate("(() => { const el = document.querySelector('[data-ln-subject]'); el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })); return true; })()");
   await waitFor("!!document.querySelector('[data-qz-eval] .qz-gauge')", 'back on the subject page with the card');
-  assert.ok(await evaluate("/Correct/.test(document.querySelector('[data-qz-eval]').textContent)"), 'the card shows the latest result with its gauge');
+  await waitFor("/Correct/.test(document.querySelector('[data-qz-eval]').textContent)", 'the card shows the latest result with its gauge');
   if (await evaluate("document.querySelector('[data-qz-host]').hidden")) await click('[data-qz-evexpand]');
   await waitFor("!!document.querySelector('.qz') && !document.querySelector('[data-qz-host]').hidden", 'workspace open again');
 
@@ -447,7 +463,7 @@ async function main() {
   step('offline proof: 0 http(s) requests, 0 console errors');
 }
 
-main().then(() => 0, error => { console.error(`FAIL: ${error.message}`); return 1; }).then(async code => {
+main().then(() => 0, async error => { console.error(`FAIL: ${error.message}`); try { console.error('DEBUG', await evaluate("JSON.stringify({ head: (document.querySelector('.qz-head')||{}).textContent, nexts: document.querySelectorAll('[data-qz=next]').length, text: (document.querySelector('[data-qz-content]')||{}).textContent.slice(0,100), card: (document.querySelector('[data-qz-eval]')||{}).innerHTML.slice(0,1500), tab: [...document.querySelectorAll('[data-qz-evtab]')].map(b=>b.className).join() })")); } catch (e) { console.error('DEBUG failed', e.message); } return 1; }).then(async code => {
   try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Runtime.evaluate', params: { expression: 'window.windowControls && window.windowControls.close()' } })); } catch { /* closing */ }
   await Promise.race([new Promise(r => child?.once('exit', r)), sleep(15000)]);
   if (child && child.exitCode === null) child.kill();

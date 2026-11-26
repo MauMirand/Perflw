@@ -64,15 +64,16 @@
 
   // ───────── rendering
   const hostOf = S => document.querySelector(`[data-qz-host][data-subject="${CSS.escape(S.subjectId)}"]`);
-  const VIEWS = { setup: setupView, history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView };
+  const VIEWS = { setup: setupView, history: historyView, evaluation: evaluationView, templates: templatesView, notes: notesView, bank: bankView, add: addView, quiz: quizView, grade: gradeView, results: resultsView, examSetup: examSetupView, report: reportView, schedule: scheduleView };
   /* The expanded "Learning Cycle" (owner mock-up, 2026-11-26): it covers the main panel; tabs on top, the latest result on the left,
      the workspace (start, answer, results, bank, notes, history, schedule) on the right. Nothing is added below the subject page. */
   const CYCLE_TABS = [['diagnostic', 'Pre-Test'], ['practice', 'Practice'], ['final', 'Final Exam']];
   function cycleFrame() {
     return `<div class="qz-cycle" role="region" aria-labelledby="qz-cycle-title">
-      <header class="qz-cycle-head"><h2 id="qz-cycle-title" tabindex="-1">Learning Cycle</h2><button class="icon-btn qz-cycle-close" type="button" data-qz="collapse" aria-label="Close the learning cycle" title="Close (Esc)">⤡</button></header>
+      <header class="qz-cycle-head"><h2 id="qz-cycle-title" tabindex="-1">Learning Cycle <span class="qz-cycle-sub"></span></h2><button class="icon-btn qz-cycle-close" type="button" data-qz="collapse" aria-label="Close the learning cycle" title="Close (Esc)">⤡</button></header>
       <div class="qz-tabs qz-cycle-tabs" role="tablist" aria-label="Kind"></div>
-      <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Latest result"></aside><div class="qz-cycle-main"></div></div>
+      <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Status and performance"></aside>
+        <div class="qz-cycle-main"><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-cycle-content" data-qz-content></div></div></div>
     </div>`;
   }
   const cycleTabs = S => CYCLE_TABS.map(([k, l]) => `<button class="qz-tab${k === S.evalTab ? ' on' : ''}" type="button" role="tab" aria-selected="${k === S.evalTab}" data-qz-cytab="${k}">${l}</button>`).join('');
@@ -82,20 +83,52 @@
     Object.assign(host.style, { position: 'fixed', top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` });
   }
   window.addEventListener('resize', () => { for (const S of states.values()) if (S.expanded) placeOverlay(hostOf(S)); });
+  /* Right-hand sections (owner, 2026-11-26): Cycle status, Question bank, Schedule. Studying is parked for a later place. */
+  const SECTIONS = [['home', 'Cycle status'], ['bank', 'Question bank'], ['schedule', 'Schedule']];
+  const sectionOf = mode => (['bank', 'add', 'templates'].includes(mode) ? 'bank' : mode === 'schedule' ? 'schedule' : 'home');
+  const sectionTabs = S => SECTIONS.map(([k, l]) => `<button class="qz-tab${sectionOf(S.mode) === k ? ' on' : ''}" type="button" role="tab" aria-selected="${sectionOf(S.mode) === k}" data-qz="${k}">${l}</button>`).join('');
+  const ICON_LIST = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="3" fill="currentColor" opacity=".9"/><path d="M4.5 5h1M7 5h4.5M4.5 8h1M7 8h4.5M4.5 11h1M7 11h4.5" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  const ICON_CLOCK = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="3" fill="currentColor" opacity=".9"/><circle cx="8" cy="8" r="4.2" fill="none" stroke="var(--ink)" stroke-width="1.3"/><path d="M8 5.8V8l1.5 1" fill="none" stroke="var(--ink)" stroke-width="1.3" stroke-linecap="round"/></svg>';
+  const ICON_CHART = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="2" fill="currentColor"/><path d="M5 12V8M8 12V4.5M11 12V6.5" stroke="var(--ink)" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  /* What the next attempt of a kind would be: its item count and a time estimate (finals use the exam's own time limit). */
+  async function plannedFor(S, kind) {
+    const approved = S.questions.filter(q => q.review === 'approved').length;
+    if (kind === 'diagnostic') { const n = Math.min(approved, Math.min(40, Math.max(1, S.topics.length * 2))); return { items: n, time: n ? `About ${n} min` : '—' }; }
+    if (kind === 'practice') { const n = Math.min(S.questions.length, Math.min(10, Math.max(5, S.topics.length * 3))); return { items: n, time: n ? `About ${n} min` : '—' }; }
+    let pv = null;
+    try { pv = await D().examPreview({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, config: { count: Number(S.exam.count) || 50, test: S.exam.test, timeMultiplier: Number(S.exam.multiplier) || 1 } }); } catch { pv = null; }
+    const limit = pv && pv.ok && pv.timeLimitSeconds ? `${Math.round(pv.timeLimitSeconds / 60)} min limit` : 'Timed';
+    return { items: pv ? pv.count : Math.min(approved, 50), time: limit };
+  }
   async function paintSide(S) {
     const host = hostOf(S); const side = host && host.querySelector('[data-qz-side]'); if (!side) return;
-    const label = (CYCLE_TABS.find(t => t[0] === S.evalTab) || [])[1];
-    let d = null; try { d = await evalData(S, S.evalTab); } catch { d = null; }
+    const kind = S.evalTab;
+    let d = null; try { d = await evalData(S, kind); } catch { d = null; }
+    let plan = null; if (!d) { try { plan = await plannedFor(S, kind); } catch { plan = { items: 0, time: '—' }; } }
+    if (S.evalTab !== kind) return; // the tab changed while this was loading
+    const busy = S.mode === 'quiz' && S.quiz;
+    const can = S.questions.length > 0 && !busy;
+    const why = busy ? 'Finish or leave the current one first' : 'Add questions in the Question bank first';
+    const time = d ? (d.minutes == null ? 'Untimed' : `${d.minutes} min${d.limit ? ` of ${Math.round(d.limit / 60)}` : ''}`) : plan.time;
     const list = items => (items && items.length ? `<ul class="qz-ev-list">${items.slice(0, 6).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="qz-ev-none">—</p>');
-    const time = d ? (d.minutes == null ? 'Untimed' : `${d.minutes} min${d.limit ? ` of ${Math.round(d.limit / 60)}` : ''}`) : '';
-    side.innerHTML = `<div class="qz-side-gauge">${gauge(d ? d.correct : 0, d ? d.total : 0)}</div>
-      <p class="qz-ev-title">${esc(label)}</p>
-      <p class="qz-ev-sub">${d ? esc(d.level) : 'Not taken yet'}</p>
-      <p class="qz-ev-meta">${d ? `${d.total} item${d.total === 1 ? '' : 's'}${d.attempts > 1 ? ` · attempt ${d.attempts}` : ''}` : `${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank`}</p>
-      <p class="qz-ev-meta">${esc(time)}</p>
-      ${d && d.exam && d.exam.passed !== null ? `<p class="${d.exam.passed ? 'qz-pass' : 'qz-fail'} qz-ev-verdict">${d.exam.passed ? '✓ Passed' : '✗ Not passed'} · pass mark ${d.exam.passMarkPercent}%</p>` : ''}
-      <p class="qz-ev-h">Strengths</p>${list(d && d.strengths)}
-      <p class="qz-ev-h">Focus Area</p>${list(d && d.focus)}`;
+    const pct = d && d.total ? `${Math.round((d.correct / d.total) * 100)}%` : '—';
+    const stat = (value, label) => `<div class="qz-perf-stat"><span class="qz-perf-num">${value}</span><span class="qz-perf-lbl">${label}</span></div>`;
+    side.innerHTML = `<section class="qz-card-panel" aria-labelledby="qz-status-h"><h3 class="qz-panel-h" id="qz-status-h">Status</h3>
+        <div class="qz-status-gauge">${gauge(d ? d.correct : 0, d ? d.total : 0)}</div>
+        ${d && d.exam && d.exam.passed !== null ? `<p class="${d.exam.passed ? 'qz-pass' : 'qz-fail'} qz-ev-verdict">${d.exam.passed ? '✓ Passed' : '✗ Not passed'} · pass mark ${d.exam.passMarkPercent}%</p>` : ''}
+        <dl class="qz-status-rows"><div><dt>${ICON_LIST}<span>${d ? 'Items taken' : 'Current Items'}</span></dt><dd>${d ? d.total : plan.items}</dd></div>
+          <div><dt>${ICON_CLOCK}<span>${d ? 'Time used' : 'Estimated Time'}</span></dt><dd>${esc(time)}</dd></div></dl>
+        <div class="qz-status-foot">${d && d.attempts > 1 ? `<span class="qz-ev-meta">Attempt ${d.attempts}</span>` : '<span></span>'}<button class="btn btn-sm qz-take" type="button" data-qz-take ${can ? '' : `disabled title="${why}"`}>Take</button></div></section>
+      <section class="qz-card-panel" aria-labelledby="qz-perf-h"><h3 class="qz-panel-h" id="qz-perf-h">${ICON_CHART}<span>Your Performance</span></h3>
+        <div class="qz-perf">${stat(pct, 'Accuracy')}${stat(d ? d.correct : '—', 'Correct')}${stat(d ? d.total - d.correct : '—', 'Incorrect')}</div>
+        <p class="qz-ev-h">Strengths</p>${list(d && d.strengths)}
+        <p class="qz-ev-h">Focus Areas</p>${list(d && d.focus)}</section>`;
+  }
+  /* Take: the left card's button starts the kind of the selected tab (pre-test sheet, practice set, or the exam setup). */
+  async function take(S, kind) {
+    if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S); }
+    else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) });
+    else { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
   }
   function paint(S) {
     const host = hostOf(S); if (!host) return;
@@ -103,8 +136,11 @@
     host.hidden = !S.expanded;
     if (S.expanded) placeOverlay(host);
     if (!host.querySelector('.qz-cycle')) host.innerHTML = cycleFrame();
+    host.querySelector('.qz-cycle-sub').textContent = S.name || '';
     host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S);
-    const main = host.querySelector('.qz-cycle-main');
+    const sections = host.querySelector('[data-qz-sections]');
+    sections.hidden = ['quiz', 'grade'].includes(S.mode); sections.innerHTML = sectionTabs(S);
+    const main = host.querySelector('[data-qz-content]');
     main.innerHTML = `<section class="qz" aria-label="Quizzes and exams">${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
     if (S.shown !== S.mode) { S.shown = S.mode; main.scrollTop = 0; }
     paintSide(S).catch(() => {});
@@ -136,9 +172,8 @@
 
   function homeView(S) {
     if (S.loading) return '<p class="ln-soon" role="status">Loading your quizzes…</p>';
-    if (!S.topics.length) return '<p class="ln-soon">Add topics or import a file first, then write questions for them here.</p>';
+    if (!S.topics.length) return '<p class="ln-soon">Add topics or import a file first, then write questions for them in the Question bank.</p>';
     const perTopic = S.topics.map(t => `${esc(t.title)}: ${S.questions.filter(q => String(q.topicId) === String(t.id)).length}`).join(' · ');
-    const has = S.questions.length > 0;
     const row = a => {
       const done = ['submitted', 'graded'].includes(a.status);
       const label = `${esc(a.title || KIND_LABEL[a.kind] || a.kind)}${a.attempt > 1 ? ` (attempt ${a.attempt})` : ''}`;
@@ -147,33 +182,48 @@
     };
     const past = S.assessments.filter(a => a.status !== 'abandoned').map(row).join('');
     const hasDone = S.assessments.some(a => ['submitted', 'graded'].includes(a.status));
-    return `${hintView(S)}${stepperView(S)}<p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.</p>
-      <div class="qz-row">${ghost('add', 'Add question', 'data-qz-focus')}${ghost('bank', 'Question bank')}
-        ${btn('start', 'Pre-test', has ? '' : 'disabled title="Add at least one question first"')}
-        ${btn('practice', S.due ? `Practice (${S.due} due)` : 'Practice', has ? 'title="Short set with feedback after each question; mistakes that are due come first"' : 'disabled title="Add at least one question first"')}
-        ${btn('exam', 'Final exam', has ? 'title="Timed exam with a pass mark"' : 'disabled title="Add at least one question first"')}
-        ${hasDone && S.journey ? ghost('evaluation', 'Final learning', 'title="Your evidence for this cycle, and what to review before the final"') : ''}
-        ${S.assessments.length ? ghost('history', 'History') : ''}
-        ${S.retention && S.retention.eligible ? btn('retention', 'Retention check', 'title="A short recall check of what you should still know"') : ''}
-        ${S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : ''}
-        ${hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : ''}
-        ${S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''}</div>
+    const next = S.schedule.find(x => Date.parse(x.endsAt || x.startsAt) >= Date.now());
+    const links = [
+      hasDone && S.journey ? ghost('evaluation', 'Final learning', 'title="Your evidence for this cycle, and what to review before the final"') : '',
+      S.assessments.length ? ghost('history', 'History') : '',
+      S.retention && S.retention.eligible ? btn('retention', 'Retention check', 'title="A short recall check of what you should still know"') : '',
+      S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : '',
+      hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : '',
+      S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''].join('');
+    return `${hintView(S)}${studyView(S)}${stepperView(S)}
+      <p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.${S.due ? ` ${S.due} practice item${S.due === 1 ? ' is' : 's are'} due.` : ''}</p>
+      ${next ? `<p class="ln-soon">Next scheduled: ${esc(SCHED_KIND[next.kind] || next.kind)} · ${esc(when(next.startsAt))}</p>` : ''}
+      ${links ? `<div class="qz-row">${links}</div>` : ''}
       ${S.retention && !S.retention.eligible && S.retention.eligibleOn ? `<p class="ln-soon">${esc(S.retention.reason)}</p>` : ''}
-      ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : ''}
-      ${scheduleView(S)}
-      ${studyView(S)}`;
+      ${past ? `<ul class="qz-list" aria-label="Your quizzes and exams">${past}</ul>` : `<p class="ln-soon">Nothing taken yet. Pick Pre-Test, Practice or Final Exam above and press Take.</p>`}`;
   }
 
+  const SCHED_KIND = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
+  const pad2 = n => String(n).padStart(2, '0');
+  const localInput = iso => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+  const when = iso => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+  const minutesOf = x => (x.endsAt ? Math.max(1, Math.round((Date.parse(x.endsAt) - Date.parse(x.startsAt)) / 60000)) : null);
   function scheduleView(S) {
-    if (!S.journey) return '';
-    const KIND = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
-    const rows = S.schedule.map(x => `<li>${esc(KIND[x.kind] || x.kind)} · ${esc(String(x.startsAt).replace('T', ' ').slice(0, 16))} ${btn('sched-start', 'Start', `data-kind="${esc(x.kind)}"`)} ${ghost('sched-cancel', 'Cancel', `data-id="${esc(x.id)}"`)}</li>`).join('');
-    return `<div class="qz-sched" role="group" aria-label="Schedule a session"><form class="qz-form" data-qz-form="schedule" novalidate><span class="qz-opt-row">
-      <label class="ln-field"><span>Schedule</span><select class="field" name="kind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-      <label class="ln-field"><span>Starts</span><input class="field" name="startsAt" type="datetime-local" required></label>
-      <label class="ln-field"><span>Minutes</span><input class="field" name="minutes" type="number" min="5" max="600" value="45"></label>
-      <button class="btn btn-sm" type="submit">Add to calendar</button></span></form>
-      ${rows ? `<ul class="qz-list" aria-label="Scheduled sessions">${rows}</ul>` : ''}</div>`;
+    const edit = S.schedEdit ? S.schedule.find(x => x.id === S.schedEdit) : null;
+    const kind = edit ? edit.kind : (S.schedForm && S.schedForm.kind) || 'session';
+    const nowMs = Date.now();
+    const rowOf = x => {
+      const due = Date.parse(x.startsAt) <= nowMs + 15 * 60000 && Date.parse(x.endsAt || x.startsAt) >= nowMs;
+      const mins = minutesOf(x);
+      return `<li class="qz-sched-row${x.id === S.schedEdit ? ' editing' : ''}"><div><p class="qz-q-prompt">${esc(SCHED_KIND[x.kind] || x.kind)}</p><p class="ln-soon">${esc(when(x.startsAt))}${mins ? ` · ${mins} min` : ''}</p></div>
+        <span class="qz-row">${due && x.kind !== 'session' ? btn('sched-start', 'Start', `data-kind="${esc(x.kind)}"`) : ''}${ghost('sched-edit', 'Edit', `data-id="${esc(x.id)}"`)}${ghost('sched-cancel', 'Remove', `data-id="${esc(x.id)}"`)}</span>
+        ${S.confirmSched === x.id ? `<span class="qz-confirm" role="alert">Remove this from your calendar? ${btn('sched-remove-yes', 'Remove', `data-id="${esc(x.id)}"`)} ${ghost('sched-remove-no', 'Keep')}</span>` : ''}</li>`;
+    };
+    const upcoming = S.schedule.filter(x => Date.parse(x.endsAt || x.startsAt) >= nowMs);
+    const past = S.schedule.filter(x => Date.parse(x.endsAt || x.startsAt) < nowMs);
+    return `<p class="ln-soon">Plan study sessions, practice, retention checks and the final. Each one is also added to your calendar.</p>
+      <form class="qz-form qz-sched-form" data-qz-form="schedule" novalidate><p class="qz-journey-title"><strong>${edit ? 'Edit scheduled item' : 'Add to the schedule'}</strong></p><span class="qz-opt-row">
+        <label class="ln-field"><span>What</span><select class="field" name="kind">${Object.entries(SCHED_KIND).map(([k, v]) => `<option value="${k}"${k === kind ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label class="ln-field"><span>Starts</span><input class="field" name="startsAt" type="datetime-local" required value="${edit ? esc(localInput(edit.startsAt)) : ''}" data-qz-focus></label>
+        <label class="ln-field"><span>Duration (minutes)</span><input class="field" name="minutes" type="number" min="5" max="600" step="5" value="${edit ? esc(minutesOf(edit) || 45) : 45}"></label></span>
+        <div class="qz-row"><button class="btn btn-sm" type="submit">${edit ? 'Save changes' : 'Add to calendar'}</button>${edit ? ghost('sched-new', 'Cancel') : ''}</div></form>
+      <p class="qz-journey-title"><strong>Upcoming</strong></p>${upcoming.length ? `<ul class="qz-list qz-sched-list" aria-label="Upcoming">${upcoming.map(rowOf).join('')}</ul>` : '<p class="ln-soon">Nothing scheduled.</p>'}
+      ${past.length ? `<p class="qz-journey-title"><strong>Past</strong></p><ul class="qz-list qz-sched-list" aria-label="Past">${past.map(rowOf).join('')}</ul>` : ''}`;
   }
 
   function studyView(S) {
@@ -188,8 +238,7 @@
     }
     const sum = st.summary;
     const done = sum ? `<div class="qz-feedback" role="status"><p><strong>Session saved</strong> · ${sum.durationSeconds == null ? 'no time entry' : clock(sum.durationSeconds)}${sum.topics.length ? ` · ${esc(sum.topics.join(', '))}` : ''} · ${sum.notes} note${sum.notes === 1 ? '' : 's'}</p>${sum.message ? `<p class="ln-soon">${esc(sum.message)}</p>` : ''}<p class="qz-row">${btn('practice', 'Practice now')}</p></div>` : '';
-    const topics = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
-    return `${done}<div class="qz-study" role="group" aria-label="Start a study session"><span class="qz-opt-row"><label class="ln-field"><span>Study session</span><select class="field" data-qz-study-topic><option value="">Whole subject</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" data-qz-study-kind><option value="main">Learning</option><option value="supplementary">Extra study (weak topics)</option><option value="review">Review (for a retake)</option></select></label>${btn('study-start', 'Start studying', 'title="Runs your timer; it is saved to the calendar when you end it"')}</span></div>`;
+    return done; // starting a session from here is parked (owner, 2026-11-26); the header's Start your session still works
   }
 
   /* D13: notes opened during a study session count as visited (the retake gate reads them). */
@@ -242,11 +291,10 @@
     const types = Object.keys(TYPES).map(k => `<option value="${k}"${f.type === k ? ' selected' : ''}>${TYPES[k]}</option>`).join('');
     const topicOpts = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
     const ai = `<div class="qz-ai" role="group" aria-label="Write questions with AI"><span class="qz-opt-row"><label class="ln-field"><span>AI question writer</span><select class="field" data-qz-ai-topic>${topicOpts}</select></label><label class="ln-field"><span>How many</span><input class="field" data-qz-ai-count type="number" min="1" max="10" value="5"></label>${btn('ai-generate', 'Generate with AI', S.ai.available ? 'title="Drafts from your file, each quoting it; they wait for your review"' : `disabled title="${esc(S.ai.reason)}"`)}</span>${S.ai.available ? '' : `<p class="ln-soon">${esc(S.ai.reason)} You can still write your own questions and use the template drafts.</p>`}</div>`;
-    return `${ai}<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
+    return `<div class="qz-row">${btn('add', 'Add question', 'data-qz-focus')}${ghost('templates', 'Template drafts', 'title="Draft questions built from your analysed files, no AI"')}</div>${ai}<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
       <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired questions</label></form>
       <p class="ln-soon" role="status">${list.length} question${list.length === 1 ? '' : 's'}.</p>
-      ${rows ? `<ul class="qz-qlist">${rows}</ul>` : '<p class="ln-soon">No questions match. Write your first one with Add question.</p>'}
-      <div class="qz-row">${btn('add', 'Add question')}${ghost('templates', 'Template drafts', 'title="Draft questions built from your analysed files, no AI"')}${ghost('home', 'Back', 'data-qz-focus')}</div>`;
+      ${rows ? `<ul class="qz-qlist">${rows}</ul>` : '<p class="ln-soon">No questions match. Write your first one with Add question.</p>'}`;
   }
 
   function templatesView(S) {
@@ -286,7 +334,7 @@
       <span class="qz-opt-row"><label class="ln-field"><span>Skill tested</span><select class="field" name="dimension">${dims}</select></label>
         <label class="ln-field"><span>Difficulty</span><select class="field" name="difficulty">${[1, 2, 3].map(d => `<option value="${d}"${Number(f.difficulty || 2) === d ? ' selected' : ''}>${['', 'Easy', 'Medium', 'Hard'][d]}</option>`).join('')}</select></label></span>
       <label class="ln-field"><span>Explanation (shown after you answer)</span><textarea class="field field-area" name="explanation" rows="2" maxlength="2000">${esc(f.explanation || '')}</textarea></label>
-      <div class="qz-row"><button class="btn btn-sm" type="submit"${S.busy ? ' disabled' : ''}>${S.editId ? 'Save changes' : 'Save question'}</button>${ghost(S.editId ? 'bank' : 'home', S.editId ? 'Cancel' : 'Done')}</div>
+      <div class="qz-row"><button class="btn btn-sm" type="submit"${S.busy ? ' disabled' : ''}>${S.editId ? 'Save changes' : 'Save question'}</button>${ghost('bank', S.editId ? 'Cancel' : 'Done')}</div>
     </form>`;
   }
 
@@ -573,6 +621,7 @@
     const attempts = assessment.kind === 'final' ? await D().examAttempts({ subjectId: S.subjectId, journeyId: assessment.journeyId || undefined }) : [];
     let retake = null; if (assessment.kind === 'final' && assessment.exam && assessment.exam.passed === false) { try { retake = await D().assessmentRetakeStatus({ assessmentId }); } catch { /* shown without the list */ } }
     let analysis = null; try { analysis = await D().assessmentAnalysis({ assessmentId }); } catch { /* the analysis is a bonus */ }
+    try { await load(S); } catch { /* the Status card keeps its last data */ } // the Status card and the subject card show this attempt
     S.results = { assessment, mastery, attempts, analysis, retake }; S.mode = 'results'; S.errors = ''; paint(S);
   }
   async function advance(S, submitted) {
@@ -612,18 +661,23 @@
   async function onClick(S, event) {
     const cytab = event.target.closest('[data-qz-cytab]');
     if (cytab) { S.evalTab = cytab.dataset.qzCytab; const host = hostOf(S); host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S); paintSide(S); paintEval(S); const b = host.querySelector(`[data-qz-cytab="${S.evalTab}"]`); if (b) b.focus(); return; }
+    if (event.target.closest('[data-qz-take]')) { S.errors = ''; try { await take(S, S.evalTab); } catch (error) { fail(S, error); } return; }
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';
     try {
       if (action === 'collapse') { stopTimer(S); S.expanded = false; const host = hostOf(S); if (host) host.hidden = true; paintEval(S).then(() => { const b = document.querySelector('[data-qz-evexpand]'); if (b) b.focus(); }); return; }
       if (action === 'add') { S.editId = null; S.form = { type: (S.form && S.form.type) || 'choice', topicId: S.form && S.form.topicId }; S.mode = 'add'; paint(S); }
-      else if (action === 'sched-cancel') { await D().scheduleCancel({ scheduleId: target.dataset.id }); await load(S); paint(S); H.toast('Removed from your calendar.'); }
+      else if (action === 'schedule') { const from = S.mode; await load(S); if (S.mode !== from) return; S.schedEdit = null; S.confirmSched = null; S.mode = 'schedule'; paint(S); }
+      else if (action === 'sched-edit') { S.schedEdit = target.dataset.id; S.confirmSched = null; paint(S); }
+      else if (action === 'sched-new') { S.schedEdit = null; paint(S); }
+      else if (action === 'sched-cancel') { S.confirmSched = target.dataset.id; paint(S); }
+      else if (action === 'sched-remove-no') { S.confirmSched = null; paint(S); }
+      else if (action === 'sched-remove-yes') { await D().scheduleCancel({ scheduleId: target.dataset.id }); if (S.schedEdit === target.dataset.id) S.schedEdit = null; S.confirmSched = null; await load(S); paint(S); H.toast('Removed from your calendar.'); }
       else if (action === 'sched-start') {
         const kind = target.dataset.kind;
         if (kind === 'practice') { target.disabled = true; await begin(S, 'practice', 'Practice', { count: 8 }); }
         else if (kind === 'final') { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
         else if (kind === 'retention') { target.disabled = true; await begin(S, 'retention', 'Retention check', { count: 8 }); }
-        else { hostOf(S).querySelector('[data-qz-study-topic]').scrollIntoView({ block: 'center' }); hostOf(S).querySelector('[data-qz-study-topic]').focus(); }
       }
       else if (action === 'evaluation') { S.evaluation = await D().journeyEvaluation({ journeyId: S.journey.id }); S.mode = 'evaluation'; paint(S); }
       else if (action === 'history') { S.history = await D().learningHistory({ subjectId: S.subjectId }); S.mode = 'history'; paint(S); }
@@ -643,16 +697,11 @@
         await D().studyCheckNote({ materialId: target.dataset.id });
         S.study.notes = await D().studyNotes({ sessionId: S.study.active.session.id }); paint(S);
       }
-      else if (action === 'study-start') {
-        const topic = hostOf(S).querySelector('[data-qz-study-topic]').value;
-        const started = await D().studyStart({ subjectId: S.subjectId, journeyId: S.journey ? S.journey.id : undefined, topicId: topic || undefined, kind: hostOf(S).querySelector('[data-qz-study-kind]').value });
-        S.study.summary = null; await load(S); if (S.journey && S.journey.stage === 'diagnostic') S.journey.stage = 'main_learning'; paint(S); say('Study session started.'); void started;
-      }
       else if (action === 'study-end') {
         const sum = await D().studyEnd({ sessionId: S.study.active.session.id });
         S.study.summary = sum; S.study.active = null; S.study.notes = []; await load(S); paint(S); say('Study session saved.');
       }
-      else if (action === 'bank') { S.editId = null; await load(S); S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); }
+      else if (action === 'bank') { const from = S.mode; await load(S); if (S.mode !== from) return; S.editId = null; S.bankFilter = S.bankFilter || {}; S.confirmDelete = null; S.mode = 'bank'; paint(S); } // a click made during the reload wins
       else if (action === 'hint-dismiss') { try { localStorage.setItem(hintKey(), '1'); } catch { /* the hint may return next time */ } paint(S); }
       else if (action === 'ai-generate') {
         const host = hostOf(S); target.disabled = true; H.toast('Writing questions… this can take a minute.');
@@ -692,7 +741,7 @@
         const parent = S.journey; const next = await D().journeyCreate({ subjectId: S.subjectId, parentId: parent.id });
         S.journey = next; await load(S); S.journey = next; paint(S); H.toast(`Cycle ${next.cycle} started. Its statistics start at zero; cycle ${parent.cycle} stays as it was.`);
       }
-      else if (action === 'home') { stopTimer(S); await load(S); S.mode = 'home'; paint(S); }
+      else if (action === 'home') { stopTimer(S); S.mode = 'home'; paint(S); await load(S); if (S.mode === 'home') paint(S); } // switch first: a slow reload must not undo a later click
       else if (action === 'start') {
         S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S);
         if (S.journey && S.journey.stage === 'material') { try { await D().journeyUpdate({ journeyId: S.journey.id, stage: 'pretest_setup' }); S.journey.stage = 'pretest_setup'; } catch { /* informational */ } }
@@ -718,7 +767,7 @@
         await D().assessmentRetry({ assessmentId: S.quiz.assessment.id, itemId: item.id });
         delete S.quiz.checked[item.id]; paint(S); say('Second try: it counts half.');
       }
-      else if (action === 'leave') { stopTimer(S); await saveNow(S); await load(S); S.mode = 'home'; paint(S); }
+      else if (action === 'leave') { stopTimer(S); await saveNow(S); S.mode = 'home'; paint(S); await load(S); if (S.mode === 'home') paint(S); }
       else if (action === 'back-quiz') { S.quiz.confirm = false; paint(S); }
       else if (action === 'submit') {
         if (!(await saveNow(S))) { paint(S); return; }
@@ -809,9 +858,16 @@
         await begin(S, 'diagnostic', 'Pre-test', { count: Math.min(40, S.setup.count), types });
       } else if (kind === 'schedule') {
         const f = form.elements; if (!f.startsAt.value) throw new Error('Choose when it starts.');
-        const startsAt = new Date(f.startsAt.value); const endsAt = new Date(startsAt.getTime() + Number(f.minutes.value || 45) * 60000);
-        await D().scheduleCreate({ journeyId: S.journey.id, kind: f.kind.value, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() });
-        await load(S); paint(S); H.toast('Added to your calendar.');
+        const minutes = Number(f.minutes.value || 45);
+        if (!Number.isFinite(minutes) || minutes < 5 || minutes > 600) throw new Error('Duration must be 5 to 600 minutes.');
+        const startsAt = new Date(f.startsAt.value); const endsAt = new Date(startsAt.getTime() + minutes * 60000);
+        const times = { kind: f.kind.value, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() };
+        if (S.schedEdit) { await D().scheduleUpdate({ scheduleId: S.schedEdit, ...times }); S.schedEdit = null; await load(S); paint(S); H.toast('Schedule updated.'); }
+        else {
+          if (!S.journey) S.journey = await D().journeyCreate({ subjectId: S.subjectId });
+          S.schedForm = { kind: f.kind.value };
+          await D().scheduleCreate({ journeyId: S.journey.id, ...times }); await load(S); paint(S); H.toast('Added to your calendar.');
+        }
       } else if (kind === 'note') {
         const text = form.elements.text.value;
         await D().studySideNote({ sessionId: S.study.active.session.id, text });
@@ -911,11 +967,7 @@
         if (event.target.closest('[data-qz-evexpand]')) { expand(S, async () => { S.mode = 'home'; await load(S); S.loading = false; paint(S); }); return; }
         if (event.target.closest('[data-qz-evtake]')) {
           const kind = S.evalTab;
-          expand(S, async () => {
-            if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S); }
-            else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) });
-            else { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
-          });
+          expand(S, () => take(S, kind));
         }
       });
       el.addEventListener('keydown', event => { // arrow keys move between the tabs
@@ -924,16 +976,16 @@
         S.evalTab = next; paintEval(S).then(() => { const b = el.querySelector(`[data-qz-evtab="${next}"]`); if (b) b.focus(); });
       });
     }
-    (S.loading ? load(S).then(() => { S.loading = false; }) : Promise.resolve()).then(() => paintEval(S)).catch(() => paintEval(S));
+    load(S).then(() => { S.loading = false; }).then(() => paintEval(S)).catch(() => paintEval(S));
   }
   /* "Start your session" in the page header: open the workspace with the study panel and start a whole-subject session. */
-  function startSession(subjectId) {
+  function startSession(subjectId, { topicId, kind = 'main' } = {}) {
     const S = states.get(subjectId); if (!S) return;
     expand(S, async () => {
       await load(S); S.loading = false; S.mode = 'home'; paint(S);
       if (S.study.active) { H.toast('A study session is already running.'); return; }
-      await D().studyStart({ subjectId, journeyId: S.journey ? S.journey.id : undefined, kind: 'main' });
-      await load(S); paint(S); say('Study session started.');
+      await D().studyStart({ subjectId, journeyId: S.journey ? S.journey.id : undefined, topicId: topicId || undefined, kind });
+      S.study.summary = null; await load(S); if (S.journey && S.journey.stage === 'diagnostic') S.journey.stage = 'main_learning'; paint(S); say('Study session started.');
     });
   }
 

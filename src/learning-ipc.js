@@ -427,6 +427,12 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     if (!KIND_TITLE[a.kind]) fail('Kind must be one of: session, practice, retention, final.');
     return store().createSchedule(u, { journeyId: journey.id, kind: a.kind, topicIds: a.topicIds, makeEvent: () => workspace.createEvent(u, `${KIND_TITLE[a.kind]}: ${subject.name}`.slice(0, 180), a.startsAt, a.endsAt, null, null, 'light-blue', 'Event', '', 'Scheduled from Learning.') });
   });
+  on('schedule:update', ['scheduleId', 'kind', 'startsAt', 'endsAt'], (u, a) => {
+    if (!KIND_TITLE[a.kind]) fail('Kind must be one of: session, practice, retention, final.');
+    const row = store().getSchedule(u, a);
+    const subject = workspace.getSubject(u, store().getJourney(u, { journeyId: row.journeyId }).subjectId);
+    return store().updateSchedule(u, { scheduleId: row.id, kind: a.kind, updateEvent: eventId => workspace.updateEvent(u, eventId, { title: `${KIND_TITLE[a.kind]}: ${subject.name}`.slice(0, 180), startsAt: a.startsAt, endsAt: a.endsAt }) });
+  });
   on('schedule:list', ['subjectId'], (u, a) => store().listSchedule(u, a));
   /* Cancelling deletes the calendar event; the link goes with it (cascade) and nothing else is touched. */
   on('schedule:cancel', ['scheduleId'], (u, a) => { const row = store().getSchedule(u, a); workspace.deleteEvent(u, row.eventId); return { id: row.id, cancelled: true }; });

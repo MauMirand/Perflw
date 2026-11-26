@@ -1845,6 +1845,21 @@ Not pushed, not merged.
 - **Deviations to reconcile:** one renderer module `learning-quiz.js` (about 1,100 lines, over the 600-line guide) instead of the separate journey hub, bank, quiz and results modules of LS-008 to LS-011; one branch instead of one task per branch; `assessment_answers.attempt` now means "second try" in practice; the final-learning gate counts any ended Review session started after the pre-test (it does not track that the evaluation was opened); retention uses a "Proficient or Mastered" topic filter; the study sessions run from the subject page, not from a bar inside the topic viewer (opened topics and sections are still recorded); calendar events are created and cancelled from the quiz block, the calendar view itself does not offer Start on them yet.
 - **LS-006 here** is the pre-revision store plus additions; its revision 2 (HO-021) must be merged in before the store is reviewed.
 
+
+### HO-042 — Claude A: Learning Cycle second layout (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-26  
+**From:** Claude A (owner request with mock-up: "on the right section panel ... cycle status, and a question bank ..., schedule ... toggle-able sections, start studying will be moved somewhere else so reserve that for now and don't put it")  
+**To:** independent reviewer, Project Owner  
+**Status:** SUBMITTED (not reviewed; not merged to `main`, not pushed)
+
+- **Left column:** "Status" card (gauge, Current Items, Estimated Time, Take for the selected Pre-Test/Practice/Final Exam tab) and "Your Performance" card (Accuracy, Correct, Incorrect, Strengths, Focus Areas). Title shows the subject name.
+- **Right panel:** three section toggles: Cycle status (stepper, history/evaluation/notes/report links, attempts list), Question bank (add/edit/retire/delete, AI writer, templates), Schedule (add, edit kind/start/duration, remove with confirm, start a due item).
+- **New channel** `schedule:update` (`learning-store.updateSchedule`): event and link change in one transaction.
+- **Study start is parked:** no start form in the Learning Cycle. The header's "Start your session" still starts a whole-subject session; while it runs it shows in Cycle status (timer, side notes, End). The D9/D13 gates still need a Review session; no UI starts one now. **Owner decision needed** on where studying goes.
+- **Fixes found while testing:** a section switch's reload could overwrite a test started right after it; the Status card and subject card showed "Not taken" after a submit until reload.
+- **Checks:** `npm test` 305/305 (schedule edit tests added); `npm run test:electron` PASS; `npm run test:ml1` PASS (30 steps, schedule edit/remove added; it now starts tests with the Status card's Take).
+
 ---
 
 ## 5. Review Decision Definitions
