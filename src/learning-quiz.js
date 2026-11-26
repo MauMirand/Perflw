@@ -73,7 +73,9 @@
       <header class="qz-cycle-head"><h2 id="qz-cycle-title" tabindex="-1">Learning Cycle <span class="qz-cycle-sub"></span></h2><button class="icon-btn qz-cycle-close" type="button" data-qz="collapse" aria-label="Close the learning cycle" title="Close (Esc)">⤡</button></header>
       <div class="qz-tabs qz-cycle-tabs" role="tablist" aria-label="Kind"></div>
       <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Status and performance"></aside>
-        <div class="qz-cycle-main"><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-cycle-content" data-qz-content></div></div></div>
+        <div class="qz-cycle-main"><div class="qz-track-wrap" data-qz-track></div>
+          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div>
+          <div class="qz-cycle-content" data-qz-content></div></div></div>
     </div>`;
   }
   const cycleTabs = S => CYCLE_TABS.map(([k, l]) => `<button class="qz-tab${k === S.evalTab ? ' on' : ''}" type="button" role="tab" aria-selected="${k === S.evalTab}" data-qz-cytab="${k}">${l}</button>`).join('');
@@ -106,25 +108,22 @@
     let d = null; try { d = await evalData(S, kind); } catch { d = null; }
     let plan = null; if (!d) { try { plan = await plannedFor(S, kind); } catch { plan = { items: 0, time: '—' }; } }
     if (S.evalTab !== kind) return; // the tab changed while this was loading
-    const busy = S.mode === 'quiz' && S.quiz;
-    const can = S.questions.length > 0 && !busy;
-    const why = busy ? 'Finish or leave the current one first' : 'Add questions in the Question bank first';
     const time = d ? (d.minutes == null ? 'Untimed' : `${d.minutes} min${d.limit ? ` of ${Math.round(d.limit / 60)}` : ''}`) : plan.time;
     const list = items => (items && items.length ? `<ul class="qz-ev-list">${items.slice(0, 6).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="qz-ev-none">—</p>');
     const pct = d && d.total ? `${Math.round((d.correct / d.total) * 100)}%` : '—';
     const stat = (value, label) => `<div class="qz-perf-stat"><span class="qz-perf-num">${value}</span><span class="qz-perf-lbl">${label}</span></div>`;
-    side.innerHTML = `<section class="qz-card-panel" aria-labelledby="qz-status-h"><h3 class="qz-panel-h" id="qz-status-h">Status</h3>
+    side.innerHTML = `<section class="qz-card-panel" aria-label="Status">
         <div class="qz-status-gauge">${gauge(d ? d.correct : 0, d ? d.total : 0)}</div>
         ${d && d.exam && d.exam.passed !== null ? `<p class="${d.exam.passed ? 'qz-pass' : 'qz-fail'} qz-ev-verdict">${d.exam.passed ? '✓ Passed' : '✗ Not passed'} · pass mark ${d.exam.passMarkPercent}%</p>` : ''}
         <dl class="qz-status-rows"><div><dt>${ICON_LIST}<span>${d ? 'Items taken' : 'Current Items'}</span></dt><dd>${d ? d.total : plan.items}</dd></div>
           <div><dt>${ICON_CLOCK}<span>${d ? 'Time used' : 'Estimated Time'}</span></dt><dd>${esc(time)}</dd></div></dl>
-        <div class="qz-status-foot">${d && d.attempts > 1 ? `<span class="qz-ev-meta">Attempt ${d.attempts}</span>` : '<span></span>'}<button class="btn btn-sm qz-take" type="button" data-qz-take ${can ? '' : `disabled title="${why}"`}>Take</button></div></section>
+        ${d && d.attempts > 1 ? `<p class="qz-ev-meta">Attempt ${d.attempts}</p>` : ''}</section>
       <section class="qz-card-panel" aria-labelledby="qz-perf-h"><h3 class="qz-panel-h" id="qz-perf-h">${ICON_CHART}<span>Your Performance</span></h3>
         <div class="qz-perf">${stat(pct, 'Accuracy')}${stat(d ? d.correct : '—', 'Correct')}${stat(d ? d.total - d.correct : '—', 'Incorrect')}</div>
         <p class="qz-ev-h">Strengths</p>${list(d && d.strengths)}
         <p class="qz-ev-h">Focus Areas</p>${list(d && d.focus)}</section>`;
   }
-  /* Take: the left card's button starts the kind of the selected tab (pre-test sheet, practice set, or the exam setup). */
+  /* Take Test: the right panel's button starts the kind of the selected tab (pre-test sheet, practice set, or the exam setup). */
   async function take(S, kind) {
     if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S); }
     else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) });
@@ -138,8 +137,8 @@
     if (!host.querySelector('.qz-cycle')) host.innerHTML = cycleFrame();
     host.querySelector('.qz-cycle-sub').textContent = S.name || '';
     host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S);
-    const sections = host.querySelector('[data-qz-sections]');
-    sections.hidden = ['quiz', 'grade'].includes(S.mode); sections.innerHTML = sectionTabs(S);
+    host.querySelector('[data-qz-track]').innerHTML = trackView(S);
+    paintBar(S);
     const main = host.querySelector('[data-qz-content]');
     main.innerHTML = `<section class="qz" aria-label="Quizzes and exams">${S.errors ? `<p class="qz-error" role="alert">${esc(S.errors)}</p>` : ''}${body}</section>`;
     if (S.shown !== S.mode) { S.shown = S.mode; main.scrollTop = 0; }
@@ -151,17 +150,51 @@
   const btn = (action, label, extra = '', cls = 'btn btn-sm') => `<button class="${cls}" type="button" data-qz="${action}" ${extra}>${label}</button>`;
   const ghost = (action, label, extra = '') => btn(action, label, extra, 'btn btn-sm btn-ghost');
 
-  function stepperView(S) {
-    const j = S.journey; if (!j) return '';
-    const at = STAGES.findIndex(x => x[0] === j.stage);
-    const steps = STAGES.map(([key, label, built], i) => {
-      const state = !built ? 'later' : i < at ? 'done' : i === at ? 'current' : 'locked';
-      const word = { later: 'later update', done: 'done', current: 'current', locked: 'not yet' }[state];
-      return `<li class="qz-step ${state}"${state === 'current' ? ' aria-current="step"' : ''}><span class="qz-step-label">${esc(label)}</span><span class="qz-step-state">${word}</span></li>`;
-    }).join('');
-    const next = (STAGES[at] || [])[3] || '';
-    return `<div class="qz-journey"><p class="qz-journey-title"><strong>${esc(j.title)}</strong> · cycle ${j.cycle} · ${esc(j.status)}</p><ol class="qz-stepper" aria-label="Journey stages">${steps}</ol>${next ? `<p class="qz-next">Next: ${esc(next)}</p>` : ''}</div>`;
+  const svg = d => `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const DOC = '<path d="M4 2.5h6l2.5 2.5v8.5H4z"/>';
+  const STAGE_ICON = {
+    material: svg('<path d="M2.5 5.5 8 3l5.5 2.5L8 8z"/><path d="M2.5 8.5 8 11l5.5-2.5"/><path d="M2.5 11.5 8 14l5.5-2.5"/>'),
+    pretest_setup: svg('<path d="M3 4h10M3 8h10M3 12h10"/><circle cx="6" cy="4" r="1.3" fill="currentColor"/><circle cx="10" cy="8" r="1.3" fill="currentColor"/><circle cx="5" cy="12" r="1.3" fill="currentColor"/>'),
+    pretest: svg('<rect x="3.5" y="3" width="9" height="11" rx="1.5"/><path d="M6 2.5h4M6 9l1.5 1.5L10.5 7"/>'),
+    diagnostic: svg('<circle cx="7" cy="7" r="4"/><path d="m10 10 3.5 3.5"/>'),
+    targeted_notes: svg(`${DOC}<path d="M6 8h4M6 10.5h3"/>`),
+    main_learning: svg('<path d="M8 4.5C6.5 3.3 4.5 3 2.5 3.2v9c2-.2 4 .1 5.5 1.3 1.5-1.2 3.5-1.5 5.5-1.3v-9c-2-.2-4 .1-5.5 1.3z"/><path d="M8 4.5v9"/>'),
+    practice: svg('<circle cx="8" cy="8" r="5.5"/><path d="M7 5.8v4.4L10.3 8z" fill="currentColor"/>'),
+    mistake_analysis: svg('<path d="M4 13V9M8 13V4M12 13V7"/>'),
+    supplementary: svg(`${DOC}<path d="M8 7v4M6 9h4"/>`),
+    final_learning: svg('<path d="M4 2.5h8v11H5.5A1.5 1.5 0 0 1 4 12z"/><path d="M4 12a1.5 1.5 0 0 1 1.5-1.5H12"/>'),
+    final_exam: svg('<rect x="3" y="2.5" width="10" height="11" rx="1.5"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"/>'),
+    report: svg(`${DOC}<path d="M6.5 11V9.5M8.5 11V7.5M10.5 11V9"/>`),
+    retention: svg('<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3M6 10l1.5 1.5L10.5 8.5"/>'),
+  };
+  const TRACK_WORD = { done: 'Completed', now: 'On going', todo: 'Not completed' };
+  function stageStates(S) {
+    const j = S.journey;
+    const at = j ? Math.max(0, STAGES.findIndex(x => x[0] === j.stage)) : 0;
+    const finished = j && ['completed', 'done'].includes(j.status);
+    return STAGES.map((x, i) => (finished || i < at ? 'done' : i === at ? 'now' : 'todo'));
   }
+  function trackView(S) {
+    const states = stageStates(S);
+    const stops = STAGES.map(([key, label], i) => {
+      const st = states[i]; const word = TRACK_WORD[st];
+      return `${i ? `<span class="qz-link${st === 'todo' ? '' : ' done'}" aria-hidden="true"></span>` : ''}<span class="qz-stop ${st}" role="listitem" data-stage="${key}" title="${esc(label)} · ${word}" aria-label="${esc(label)}: ${word}"${st === 'now' ? ' aria-current="step"' : ''}>${STAGE_ICON[key] || ''}</span>`;
+    }).join('');
+    const now = STAGES[states.indexOf('now')];
+    return `<div class="qz-track-head"><h3 class="qz-panel-h">Cycle</h3><span class="qz-track-key" aria-hidden="true"><i class="todo"></i>Not completed<i class="now"></i>On going<i class="done"></i>Completed</span></div>
+      <div class="qz-track" role="list" aria-label="Cycle stages">${stops}</div>
+      <p class="qz-track-now">${now ? `<strong>${esc(now[1])}</strong> · ${esc(now[3])}` : 'This cycle is complete.'}</p>`;
+  }
+  function paintBar(S) {
+    const host = hostOf(S); if (!host) return;
+    const bar = host.querySelector('[data-qz-bar]'); if (!bar) return;
+    bar.hidden = ['quiz', 'grade'].includes(S.mode);
+    bar.querySelector('[data-qz-sections]').innerHTML = sectionTabs(S);
+    const label = (CYCLE_TABS.find(t => t[0] === S.evalTab) || [])[1] || 'test';
+    const b = bar.querySelector('[data-qz-take]'); const can = S.questions.length > 0;
+    b.disabled = !can; b.title = can ? `Take the ${label}` : 'Add questions in the Question bank first'; b.setAttribute('aria-label', `Take the ${label}`);
+  }
+
 
   /* First-use hint on the journey hub (LS-029): dismissible, remembered per account in this browser profile. */
   let accountKey = 'anonymous';
@@ -190,7 +223,7 @@
       S.targeted.length ? ghost('notes', `Targeted notes (${S.targeted.length})`) : '',
       hasDone && S.journey ? ghost('report', 'Report', 'title="Pre-test vs final, by topic"') : '',
       S.journey && ['report', 'final_exam'].includes(S.journey.stage) && S.assessments.some(a => a.kind === 'final' && ['submitted', 'graded'].includes(a.status)) ? ghost('newcycle', 'Start the next cycle', 'title="A new journey; its statistics start at zero and the old ones stay"') : ''].join('');
-    return `${hintView(S)}${studyView(S)}${stepperView(S)}
+    return `${hintView(S)}${studyView(S)}
       <p class="ln-soon">${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank${perTopic ? ` (${perTopic})` : ''}.${S.due ? ` ${S.due} practice item${S.due === 1 ? ' is' : 's are'} due.` : ''}</p>
       ${next ? `<p class="ln-soon">Next scheduled: ${esc(SCHED_KIND[next.kind] || next.kind)} · ${esc(when(next.startsAt))}</p>` : ''}
       ${links ? `<div class="qz-row">${links}</div>` : ''}
@@ -660,7 +693,7 @@
 
   async function onClick(S, event) {
     const cytab = event.target.closest('[data-qz-cytab]');
-    if (cytab) { S.evalTab = cytab.dataset.qzCytab; const host = hostOf(S); host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S); paintSide(S); paintEval(S); const b = host.querySelector(`[data-qz-cytab="${S.evalTab}"]`); if (b) b.focus(); return; }
+    if (cytab) { S.evalTab = cytab.dataset.qzCytab; const host = hostOf(S); host.querySelector('.qz-cycle-tabs').innerHTML = cycleTabs(S); paintBar(S); paintSide(S); paintEval(S); const b = host.querySelector(`[data-qz-cytab="${S.evalTab}"]`); if (b) b.focus(); return; }
     if (event.target.closest('[data-qz-take]')) { S.errors = ''; try { await take(S, S.evalTab); } catch (error) { fail(S, error); } return; }
     const target = event.target.closest('[data-qz]'); if (!target) return;
     const action = target.dataset.qz; S.errors = '';

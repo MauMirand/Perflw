@@ -775,3 +775,24 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-sched-row .ln-soon { margin: 2px 0 0; }
 .qz-sched-row .qz-confirm { flex-basis: 100%; }
 @media (max-width: 760px) { .qz-cycle-main { overflow: visible; } .qz-cycle-content { overflow: visible; } }
+
+/* Cycle track (owner mock-up 2026-11-26): gray = not completed, blue = on going, green = completed. */
+.qz-cycle-main { --qz-todo: #6f6f6f; --qz-now: #3b82f6; --qz-done: #22a55a; }
+.qz-track-wrap { flex-shrink: 0; }
+.qz-track-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.qz-track-head .qz-panel-h { margin: 0; }
+.qz-track-key { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); }
+.qz-track-key i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; }
+.qz-track-key i.todo { background: var(--qz-todo); } .qz-track-key i.now { background: var(--qz-now); } .qz-track-key i.done { background: var(--qz-done); }
+.qz-track { display: flex; align-items: center; margin: 18px 0 8px; }
+.qz-stop { flex: 0 0 auto; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: var(--qz-todo); background: #262626; box-shadow: inset 0 0 0 1.5px #3a3a3a; transition: background .2s var(--ease), color .2s var(--ease); }
+.qz-stop.done { color: #fff; background: var(--qz-done); box-shadow: none; }
+.qz-stop.now { color: #fff; background: var(--qz-now); box-shadow: 0 0 0 4px rgba(59, 130, 246, .25); }
+.qz-link { flex: 1; height: 2px; min-width: 4px; background: #3a3a3a; }
+.qz-link.done { background: var(--qz-done); }
+.qz-track-now { margin: 6px 0 0; font-size: 12.5px; color: var(--text-2); }
+.qz-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
+.qz-actions[hidden] { display: none; }
+.qz-actions .qz-sections { align-self: auto; }
+.qz-cycle-content { background: #222121; border-radius: 14px; padding: 18px 20px; }
+@media (max-width: 760px) { .qz-stop { width: 20px; height: 20px; } .qz-stop svg { width: 11px; height: 11px; } .qz-track-key { display: none; } }

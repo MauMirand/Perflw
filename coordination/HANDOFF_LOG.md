@@ -1860,6 +1860,14 @@ Not pushed, not merged.
 - **Fixes found while testing:** a section switch's reload could overwrite a test started right after it; the Status card and subject card showed "Not taken" after a submit until reload.
 - **Checks:** `npm test` 305/305 (schedule edit tests added); `npm run test:electron` PASS; `npm run test:ml1` PASS (30 steps, schedule edit/remove added; it now starts tests with the Status card's Take).
 
+### HO-043 — Claude A: Cycle track in the Learning Cycle (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-26 · **Status:** SUBMITTED (not reviewed)
+
+- Right panel now: "Cycle" heading with a 13-icon track (one per journey stage), colors gray = not completed, blue = on going, green = completed, with a key and per-icon tooltip/label; the current stage's next step under it. Below: section toggles (Cycle status, Question bank, Schedule) with **Take Test** on the right (moved from the Status card); content in its own box.
+- The long text stepper is gone from Cycle status (the track replaces it).
+- **Checks:** `npm test` 305/305; `npm run test:ml1` PASS (track step asserts states and three distinct colors); `npm run test:electron` PASS on rerun (first run failed once at the unrelated profile-header height check, `electron-smoke.js:877`, flaky).
+
 ---
 
 ## 5. Review Decision Definitions
