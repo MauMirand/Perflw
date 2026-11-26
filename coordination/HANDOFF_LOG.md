@@ -1879,6 +1879,14 @@ Not pushed, not merged.
 - **Fix:** Escape in the Learning Cycle no longer also leaves the subject page (the page's capture-phase handler now yields while the overlay is open).
 - **Checks:** `npm test` 306/306 (new scope test); `npm run test:ml1` PASS with a scope step; `npm run test:electron` PASS.
 
+### HO-045 — Claude A: Learning Cycle follows the sidebar (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-26 · **Status:** SUBMITTED (not reviewed) · merged and pushed (standing "always push live" rule)
+
+- **Bug (owner screenshots):** collapsing or expanding the sidebar left the Learning Cycle at the main panel's old position; the subject page showed beside it, or the sidebar covered it. Cause: the fixed-position overlay was measured only on open and on window resize.
+- **Fix:** a `ResizeObserver` on `#main-panel` plus `transitionrun`/`transitionend` re-measure the overlay for about 30 frames after each change, so it tracks the sidebar animation and settles on its end.
+- **Checks:** `npm test` 306/306; `npm run test:ml1` PASS with a new step (toggle the sidebar both ways, overlay rect equals the panel rect within 2 px); `npm run test:electron` PASS on the second run (first run failed at "folded Plan group persisted", a sidebar-preference check unrelated to the overlay; flaky like the profile-header check).
+
 ---
 
 ## 5. Review Decision Definitions
