@@ -457,6 +457,11 @@ merge conflicts in `HANDOFF_LOG.md` are resolved by keeping both sides in number
 **Owner decisions D6–D17 (2026-11-23)** are in spec §9 and §9.1 (no open follow-ups; ADR-007 ACCEPTED). They change LS-005, LS-006,
 LS-008, LS-012, LS-013, LS-022 to LS-024 and add LS-031 to LS-033. LS-002 to LS-004 are unchanged.
 
+> **Built early (2026-11-24, owner request), not reviewed, not merged:** `feature/ml1-slice`, HO-041. It covers LS-006 to LS-027
+> (as one module), LS-029, LS-030, LS-032, LS-033 and the M-L1 script (`npm run test:ml1`, LS-034 in spirit), plus PF-021. Still open:
+> **LS-028** (owner decision PF-019) and **LS-031** (owner design first). The task statuses below describe the original plan; the
+> branch needs an independent review, to be split per task, and merged by the owner or an authorised orchestrator.
+
 #### Phase 1 — Engine core (pure modules, no schema, no UI)
 
 **LS-001 · Owner approval of spec and decisions** — Owner · Depends: — · Status: **DONE** (2026-11-23). D1–D5

@@ -28,6 +28,38 @@
 
   const subject = id => L.subjects.find(s => s.id === id) || null;
   const typeLabel = type => (type === 'minor' ? 'Minor' : 'Major');
+  /* ADR-006 / D2: the subject summary is computed from assessments and study sessions. Until a subject has evidence, the old
+     manual value stays visible, read-only and labelled, and is never used in a calculation. */
+  const summaries = new Map(); // subjectId → { text } filled from learningData.learningSummary
+  function studyTime(seconds) {
+    const m = Math.round((seconds || 0) / 60); if (!m) return 'No study time yet';
+    const h = Math.floor(m / 60), r = m % 60; return `${h ? `${h}h` : ''}${h && r ? ' ' : ''}${r ? `${r}m` : ''} studied`;
+  }
+  function earlierEstimate(s) { return s.mastery || s.minutes ? `Earlier self-estimate (entered manually): ${s.mastery}% mastery · ${spent(s.minutes)}` : 'Not assessed yet · No study time yet'; }
+  function summaryText(s) {
+    const c = summaries.get(s.id);
+    if (!c) return earlierEstimate(s);
+    return c.hasEvidence ? `${c.proficientPlus} of ${c.total} topic${c.total === 1 ? '' : 's'} Proficient or better · ${studyTime(c.studySeconds)}` : `${earlierEstimate(s)}${c.studySeconds ? ` · ${studyTime(c.studySeconds)}` : ''}`;
+  }
+  const STAGE_WORDS = { material: 'Material', pretest_setup: 'Pre-test setup', pretest: 'Pre-test', diagnostic: 'Diagnostic', targeted_notes: 'Targeted notes', main_learning: 'Main learning', practice: 'Practice', mistake_analysis: 'Mistake analysis', supplementary: 'Supplementary', final_learning: 'Final learning', final_exam: 'Final exam', report: 'Report', retention: 'Retention check' };
+  const NEXT_WORDS = { session: 'Study session', practice: 'Practice', retention: 'Retention check', final: 'Final exam' };
+  /* The Home card's extra rows: where to continue, what is due, what is scheduled. Filled when the data arrives. */
+  function homeBlock(subjects) {
+    const ids = subjects.map(x => x.id);
+    if (!ids.length || !api.learningHome) return '';
+    api.learningHome({ subjectIds: ids }).then(rows => {
+      const box = document.querySelector('[data-ln-home]'); if (!box) return;
+      const name = id => (subjects.find(x => x.id === id) || {}).name || '';
+      box.innerHTML = rows.length ? `<ul class="t-list ln-home-rows" aria-label="Learning next steps">${rows.slice(0, 3).map(r => `<li><button class="t-item" type="button" data-action="home-subject" data-id="${esc(r.subjectId)}"><span class="t-main"><strong>Continue: ${esc(name(r.subjectId))}</strong><small>${esc(STAGE_WORDS[r.stage] || r.stage)} · cycle ${r.cycle}${r.due ? ` · ${r.due} review${r.due === 1 ? '' : 's'} due` : ''}${r.next ? ` · next: ${esc(NEXT_WORDS[r.next.kind] || r.next.kind)} ${esc(String(r.next.startsAt).replace('T', ' ').slice(0, 16))}` : ''}</small></span></button></li>`).join('')}</ul>` : '';
+    }).catch(() => {});
+    for (const id of ids) loadSummary(id);
+    return '<div data-ln-home aria-live="polite"></div>';
+  }
+  async function loadSummary(id) {
+    if (!api.learningSummary) return;
+    try { summaries.set(id, await api.learningSummary({ subjectId: id })); } catch { return; }
+    for (const el of document.querySelectorAll(`[data-ln-summary="${CSS.escape(id)}"]`)) { const s = subject(id); if (s) el.textContent = summaryText(s); }
+  }
   function spent(minutes) {
     if (!minutes) return 'No time spent yet';
     const h = Math.floor(minutes / 60), m = minutes % 60;
@@ -172,7 +204,7 @@
         </div>
         <button class="ln-learn" type="button" data-ln="learn" data-id="${esc(s.id)}">Learn</button>
       </div>
-      <p class="ln-spent">${esc(spent(s.minutes))} · ${s.mastery}% mastery</p>
+      <p class="ln-spent" data-ln-summary="${esc(s.id)}">${esc(summaryText(s))}</p>
       <p class="ln-desc ln-panel-desc${s.description ? '' : ' empty-desc'}">${s.description ? esc(s.description) : 'No description yet.'}</p>`;
   }
   function panel() {
@@ -230,12 +262,13 @@
             <h1 tabindex="-1">${esc(s.name)}</h1>
             <span class="ln-type" title="Subject type">${typeLabel(s.type)}</span>
           </div>
-          <button class="ln-learn ln-learn-lg" type="button" data-ln="learn" data-id="${esc(s.id)}">Learn</button>
+          <span class="ln-head-actions"><button class="ln-learn ln-learn-lg" type="button" data-ln="learn" data-id="${esc(s.id)}" title="Open the topic viewer">Study</button><button class="ln-learn ln-learn-lg ln-session-btn" type="button" data-ln="start-session" data-id="${esc(s.id)}" title="Start a timed study session">Start your session</button></span>
         </div>
         <p class="ln-desc${s.description ? '' : ' empty-desc'}">${s.description ? esc(s.description) : 'No description yet.'}</p>
-        <p class="ln-page-stats">${s.mastery}% mastery · ${esc(spent(s.minutes))}</p>
+        <p class="ln-page-stats" data-ln-summary="${esc(s.id)}">${esc(summaryText(s))}</p>
       </header>
-      <div class="ln-page-grid">${topicsSection(s)}${placeholders(true)}</div>
+      <div class="ln-page-grid">${topicsSection(s)}<section class="ln-block ln-eval" data-qz-eval aria-labelledby="ln-eval-title"><h3 class="ln-block-title" id="ln-eval-title">Evaluation Cycle</h3><p class="ln-soon">Loading…</p></section></div>
+      <div data-qz-host></div>
     </div>`;
   }
   function render() {
@@ -248,6 +281,10 @@
     const root = $('.ln-root'); if (!root) return;
     $$('[data-ln-img]', root).forEach(el => { el.style.backgroundImage = `url("${el.dataset.lnImg}")`; });
     $$('[data-ln-w]', root).forEach(el => { el.style.width = `${el.dataset.lnW}%`; });
+    for (const el of $$('[data-ln-summary]', root)) loadSummary(el.dataset.lnSummary);
+    const quiz = $('[data-qz-host]', root); const quizSubject = quiz && L.page ? subject(L.page) : null;
+    if (quiz && quizSubject && window.PerflwQuiz) window.PerflwQuiz.mount(quiz, quizSubject);
+    const evalCard = $('[data-qz-eval]', root); if (evalCard && quizSubject && window.PerflwQuiz) window.PerflwQuiz.mountEval(evalCard, quizSubject);
     if (L.focus) { const el = $(L.focus, root); if (el) el.focus(); L.focus = null; }
     if (L.viewer) { const box = $('[data-ln-doc]', root); if (box && PDFV) paintDoc(box); else annotate(); syncStudy(); }
   }
@@ -468,6 +505,7 @@
     await ensureTopics(subjectId);
     const t = currentTopic();
     if (t && t.fileId) loadFile(t.fileId);
+    if (t && t.fileId && window.PerflwQuiz) window.PerflwQuiz.noteVisit({ subjectId, fileId: t.fileId, section: t.title }); // D13: a study session records what was opened
     syncStudy();
   }
   /* Learn: open the subject's first topic in the viewer, or warn when nothing has been uploaded yet. */
@@ -826,7 +864,7 @@
           </div>
         </div>
       </div>
-      ${s ? `<div class="ln-field-row">
+      ${false ? `<div class="ln-field-row">
         <label class="ln-field"><span>Mastery %</span><input class="field" name="mastery" type="number" min="0" max="100" step="1" inputmode="numeric" value="${s.mastery}"></label>
         <div class="ln-field"><span id="ln-time-label">Time spent</span>
           <span class="ln-time" role="group" aria-labelledby="ln-time-label">
@@ -889,9 +927,8 @@
     try {
       const name = form.name.value.trim();
       if (!name) { form.name.focus(); replay(form.name, 'invalid'); throw new Error('Give the subject a name.'); }
-      // Mastery and time spent are on the edit panel only; a new subject starts at 0.
-      const minutes = form.hours ? whole(form.hours.value || '0', 'Hours', 16000) * 60 + whole(form.minutes.value || '0', 'Minutes', 59) : 0;
-      payload = { name, type: draft.type, mastery: form.mastery ? whole(form.mastery.value || '0', 'Mastery', 100) : 0, minutes, description: form.description.value, imageName: draft.imageName };
+      // Mastery and time are computed from assessments and study sessions (ADR-006): not typed here, and left untouched in the columns.
+      payload = { name, type: draft.type, description: form.description.value, imageName: draft.imageName };
     } catch (problem) { error.textContent = problem.message; replay(error, 'shake'); return; }
     dialog.busy = true; error.textContent = '';
     const submit = $('button[type="submit"]', el); submit.disabled = true;
@@ -958,6 +995,7 @@
         case 'topic-rename': if (!TS.editing) startRename(id); return;
         case 'topic-open': openViewer(control.dataset.subject || L.page, id); return;
         case 'learn': learn(id, control); return;
+        case 'start-session': if (window.PerflwQuiz) window.PerflwQuiz.startSession(id); return;
         case 'viewer-topic': L.viewer.jump = null; openViewer(L.viewer.subjectId, id); return;
         case 'viewer-learning': closeViewer('list'); return;
         case 'side-toggle': toggleSide(); return;
@@ -1071,6 +1109,7 @@
 
   function init(helpers) {
     H = helpers;
+    if (window.PerflwQuiz) window.PerflwQuiz.init(helpers);
     document.addEventListener('click', onClick);
     document.addEventListener('dblclick', onDblClick);
     document.addEventListener('keydown', onKey, true);
@@ -1103,7 +1142,7 @@
   }
 
   window.PerflwLearning = {
-    init, load, reset, render, mount, home,
+    init, load, reset, render, mount, home, homeBlock, summaryText: sub => summaryText(sub),
     profile: () => L.profile,
     list: () => L.subjects.slice(),
     open: id => { if (subject(id)) { L.page = id; L.preview = id; } },

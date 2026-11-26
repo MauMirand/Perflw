@@ -594,3 +594,153 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .ann-icon svg { width: 15px; height: 15px; }
 .ann-icon:hover { background: #2E2D2D; color: #F08A8A; }
 @media (prefers-reduced-motion: reduce) { .ann-bar, .ann-note, .ann-comment-badge, .ann-pop, .ann-select.pending { animation: none; } }
+
+/* Practice quiz on the subject page (first slice of LS-008 to LS-011). Uses the existing tokens only. */
+.qz { margin-top: 14px; }
+.qz-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+.qz-error { color: #E58A8A; font-size: 13px; margin: 6px 0; }
+.qz-list { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.qz-list li { display: flex; gap: 10px; align-items: center; }
+.qz-form, .qz-card { display: flex; flex-direction: column; gap: 10px; max-width: 720px; }
+.qz-opt-row { display: flex; gap: 10px; align-items: center; }
+.qz-opt-row .field { flex: 1; }
+.qz-correct, .qz-dk, .qz-conf label { font-size: 12.5px; color: var(--text-2); display: inline-flex; gap: 6px; align-items: center; }
+.qz-fs { border: 1px solid var(--line, #2A2929); border-radius: 8px; padding: 8px 12px; }
+.qz-head { font-size: 13px; color: var(--text-2); display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.qz-save { margin-left: auto; color: var(--dim); }
+.qz-meta { color: var(--dim); font-size: 12px; margin: 0; }
+.qz-prompt { font-size: 16px; font-weight: 600; margin: 4px 0 8px; outline: none; }
+.qz-choices { display: flex; flex-direction: column; gap: 8px; }
+.qz-choice { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 8px; background: var(--raised); cursor: pointer; }
+.qz-choice:hover { background: #343536; }
+.qz-conf { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--text-2); }
+.qz-confirm { margin: 10px 0; padding: 10px 12px; border-radius: 8px; background: var(--raised); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.qz-score { font-size: 24px; font-weight: 700; margin: 4px 0 10px; outline: none; }
+.qz-table { border-collapse: collapse; margin: 8px 0; font-size: 13px; min-width: min(100%, 420px); }
+.qz-table caption { text-align: left; color: var(--dim); font-size: 12px; padding-bottom: 4px; }
+.qz-table th, .qz-table td { text-align: left; padding: 6px 12px 6px 0; font-weight: 500; }
+.qz-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--raised); font-size: 12px; }
+.qz-reviews { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 12px; }
+.qz-rev { padding: 10px 12px; border-radius: 8px; background: #232222; }
+.qz-rev p { margin: 4px 0; font-size: 13px; }
+@media (max-width: 600px) { .qz-opt-row { flex-direction: column; align-items: stretch; } }
+
+/* Quizzes and exams: progress, navigator, timer, feedback, pass/fail (same tokens as above). */
+.qz-bar { height: 4px; border-radius: 2px; background: var(--raised); margin: 4px 0 12px; overflow: hidden; max-width: 720px; }
+.qz-bar i { display: block; height: 100%; background: var(--text); transition: width 160ms ease; }
+.qz-timer { font-variant-numeric: tabular-nums; font-weight: 700; padding: 1px 10px; border-radius: 999px; background: var(--raised); color: var(--text); }
+.qz-dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; max-width: 720px; }
+.qz-dot { all: unset; box-sizing: border-box; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--dim); cursor: pointer; }
+.qz-dot.done { background: var(--text-2); border-color: var(--text-2); }
+.qz-dot.current { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-dot.flagged { border-radius: 3px; }
+.qz-dot:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-match { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; background: var(--raised); }
+.qz-match .field { max-width: 55%; }
+.qz-feedback { max-width: 720px; margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #232222; border-left: 3px solid var(--dim); }
+.qz-feedback p { margin: 4px 0; font-size: 13px; }
+.qz-pass, .qz-fail { font-size: 20px; font-weight: 700; margin: 4px 0; }
+.qz-pass { color: #7FD08F; }
+.qz-fail { color: #E58A8A; }
+.qz-keys { margin-top: 6px; }
+.qz kbd { font: inherit; font-size: 11px; padding: 0 6px; border-radius: 4px; background: #2A2929; color: var(--text-2); }
+.qz-table td, .qz-table th { vertical-align: top; }
+@media (prefers-reduced-motion: reduce) { .qz-bar i { transition: none; } }
+/* Narrow widths: wide tables scroll inside the block instead of being cut off. */
+.ln-block.qz { min-width: 0; }
+.qz-table { display: block; max-width: 100%; overflow-x: auto; }
+
+/* Journey stepper and question bank list. */
+.qz-journey { margin-bottom: 12px; }
+.qz-journey-title { margin: 0 0 6px; font-size: 13px; }
+.qz-stepper { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.qz-step { display: flex; flex-direction: column; gap: 1px; padding: 5px 10px; border-radius: 8px; background: var(--raised); font-size: 12px; min-width: 84px; }
+.qz-step-state { font-size: 10.5px; color: var(--dim); }
+.qz-step.done .qz-step-label { color: var(--text-2); }
+.qz-step.current { outline: 1.5px solid var(--text); }
+.qz-step.later { opacity: .55; }
+.qz-next { margin: 8px 0 0; font-size: 13px; color: var(--text-2); }
+.qz-qlist { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.qz-q { padding: 10px 12px; border-radius: 8px; background: #232222; }
+.qz-q p { margin: 2px 0; }
+.qz-q-prompt { font-weight: 600; font-size: 14px; }
+
+/* Study session panel. */
+.qz-study { margin-top: 14px; padding: 12px; border-radius: 8px; background: #232222; max-width: 760px; }
+.qz-notes { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.qz-note { padding: 8px 10px; border-radius: 6px; background: var(--raised); font-size: 13px; white-space: pre-wrap; }
+.qz-note p { margin: 0; }
+
+/* Mistake analysis and notes. */
+.qz-analysis { margin: 12px 0; max-width: 760px; }
+.qz-cats { margin: 4px 0 8px 18px; padding: 0; font-size: 13px; }
+.qz-md { white-space: pre-wrap; font: inherit; font-size: 13px; margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--raised); overflow-x: auto; }
+
+.qz-excluded { opacity: .6; }
+
+.qz-sched { margin-top: 14px; padding: 12px; border-radius: 8px; background: #232222; max-width: 760px; }
+
+.qz-ai { margin: 8px 0 12px; max-width: 760px; }
+
+.qz-hint { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: var(--raised); max-width: 760px; font-size: 13px; }
+.qz-hint p { margin: 0 0 8px; }
+
+/* Accessibility pass (LS-014, WCAG 2.1 AA): the quiz block never uses the dim token for text a student needs. */
+.qz .ln-soon, .qz .qz-meta, .qz .qz-step-state, .qz .qz-save, .qz .qz-keys, .qz .qz-table caption { color: var(--text-2); }
+.qz-step.later { opacity: 1; border: 1px dashed var(--line); background: transparent; }
+.qz-step.later .qz-step-label, .qz-step.later .qz-step-state { color: var(--text-2); }
+.qz-dot { width: 24px; height: 24px; padding: 5px; background-clip: content-box; border-radius: 50%; border: 0; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+.qz-dot.done { background-color: var(--text-2); }
+.qz-dot.flagged { border-radius: 6px; }
+.qz-dots { gap: 2px; }
+.qz [data-qz]:focus-visible, .qz .field:focus-visible, .qz input:focus-visible, .qz summary:focus-visible, .qz-table:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-choice:focus-within { outline: 2px solid var(--text); outline-offset: 1px; }
+
+/* Instant reveal in quizzes: right and wrong shown in place, with words as well as colour. */
+.qz-choice.right, .qz-match.right { background: #1d2a21; box-shadow: inset 3px 0 0 #7FD08F; }
+.qz-choice.wrong, .qz-match.wrong { background: #2b2020; box-shadow: inset 3px 0 0 #E58A8A; }
+.qz-mark { font-style: normal; font-size: 12px; font-weight: 700; margin-left: 6px; color: var(--text); }
+.qz-feedback { transition: opacity 140ms ease; }
+@media (prefers-reduced-motion: reduce) { .qz-feedback { transition: none; } }
+
+/* Subject page redesign (owner mock-up, 2026-11-24): Study / Start your session, and the Evaluation Cycle card. */
+.ln-head-actions { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+.ln-session-btn { width: auto; padding: 0 18px; }
+.ln-eval { display: flex; flex-direction: column; gap: 12px; }
+.qz-ev-head, .qz-ev-bar, .qz-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.qz-ev-head .ln-block-title { margin: 0; }
+.qz-ev-expand { font-size: 16px; }
+.qz-tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: #232222; }
+.qz-tab { all: unset; box-sizing: border-box; padding: 5px 12px; border-radius: 999px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.qz-tab.on { background: var(--raised); color: var(--text); font-weight: 600; }
+.qz-tab:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.qz-ev-take { border-radius: 999px; }
+.qz-ev-body { display: grid; grid-template-columns: 1fr minmax(120px, 160px); gap: 12px; align-items: center; padding: 12px; border-radius: 10px; background: #232222; }
+.qz-ev-title { font-size: 22px; font-weight: 700; margin: 0 0 2px; }
+.qz-ev-sub, .qz-ev-meta { margin: 2px 0; font-size: 12.5px; color: var(--text-2); }
+.qz-ev-verdict { font-size: 13px; margin: 4px 0 0; }
+.qz-gauge { width: 100%; height: auto; }
+.qz-gauge-num { font-size: 18px; font-weight: 700; fill: var(--text); }
+.qz-gauge-lbl { font-size: 10px; fill: var(--text-2); }
+.qz-ev-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qz-ev-h { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.qz-ev-list { margin: 0; padding-left: 16px; font-size: 13px; }
+.qz-ev-none { margin: 0; font-size: 13px; color: var(--text-2); }
+.qz-titlebar .ln-block-title { margin: 0; }
+@media (max-width: 600px) { .qz-ev-body { grid-template-columns: 1fr; } .qz-ev-cols { grid-template-columns: 1fr; } }
+
+/* Learning Cycle overlay: covers the main panel (position set in JS from #main-panel), no part of it sits below the page. */
+[data-qz-host] { z-index: 40; box-sizing: border-box; padding: 28px; border-radius: 20px; background: var(--main); overflow: hidden; }
+[data-qz-host][hidden] { display: none; }
+.qz-cycle { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+.qz-cycle-head { display: flex; align-items: center; justify-content: space-between; }
+.qz-cycle-head h2 { margin: 0; font-size: 30px; font-weight: 800; outline: none; }
+.qz-cycle-close { font-size: 20px; }
+.qz-cycle-tabs { align-self: flex-start; }
+.qz-cycle-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 32%) 1fr; gap: 24px; }
+.qz-cycle-side { overflow-y: auto; padding: 4px 8px; }
+.qz-side-gauge { background: #232222; border-radius: 12px; padding: 18px 24px; margin-bottom: 14px; }
+.qz-cycle-side .qz-ev-h { margin-top: 14px; }
+.qz-cycle-main { min-height: 0; overflow-y: auto; background: var(--ink); border-radius: 16px; padding: 22px; }
+.qz-cycle-main .qz { margin: 0; }
+@media (max-width: 760px) { .qz-cycle-body { grid-template-columns: 1fr; overflow-y: auto; } .qz-cycle-main { overflow: visible; } }

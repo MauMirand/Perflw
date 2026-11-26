@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createAutomationStore, createAutomationSchema } = require('./automation/store');
 const { createConnectionStore, createConnectionSchema } = require('./automation/connections');
+const { createLearningStore } = require('./learning-store');
 const { createSessionStore, createSessionSchema } = require('./automation/sessions');
 const { migrate } = require('./db-migrate');
 
@@ -765,15 +766,24 @@ function createWorkspace(root, { migrations = WORKSPACE_MIGRATIONS } = {}) {
     if (!timer.segment_started_at) db.prepare('UPDATE active_timers SET segment_started_at=?,paused=0 WHERE user_id=?').run(now(),userId);
     return activeTimer(userId);
   }
-  function stopTimer(userId) {
+  /* Stops the account's timer and saves it as one focus entry. `endedAt` (default now) lets a learning session close at its last
+     activity time; `source` tells the calendar where the time came from. With an explicit `endedAt` and under one second tracked,
+     the timer is just removed. */
+  function stopTimerAt(userId, { endedAt = null, source = 'timer' } = {}) {
     const timer=activeTimer(userId); if (!timer) fail('There is no active timer.');
-    const ended=now();
-    const seconds=timer.elapsed_seconds+(timer.segment_started_at?Math.max(0,Math.floor((Date.now()-Date.parse(timer.segment_started_at))/1000)):0);
-    if (seconds<1) fail('Track at least one second before saving.');
-    const entryId=saveFocusEntry(userId,{startedAt:timer.started_at,endedAt:ended,durationSeconds:seconds,projectId:timer.project_id,taskId:timer.task_id,description:timer.description,note:timer.note,skill:timer.skill,source:'timer'});
+    const stamp=endedAt ? Math.min(Date.parse(endedAt), Date.now()) : Date.now();
+    if (!Number.isFinite(stamp)) fail('The end time is not valid.');
+    const ended=new Date(stamp).toISOString();
+    const seconds=timer.elapsed_seconds+(timer.segment_started_at?Math.max(0,Math.floor((stamp-Date.parse(timer.segment_started_at))/1000)):0);
+    if (seconds<1) {
+      if (endedAt) { db.prepare('DELETE FROM active_timers WHERE user_id=?').run(userId); return null; }
+      fail('Track at least one second before saving.');
+    }
+    const entryId=saveFocusEntry(userId,{startedAt:timer.started_at,endedAt:ended,durationSeconds:seconds,projectId:timer.project_id,taskId:timer.task_id,description:timer.description,note:timer.note,skill:timer.skill,source});
     db.prepare('DELETE FROM active_timers WHERE user_id=?').run(userId);
     return entryId;
   }
+  function stopTimer(userId) { return stopTimerAt(userId); }
   function switchTimer(userId, description, projectId = null, taskId = null, note = '', skill = '') {
     const project=projectForTask(userId,projectId,taskId);
     const task=ownedTask(userId,taskId,project);
@@ -911,7 +921,7 @@ function createWorkspace(root, { migrations = WORKSPACE_MIGRATIONS } = {}) {
     const result = db.prepare('DELETE FROM chat_sessions WHERE id=? AND user_id=?').run(chatId,userId);
     if (!result.changes) fail('Conversation not found.');
   }
-  return { setChatCategory,createProject,updateProject,archiveProject,deleteProject,getProjectPage,saveProjectPage,adoptLegacyProjects,deleteMilestone,createGoal,createTask,updateTask,deleteTask,createEvent,updateEvent,deleteEvent,createMilestone,createFocusEntry,createManualFocusEntry,editFocusEntry,activeTimer,startTimer,pauseTimer,resumeTimer,stopTimer,switchTimer,
+  return { setChatCategory,createProject,updateProject,archiveProject,deleteProject,getProjectPage,saveProjectPage,adoptLegacyProjects,deleteMilestone,createGoal,createTask,updateTask,deleteTask,createEvent,updateEvent,deleteEvent,createMilestone,createFocusEntry,createManualFocusEntry,editFocusEntry,activeTimer,startTimer,pauseTimer,resumeTimer,stopTimer,stopTimerAt,switchTimer,
     listProjects,listProjectData,listProjectTaskCandidates,listTasks,listEvents,listFocus,listMilestones,
     setCompleted,listChats,createChat,renameChat,archiveChat,deleteChat,
     listPlannerItems,createPlannerItem,updatePlannerItem,deletePlannerItem,
@@ -922,6 +932,7 @@ function createWorkspace(root, { migrations = WORKSPACE_MIGRATIONS } = {}) {
     ...sessions,
     // Provider connections share this database; the caller supplies the secret codec (safeStorage in the app).
     connectionStore: secrets => createConnectionStore(db, secrets),
+    learningStore: () => createLearningStore(db),
     close:()=>db.close() };
 }
 

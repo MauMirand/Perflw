@@ -6,6 +6,10 @@ const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { createAuth } = require('./auth');
 const { createWorkspace } = require('./workspace');
+const { startupMessage } = require('./startup-error');
+const { registerLearningIpc } = require('./learning-ipc');
+const { registerStudySessionIpc, closeOpenSessions } = require('./learning-session-ipc');
+const { createLearningCoach } = require('./learning-coach');
 const learningImport = require('./learning-import');
 const { runWorkflow, LIMITS: AUTOMATION_LIMITS } = require('./automation/engine');
 const { createOllamaRuntime } = require('./automation/ollama');
@@ -214,8 +218,20 @@ app.whenReady().then(() => {
       return new Response(bytes, { headers: { 'content-type': 'application/pdf', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
     } catch { return new Response('', { status: 404 }); }
   });
-  auth = createAuth(root);
-  workspace = createWorkspace(root);
+  // If a database cannot be opened, backed up or migrated (PF-021), say so in plain language and quit. Nothing is deleted or moved.
+  try {
+    auth = createAuth(root);
+    workspace = createWorkspace(root);
+  } catch (error) {
+    if (workspace) workspace.close();
+    if (auth) auth.close();
+    const { title, message } = startupMessage(error, { dataDir: root });
+    // Test mode: a modal box would block an automated run, so print the message instead.
+    if (!app.isPackaged && process.env.PERFLW_TEST_USER_DATA) console.error(`${title}: ${message}`);
+    else dialog.showErrorBox(title, message);
+    app.exit(1);
+    return;
+  }
   // API keys are encrypted with the OS credential protection behind safeStorage (DPAPI on Windows).
   ecosystem = createEcosystem({
     root, workspace,
@@ -328,8 +344,23 @@ app.whenReady().then(() => {
   handle('learning:deleteSubject', id => {
     const user=requireUser();
     let fileIds = []; try { fileIds = workspace.listTopics(user.id, id).files.map(f => f.id); } catch { /* subject already gone */ }
+    let journeyIds = []; try { journeyIds = workspace.learningStore().listJourneys(user.id, { subjectId: id }).map(j => j.id); } catch { /* subject already gone */ }
     removeLearningFiles(user, workspace.deleteSubject(user.id,id)); removeAnnotations(user, fileIds); learningFlow.subjectRemoved(user.id, id);
+    for (const folder of [...journeyIds.map(j => path.join('journeys', j)), path.join('side-notes', String(id))]) { try { fs.rmSync(path.join(root, 'learning-files', user.id, folder), { recursive: true, force: true }); } catch { /* best effort */ } }
   });
+  registerLearningIpc({ handle, requireUser, workspace, dataDir: root, analysisOf: (userId, fileId) => learningFlow.fileAnalysis(userId, fileId), coach: createLearningCoach({ ecosystem, agents: learningFlow.agents }) });
+  { // the same AI coach and file lookup serve the quiz handlers and the study session
+    const coach = createLearningCoach({ ecosystem, agents: learningFlow.agents });
+    const sectionsFor = (userId, subjectId, topicId) => {
+      try {
+        const row = workspace.listTopics(userId, subjectId).rows.find(r => String(r.id) === String(topicId));
+        const analysis = row && row.fileId ? learningFlow.fileAnalysis(userId, row.fileId) : null;
+        return { sections: analysis && analysis.status === 'ready' ? require('./question-templates').sectionsOf({ id: row.id, title: row.title }, analysis) : [] };
+      } catch { return { sections: [] }; }
+    };
+    registerStudySessionIpc({ handle, requireUser, workspace, dataDir: root, coach, sectionsFor });
+  }
+  try { closeOpenSessions({ workspace }); } catch (error) { console.error('study sessions', error.message); } // a crash can leave a session open: close it at its last activity
   handle('learning:topics', subjectId => workspace.listTopics(requireUser().id, subjectId));
   handle('learning:addTopic', (subjectId, details) => workspace.addTopic(requireUser().id, subjectId, details));
   handle('learning:renameTopic', (topicId, title) => workspace.renameTopic(requireUser().id, topicId, title));
@@ -695,4 +726,4 @@ if ($Kind -eq 'docx') {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { if (activeRun) activeRun.controller.abort(); if (chatEngine) chatEngine.cancelAll(); if (learningFlow) learningFlow.close(); if (workspace) workspace.close(); if (auth) auth.close(); });
+app.on('before-quit', () => { try { if (workspace) closeOpenSessions({ workspace }); } catch { /* quitting anyway */ } if (activeRun) activeRun.controller.abort(); if (chatEngine) chatEngine.cancelAll(); if (learningFlow) learningFlow.close(); if (workspace) workspace.close(); if (auth) auth.close(); });

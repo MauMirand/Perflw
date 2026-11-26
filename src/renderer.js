@@ -913,9 +913,8 @@
     const subjects = LN ? LN.list().slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).slice(0, 4) : [];
     const learn = subjects.length ? `<ul class="t-list">${subjects.map(sub => `<li><button class="t-item" type="button" data-action="home-subject" data-id="${esc(sub.id)}">
         <span class="t-art${sub.image ? '' : ' none'}" ${sub.image ? `data-img="${esc(sub.image)}"` : ''} aria-hidden="true">${sub.image ? '' : esc(String(sub.name || '?').trim().charAt(0).toUpperCase())}</span>
-        <span class="t-main"><strong>${esc(sub.name)}</strong><small>${sub.type === 'minor' ? 'Minor' : 'Major'} · ${sub.mastery}% mastery</small></span>
-        <span class="t-meter" aria-hidden="true"><span data-w="${Math.max(0, Math.min(100, sub.mastery))}%"></span></span>
-      </button></li>`).join('')}</ul>` : `<p class="t-empty">No subjects yet. Add one and upload your study files.</p>`;
+        <span class="t-main"><strong>${esc(sub.name)}</strong><small data-ln-summary="${esc(sub.id)}">${sub.type === 'minor' ? 'Minor' : 'Major'} · ${esc(LN.summaryText(sub))}</small></span>
+      </button></li>`).join('')}</ul>${LN.homeBlock(subjects)}` : `<p class="t-empty">No subjects yet. Add one and upload your study files.</p>`;
 
     const projects = PJ ? PJ.list().slice(0, 4) : [];
     const create = projects.length ? `<ul class="t-list">${projects.map(pr => {

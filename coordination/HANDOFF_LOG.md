@@ -1669,6 +1669,184 @@ ranking, ties, boxes, escaping, snapshot). `npm run test:electron` not required 
 
 ---
 
+### HO-029 — PF-021: Startup shows a plain-language message when the databases cannot be opened
+
+**Date:** 2026-11-23  
+**Task ID:** PF-021  
+**From:** Claude A (implemented at the owner's request: "start building the feature"; no Claude B session was running it)  
+**To:** independent reviewer (not Claude A, see §6)  
+**Status:** SUBMITTED  
+**Branch:** `feature/PF-021-startup-error` (worktree `.claude/worktrees/pf-021-startup-error`), base `main` at `5f3d1f5`
+
+#### 1. What happened before the change (confirmed, the brief asked for this)
+With a `workspace.sqlite` that holds garbage bytes, the unmodified `main` logs
+`UnhandledPromiseRejectionWarning: Error: file is not a database` from the `app.whenReady()` callback, creates no window and does
+**not exit**: the Electron process keeps running until it is killed (my check timed out at 60 s and the exit code was not 1).
+
+#### 2. Change
+- **`src/startup-error.js` (new, pure):** `startupMessage(error, { dataDir }) → { title, message }`. A migration-runner error
+  ("Perflw could not make a safety copy of…" / "Perflw could not update…") is kept as is and gets the data folder appended. Any
+  other error is wrapped: what happened, that nothing was changed or deleted, the data folder, that a `.bak-…` copy next to the
+  database can be copied back by hand (no automatic restore), and the technical reason in brackets.
+- **`src/main.js`:** `createAuth`/`createWorkspace` are wrapped in `try/catch` (the only logic change, 15 lines). On error: close any
+  database that did open, show `dialog.showErrorBox(title, message)` and `app.exit(1)`; in test mode (`!app.isPackaged &&
+  PERFLW_TEST_USER_DATA`) print the same text to stderr instead of a modal box. No file is deleted, moved or rewritten.
+- **`test/startup-error.test.js` (new, 4 tests)** and **`test/startup-error-smoke.js` (new)** + `package.json` script
+  `test:startup` (one line).
+
+#### 3. Checks
+| Check | Result | Level |
+|---|---|---|
+| `npm test > log 2>&1; echo EXIT=$?` | PASS: EXIT=0, 224 tests, 224 pass, 0 fail (base 220 + 4) | unit |
+| `node test/startup-error-smoke.js` (garbage `workspace.sqlite`, real Electron, test mode) | PASS: exit code 1, message on stderr, data folder named, file byte-identical, no `.bak`/`.tmp` file | live |
+| Same check against the unmodified `main.js` | FAIL as expected (no exit 1; unhandled rejection) | live |
+| `npm run test:electron` on this branch | **UNVERIFIED**: held until PF-020's idle-machine batch ends (about 22:56) | — |
+| Rendered check of the real dialog (screenshot, no test mode) | **UNVERIFIED**: `dialog.showErrorBox` is a native modal; it needs a manual look | — |
+
+Load note: my two short Electron runs were at about 22:41–22:42, before PF-020's batch started (22:44). My `npm test` (no
+Electron) ended at 22:44:49, so it overlapped the first minute of that batch. PF-020's reviewer should know.
+
+#### 4. Limits
+- One failure path only: the `try/catch` covers the two database openings. A later startup failure (for example in the ecosystem
+  or the learning workflow) is not wrapped.
+- The `before-quit` handler is not run by `app.exit`; both databases are closed explicitly in the catch.
+- If `app.exit(1)` is reached, the single-instance lock is released by process exit.
+
+#### 5. Sequencing
+Per the PF-021 brief: merge before LS-007 and LS-012 (all three edit `src/main.js`).
+
+#### 6. Review
+A review by Claude A of Claude A's own code is not independent. Reviewer: a Claude B session or a fresh reviewer agent, using
+the PF-021 acceptance list. Merge only after that APPROVED and a green `npm run test:electron` on the merge result.
+
+### HO-021 — LS-006: Learning store (`src/learning-store.js`)
+
+**Date:** 2026-11-23  
+**Task ID:** LS-006  
+**From:** Claude B  
+**To:** Claude A  
+**Branch:** `claude/gracious-ellis-c78fac` (based on `main` at `46c8cd8`)  
+**Status:** SUBMITTED
+
+#### 1. Understanding
+One main-process module owns all SQL for the 10 learning tables. `createLearningStore(db)` takes the open
+`DatabaseSync` (pattern of `createConnectionStore`). Every method takes `(userId, { … })` and returns plain objects.
+Every id the caller passes, including nested ones, is checked with `SELECT … WHERE id=? AND user_id=?`. A missing
+row and another account's row give the same `"<Thing> not found."`. Rules come from `src/assessment-model.js`
+(`validateQuestion`, `normalizeResponse`, `grade`, `rubricOf`, `scoreFromCriteria`). No schema change, no new
+dependency, no IPC, file I/O, AI or logging.
+
+#### 2. Implementation
+- **`src/learning-store.js` (new, 551 lines; no split needed).** Methods as built:
+  - Journeys: `createJourney`, `getJourney`, `listJourneys`, `updateJourney`.
+  - Questions: `saveQuestion`, `getQuestion`, `listQuestions`, `retireQuestion`, `deleteQuestion`, `setReview`.
+    Every question row returned carries `used` (true when an `assessment_items` row references it).
+  - Assessments: `createAssessment`, `startAssessment`, `getAssessment` (unstripped), `listAssessments`,
+    `abandonAssessment`.
+  - Answers: `saveAnswer`, `submitAssessment`, `gradeOpenAnswer`.
+  - Sessions and materials: `startSession`, `endSession`, `markVisited`, `addMaterial`, `getMaterial`,
+    `listMaterials`.
+  - Evidence: `journeyEvidence` (D11).
+  - Also exports `LIMITS` (payload/response 32 KB, source 8 KB, config 32 KB, provenance 8 KB, text lengths).
+- Multi-row writes (`createJourney`, `updateJourney` with topics, `createAssessment`, `submitAssessment`,
+  `gradeOpenAnswer`) run in `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`. JSON columns parse defensively (bad value →
+  default). Size caps count UTF-8 bytes of the serialized JSON.
+- `question_snapshot` is written only by `createAssessment` (the normalized stored question: id, subjectId,
+  topicId, type, prompt, dimension, difficulty, explanation, points, source, origin, provenance, status, review,
+  payload). No statement updates that column.
+- **`src/workspace.js`:** `learningStore: () => createLearningStore(db)` beside `connectionStore`, plus its
+  `require` line (2 lines, not 1).
+- **`test/learning-store.test.js` (new, 13 tests).**
+
+#### 3. Acceptance (evidence: unit tests on in-memory and on-disk `node:sqlite` databases; Electron smoke run once)
+| Criterion | Result | Test |
+|---|---|---|
+| All methods exist, each `(userId, { … })` | PASS | every test |
+| Cross-account "not found" for every id-taking method, incl. nested `topicIds`, `questionIds`, `parentId`, `parentMaterialId`, `retakeOf`, `sessionId`, `materials`, section `fileId`, `journeyId` of another subject (44 calls, incl. `deleteQuestion`) | PASS | `cross-account…` |
+| Answer write rejected for `draft`, `submitted`, `graded`, `abandoned` | PASS | `saveAnswer…` |
+| Edit + retire leaves the snapshot byte-identical | PASS | `editing or retiring…` |
+| Field-named `validateQuestion` errors; oversize payload and response rejected | PASS | `questions…`, `saveAnswer…` |
+| `createAssessment` rolls back fully (invalid id before the transaction; CHECK failure inside it) | PASS | `createAssessment…` |
+| D3: `unreviewed` rejected for diagnostic/final/retention, allowed for practice; `rejected` refused everywhere | PASS | `createAssessment…` |
+| `submitAssessment`: `not_answered` rows, scores equal `grade()`, pure choice → `graded`, `explain` → `submitted` until `gradeOpenAnswer` | PASS | `submitAssessment…` |
+| Brief update (`1130d5a`, `ef5a3e7` on main): `deleteQuestion` refused with "This question was used in an assessment. Retire it instead." when used, deletes when unused, "Question not found." for another account or a missing id; `used` true/false in `listQuestions`, `getQuestion` and write results | PASS | `used flag and deleteQuestion…` |
+| D11: cycle 1 absent from cycle 2's evidence and still stored | PASS | `D11…` |
+| Subject delete through `workspace.deleteSubject` leaves no learning rows for it; other subject's rows kept | PASS | `deleting a subject…` |
+| `npm test > log 2>&1; echo EXIT=$?` (after merging `main` at `d0697f8`) | PASS: EXIT=0, 202 tests, 202 pass, 0 fail | — |
+| `npm ci` then `npm run test:electron`, run once | PASS: `npm ci` exit 0; smoke exit code 0, "Electron smoke test passed." (before the merge) | — |
+| `npm run test:electron` after the merge and the brief update, run once (no `npm ci`: `package.json`/lock unchanged by the merge) | **FAIL**: exit code 1, `Error: UI condition did not become true: viewer drew the PDF`. Same step as the known PF-004 timeout (`test/electron-smoke.js:581`). The only code changed since the passing run is `src/learning-store.js` (+`deleteQuestion`, `used`) and its test; the store is created only when `learningStore()` is called, and nothing calls it yet. Assessed as the existing smoke flake, not this change; not re-run (brief: run once). Claude A may ask for a confirming run. | — |
+
+S4: branch from `main` at `46c8cd8`; `main` at `d0697f8` merged in (docs and `docs/ui-baseline/` only, no conflict). S5–S7 do not apply.
+
+#### 4. Choices and open points for review (reported, not decided by the brief)
+1. **Default `topicIds`** = rows of the subject with `kind='topic'`; milestones are left out. Say if they belong.
+2. **`journeyEvidence`** returns answers of `submitted` and `graded` assessments only. Draft, in-progress and
+   abandoned attempts are excluded (spec §5.4 "graded, non-abandoned"). Assessments without a `journey_id` are not
+   attributed to the active journey (spec §5.4 says they should be); LS-003/LS-007 must decide where that happens.
+3. **True/false with justification** stores the deterministic half in `score` while `pending`; `journeyEvidence`
+   still returns `score: null` for it, as the brief says.
+4. **`saveQuestion`** rejects moving a question to another subject. `reviewed_at` is set when `review` changes to
+   `approved`/`rejected`, cleared when it becomes `unreviewed`, else kept. An edit without `review` lets
+   `validateQuestion` default it, so an edited generated question goes back to `unreviewed`.
+5. **`createAssessment`**: duplicate question ids rejected; a question of another subject of the same account is
+   "not found"; at most 200 questions (cap chosen here); `retakeOf` must be a final of the same subject;
+   `attempt` = previous + 1 unless given. `retakeOf`/`attempt` on a non-final is rejected.
+6. **`gradeOpenAnswer`** needs the answer to be `pending` (no regrade). A criterion without a valid verdict is
+   stored as `missing`. `mistake_category` stays NULL for open answers (left to LS-004).
+7. **`abandonAssessment`** allowed from `draft` and `in_progress` only. **`endSession`/`markVisited`** rejected on an
+   ended session. `markVisited` checks section `fileId` against `subject_files` of the session's subject.
+8. **`addMaterial`**: `origin` limited to `manual`/`template`/`generated` (the column has no CHECK); `bodyFile` must
+   be a plain file name (no `/`, `\`, `:`, leading `.`); `provenance` stored as given (ADR-007).
+9. `deleteQuestion` returns `{ id, deleted: true }` (the brief gives no return shape). Its `question_review` row goes
+   with it (CASCADE). `used` is not part of `question_snapshot`.
+10. Spec §4.6 snapshots "when it starts"; the brief (governs) snapshots at create. Implemented per the brief.
+
+#### 5. Commits
+`0376944 feat(learning): LS-006 learning store for all Learning System SQL`, `986b28f docs(handoff): HO-021 LS-006
+submission`, `fb56afc` merge of `main`, then `feat(learning): LS-006 deleteQuestion and used flag` (with this update).
+Not pushed, not merged.
+
+---
+
+### HO-041 — Claude A built the quiz and exam slice (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-24  
+**Task ID:** LS-006 (base), LS-007 to LS-027, LS-029 to LS-030, LS-032, LS-033, LS-034 (script), PF-021  
+**From:** Claude A (built at the owner's explicit request: "start building the feature", "add all the feature about quizzes and exams", "loop until everything we planned is integrated")  
+**To:** independent reviewer (not Claude A), Project Owner  
+**Status:** SUBMITTED (not reviewed, not merged, not pushed)  
+**Branch:** `feature/ml1-slice` (worktree `.claude/worktrees/ml1-slice`), cut from `feature/PF-021-startup-error` on `main` 5f3d1f5 and merged with LS-006's branch `claude/gracious-ellis-c78fac` at `0567c26` (that store was unreviewed when merged; its later revision 8317408 is not in this branch)
+
+> This is one branch because the owner asked for the feature to exist now. It deviates from the one-task-one-branch rule and from the sequential brief order; it must be split or reviewed as a whole before any merge. Independent review is required (Claude A cannot approve its own code).
+
+#### 1. What exists (all in the renderer's subject page, block "Quizzes and exams", `src/learning-quiz.js`)
+- **Question bank:** write choice, true/false, matching, explain, essay questions; list, filter, edit, retire, restore, delete (confirm; a used question can only be retired); template drafts from analysed files (`src/question-templates.js`, no AI); AI drafts (optional, see §3).
+- **Journey:** stepper over the 13 stages (11 driven, `pretest_setup` and `supplementary` marked later), stage moves forward only; next cycle with statistics at zero; history of every assessment with the levels right after it.
+- **Assessments:** pre-test, practice (feedback after each question, one second try scored half, due mistakes first, "practice these"), timed final exam (`src/exam-model.js`: 50 to 100 items or a test final, time limit with x1.5/x2/untimed, pass mark 75 to 90%, deadline enforced in main), retention check (7 days after a real final, recall and understanding on Proficient topics), results with mistake categories, weak topics and targeted notes (deterministic, no AI), attempts side by side, pre-vs-final report.
+- **Final learning (D9):** evaluation screen; a real final needs a Review study session ended after the pre-test. **Retake gate (D13):** after a failed final every section of the failing topics' files and every targeted note must have been opened in a Review session started after the attempt.
+- **Study sessions (LS-012, ADR-008):** run on the account's one timer, saved as one focus entry with source `learning`; side notes are the student's own text in files; opened topics and sections are recorded in `visited`; closed at the last activity on quit or after a crash. New `workspace.stopTimerAt`.
+- **Scheduling (LS-026):** a calendar event plus a `learning_schedule` link in one transaction.
+- **Main process:** `src/learning-ipc.js` (about 45 channels), `src/learning-session-ipc.js`, `src/learning-coach.js`, `src/learning-store.js` additions (sessions, review queue, schedule, AI grades, attempts), preload `learningData` methods, agents `Learning Question Writer` and `Learning Answer Grader` (created on first use only).
+
+#### 2. Checks (Claude A)
+| Check | Result | Level |
+|---|---|---|
+| `npm test` | PASS: EXIT=0, 299 tests, 299 pass | unit |
+| `node test/learning-quiz-smoke.js` (real Electron, throwaway data folder, about 20 steps through the whole flow) | PASS | live, scripted |
+| `npm run test:electron` on this branch | **UNVERIFIED** (not run on this branch) | |
+| Visual review against `docs/ui-baseline/` (S7) | **UNVERIFIED**: screenshots are written by the smoke test but not compared | |
+
+#### 3. Not verified, not built, deviations
+- **Verified here:** `npm test` 305/305; `npm run test:electron` (the existing smoke, after the LS-025 assertion change in `test/electron-smoke.js`) passes; `npm run test:ml1` (about 30 steps, real Electron, throwaway data) passes, including no http(s) request, no console error, accessible names, text contrast at least 4.5:1, navigator targets at least 24 px and database invariants after quit; `npm run bench:quiz` (1,000 questions, 200 assessments): `mastery:subject` 14 ms, quiz start 33 ms against targets of 100 and 200 ms.
+- **AI jobs** (question writer LS-017, grader LS-018, note explanation LS-019, Check my note LS-032) are tested with a fake `runAgent`. A real model was **not** run end to end (a local model exists on this machine). Output quality is unknown; unusable output is rejected, never guessed.
+- **Also built since the first version of this entry:** replacing the manual mastery/time editing with a computed summary (LS-025: `test/electron-smoke.js` changed, which PF-020 also edits, so expect a merge conflict there), the Home Learn card (LS-027; no UI writes `planner_items` of kind `learning`, so it is not used), first-use hint and loading state (LS-029), the benchmark (LS-030), the accessibility pass (LS-014), pre-test setup sheet, extra study for weak topics (LS-021).
+- **Not built, blocked on you:** Analytics section (LS-028, owner decision PF-019: Analytics is not reachable from navigation), Quest game layer (LS-031, owner design first).
+- **Not independently reviewed. `design:accessibility-review` was applied as a checklist by Claude A, not by a person with a screen reader:** manual testing with NVDA or VoiceOver is still needed.
+- **Deviations to reconcile:** one renderer module `learning-quiz.js` (about 1,100 lines, over the 600-line guide) instead of the separate journey hub, bank, quiz and results modules of LS-008 to LS-011; one branch instead of one task per branch; `assessment_answers.attempt` now means "second try" in practice; the final-learning gate counts any ended Review session started after the pre-test (it does not track that the evaluation was opened); retention uses a "Proficient or Mastered" topic filter; the study sessions run from the subject page, not from a bar inside the topic viewer (opened topics and sections are still recorded); calendar events are created and cancelled from the quiz block, the calendar view itself does not offer Start on them yet.
+- **LS-006 here** is the pre-revision store plus additions; its revision 2 (HO-021) must be merged in before the store is reviewed.
+
+---
+
 ## 5. Review Decision Definitions
 
 ### APPROVED
