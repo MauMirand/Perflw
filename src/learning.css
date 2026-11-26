@@ -849,3 +849,28 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-scope-n { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .qz-scope-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid #2e2e2e; font-size: 12px; color: var(--text-2); }
 @media (max-width: 760px) { .qz-actions { flex-wrap: wrap; } .qz-scope-btn { max-width: 180px; } }
+
+/* Cycle status cards (owner mock-up 2026-11-26): Latest result, Final Learning, History, always visible. */
+.qz-ov { display: flex; flex-direction: column; gap: 14px; }
+.qz-ov-meta { margin: 0 0 10px; }
+.qz-ov-card { background: #2a2929; border-radius: 12px; padding: 14px 16px; }
+.qz-ov-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.qz-ov-head h4 { margin: 0; font-size: 18px; font-weight: 600; }
+.qz-ov-sub { font-size: 12px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+.qz-ov-line { margin: 4px 0; font-size: 13px; color: var(--text-2); }
+.qz-ov-line strong { color: var(--text); }
+.qz-ov-h { margin: 10px 0 4px; font-size: 12.5px; font-weight: 600; }
+.qz-ov-topics { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.qz-ov-topics li { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(60px, 1fr) auto; align-items: center; gap: 12px; font-size: 13px; }
+.qz-ov-topics li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qz-ov-bar { height: 6px; border-radius: 3px; background: #3a3a3a; overflow: hidden; }
+.qz-ov-bar i { display: block; height: 100%; background: linear-gradient(90deg, #7FA7F5, #F08AA6); }
+.qz-ov-num { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qz-ov-table { width: 100%; margin: 0; }
+.qz-ov-table th, .qz-ov-table td { font-size: 12.5px; }
+.qz-ov-table thead th { color: var(--text-2); font-weight: 600; }
+.qz-ov-continue { margin-bottom: 12px; }
+/* Taking a test: the whole Learning Cycle is the test (no side cards, track or section bar). */
+.qz-cycle.qz-focus .qz-cycle-side, .qz-cycle.qz-focus [data-qz-track], .qz-cycle.qz-focus [data-qz-bar], .qz-cycle.qz-focus .qz-cycle-tabs { display: none; }
+.qz-cycle.qz-focus .qz-cycle-body { grid-template-columns: 1fr; }
+.qz-cycle.qz-focus .qz-cycle-content > .qz { max-width: 760px; margin: 0 auto; } /* the test sits centred in the full-width box */

@@ -334,18 +334,13 @@ async function main() {
   await shoot('quiz-4b-study');
 
   // Final learning (D9): the evaluation of the cycle so far, and what unlocks the final. History: every assessment so far.
-  await click('[data-qz="evaluation"]');
-  await waitFor("/Final learning · cycle 1/.test(document.querySelector('.qz').textContent)", 'final learning evaluation');
-  assert.ok(await evaluate("/1 study session/.test(document.querySelector('.qz').textContent) && /Where you stand now/.test(document.querySelector('.qz').textContent)"), 'evaluation shows the session and the levels');
-  assert.ok(await evaluate("/Review study session/.test(document.querySelector('.qz').textContent)"), 'it says what unlocks the final');
-  step('final learning: evaluation with study time, levels and what unlocks the final');
-  await shoot('quiz-4c-evaluation');
   await click('[data-qz="home"]');
-  await waitFor("!!document.querySelector('[data-qz=\"history\"]')", 'history button');
-  await click('[data-qz="history"]');
-  await waitFor("/Cycle 1/.test(document.querySelector('.qz').textContent) && document.querySelectorAll('.qz-table tbody tr').length >= 1", 'history lists the pre-test');
-  step('history: every assessment with its score and levels');
-  await click('[data-qz="home"]');
+  await waitFor("(() => { const c = document.querySelector('[aria-label=\"Final Learning\"]'); return !!c && /Cycle 1/.test(c.textContent) && /1 study session/.test(c.textContent) && /Review study session/.test(c.textContent) && c.querySelectorAll('tbody tr').length >= 1; })()", 'Final Learning card: levels by topic, study time, what unlocks the final');
+  step('final learning card: always visible, with levels, study time and what unlocks the final');
+  await waitFor("(() => { const c = document.querySelector('[aria-label=\"History\"]'); return !!c && c.querySelectorAll('tbody tr').length >= 1 && /Pre-test/.test(c.textContent); })()", 'History card lists the pre-test');
+  assert.ok(await evaluate("(() => { const c = document.querySelector('[aria-label=\"Latest result\"]'); return !!c && /Topics/.test(c.textContent) && /Ionic bonds/.test(c.textContent) && !!c.querySelector('.qz-ov-bar'); })()"), 'Latest result card: the last test with each topic\'s score');
+  await shoot('quiz-4c-overview');
+  step('history and latest result cards: always visible on Cycle status');
 
   // Practice: feedback after Check, key shown only for that question (the study summary leaves us on the home screen).
   await waitFor("(document.querySelector('.qz-track .qz-stop.now') || { getAttribute: () => '' }).getAttribute('aria-label') === 'Final learning: In progress'", 'the cycle track shows Final learning as on going (viewing the final learning evaluation moves the journey on)');
@@ -363,6 +358,8 @@ async function main() {
   step('cycle track: 13 stages, completed green, on going blue, not completed gray');
   await take('practice');
   await waitFor("!!document.querySelector('.qz-card') && /Practice/.test(document.querySelector('.qz-head').textContent)", 'practice opened');
+  assert.ok(await evaluate("(() => { const side = document.querySelector('[data-qz-side]'); const body = document.querySelector('.qz-cycle-body').getBoundingClientRect(); const main = document.querySelector('.qz-cycle-main').getBoundingClientRect(); return getComputedStyle(side).display === 'none' && !document.querySelector('[data-qz-track]').offsetParent && Math.abs(main.width - body.width) < 2; })()"), 'taking a test fills the whole Learning Cycle');
+  await shoot('quiz-6a-fullpage');
   await answerCurrent();
   // A quiz reveals the answer by itself when it is complete; only written answers need the Check button.
   await sleep(500);

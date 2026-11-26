@@ -1887,6 +1887,15 @@ Not pushed, not merged.
 - **Fix:** a `ResizeObserver` on `#main-panel` plus `transitionrun`/`transitionend` re-measure the overlay for about 30 frames after each change, so it tracks the sidebar animation and settles on its end.
 - **Checks:** `npm test` 306/306; `npm run test:ml1` PASS with a new step (toggle the sidebar both ways, overlay rect equals the panel rect within 2 px); `npm run test:electron` PASS on the second run (first run failed at "folded Plan group persisted", a sidebar-preference check unrelated to the overlay; flaky like the profile-header check).
 
+### HO-046 — Claude A: Cycle status cards and full-page tests (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-26 · **Status:** SUBMITTED (not reviewed) · merged and pushed (standing "always push live" rule)
+
+- **Cycle status** shows three always-visible cards instead of buttons (owner mock-up): **Latest result** (kind, date, score, each topic's score with a bar; Targeted notes and Open results), **Final Learning (Cycle N)** (Topics / Level / Evidence table, study time, what unlocks the final; Report, Retention check, Start the next cycle), **History** (Date / What / Score / Levels after it, newest first). Unfinished tests are listed above them with Resume.
+- **`journey:evaluation` gains `peek`:** the card reads it without moving the journey to Final learning right after a pre-test; after a study session (stage `main_learning`) the card counts as the look, as the old button did.
+- **Taking a test** (setup, answering, grading, results) now fills the Learning Cycle: the side cards, track, section bar and kind tabs hide; the test is centred.
+- **Checks:** `npm test` 307/307 (new peek test); `npm run test:ml1` PASS (cards and the full-width test are asserted); `npm run test:electron` PASS.
+
 ---
 
 ## 5. Review Decision Definitions
