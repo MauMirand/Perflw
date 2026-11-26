@@ -465,6 +465,34 @@ async function main() {
   assert.ok(fresh, 'cycle 2 starts at zero');
   assert.ok(await evaluate(`window.learningData.journeyList({ subjectId: ${q(subjectId)} }).then(j => window.learningData.masteryJourney({ journeyId: j[0].id })).then(m => m.topics.some(t => t.items > 0))`), 'cycle 1 evidence is kept');
   step('next cycle: cycle 2 starts at zero, cycle 1 is kept');
+
+  // Topic scope: a period (milestone) and its topic; a practice set drawn only from the chosen period; back to the entire subject.
+  await evaluate(`window.learningData.addTopic(${q(subjectId)}, { kind: 'milestone', title: 'Prelim' })`);
+  const covalent = await evaluate(`window.learningData.addTopic(${q(subjectId)}, { title: 'Covalent bonds' }).then(d => d.added[0])`);
+  for (let i = 1; i <= 3; i++) await evaluate(`window.learningData.questionsSave({ question: { subjectId: ${q(subjectId)}, topicId: ${q(covalent)}, type: 'choice', prompt: 'Covalent pair ${i}?', dimension: 'recognition', difficulty: 1, explanation: 'Shared electrons.', payload: { options: [{ id: 'a', text: 'Shared' }, { id: 'b', text: 'Moved' }], correct: ['a'] } } })`);
+  await click('[data-qz="bank"]'); await waitFor("!!document.querySelector('.qz-qlist')", 'bank reloaded');
+  await click('[data-qz="home"]');
+  await waitFor("!!document.querySelector('[data-qz=\"scope\"]') && /Entire subject/.test(document.querySelector('[data-qz=\"scope\"]').textContent)", 'Topics control shows Entire subject');
+  await click('[data-qz="scope"]');
+  await waitFor("!!document.querySelector('.qz-scope-pop [data-qz=\"scope-period\"]')", 'picker lists the Prelim period');
+  assert.match(await evaluate("document.querySelector('.qz-scope-pop').textContent"), /Prelim3[\s\S]*Covalent bonds3/, 'period and topic with their question counts');
+  await click('[data-qz="scope-period"]');
+  await waitFor("/Prelim/.test(document.querySelector('.qz-scope-v').textContent) && /3 questions in scope/.test(document.querySelector('.qz-scope-foot').textContent)", 'scope is Prelim, 3 questions');
+  await shoot('quiz-9-scope');
+  await click('[data-qz="scope-done"]');
+  await waitFor("!document.querySelector('.qz-scope-pop')", 'picker closed');
+  await take('practice');
+  await waitFor("!!document.querySelector('.qz-card') && /of 3/.test(document.querySelector('.qz-head').textContent)", 'practice drawn from Prelim only');
+  assert.match(await evaluate("document.querySelector('.qz-head').textContent"), /Prelim/, 'the set is named after its scope');
+  assert.ok(await evaluate(`window.learningData.assessmentList({ subjectId: ${q(subjectId)} }).then(l => l.find(a => /Prelim/.test(a.title))).then(a => window.learningData.assessmentGet({ assessmentId: a.id })).then(a => a.items.every(i => String(i.topicId) === ${q(String(covalent))}))`), 'every question comes from the chosen topic');
+  await click('[data-qz="leave"]');
+  await waitFor("!!document.querySelector('[data-qz=\"scope\"]')", 'back on Cycle status');
+  await click('[data-qz="scope"]'); await waitFor("!!document.querySelector('[data-qz=\"scope-all\"]')", 'picker again');
+  await click('[data-qz="scope-all"]');
+  await waitFor("/Entire subject/.test(document.querySelector('.qz-scope-v').textContent)", 'back to the entire subject');
+  await evaluate("document.querySelector('[data-qz=\"scope-all\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await waitFor("!document.querySelector('.qz-scope-pop') && !document.querySelector('[data-qz-host]').hidden", 'Escape closes only the picker');
+  step('topic scope: Prelim period picked, practice drawn only from it and named after it, Entire subject restored, Escape closes the picker');
   assert.ok(!/Unhandled|TypeError|ReferenceError/.test(stderr), `no errors on stderr: ${stderr.slice(0, 300)}`);
   step('stderr clean');
   assert.deepEqual(webRequests, [], 'no http(s) request was made: no AI provider or network was needed');

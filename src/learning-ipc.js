@@ -113,8 +113,15 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     if (!model.KINDS.includes(kind)) fail(`Kind must be one of: ${model.KINDS.join(', ')}.`);
     const c = isObj(a.config) ? a.config : {};
     const s = store();
-    let topics = Array.isArray(c.topicIds) && c.topicIds.length ? c.topicIds : undefined;
-    if (a.journeyId != null) topics = s.getJourney(u, { journeyId: a.journeyId }).topicIds;
+    /* Topic scope (owner, 2026-11-26): every question carries its topic; a test may be limited to chosen topics (one, several,
+       or a whole period such as Prelim). Inside a journey the choice is narrowed to the journey's topics. */
+    const picked = Array.isArray(c.topicIds) && c.topicIds.length ? c.topicIds.map(String) : null;
+    let topics = picked || undefined;
+    if (a.journeyId != null) {
+      const own = s.getJourney(u, { journeyId: a.journeyId }).topicIds.map(String);
+      topics = picked ? picked.filter(id => own.includes(id)) : own;
+      if (picked && !topics.length) fail('None of the chosen topics belong to this cycle.');
+    }
     let dimensions = c.dimensions;
     if (kind === 'retention') {
       // Spec §5.1: recall and understanding items only, on topics that reached Proficient (a short check of what should be known).

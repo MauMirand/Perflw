@@ -1089,6 +1089,7 @@
       return;
     }
     if (event.key === 'Escape' && event.target.matches && event.target.matches('[data-ls-input]')) return; // the Ask field blurs first
+    if (event.key === 'Escape' && document.querySelector('[data-qz-host]:not([hidden])')) return; // the open Learning Cycle handles its own Escape (picker first, then the overlay)
     if (event.key === 'Escape' && !document.querySelector('.overlay:not([hidden]):not(.ln-overlay)')) {
       if (L.viewer) { event.preventDefault(); closeViewer('subject'); }
       else if (L.page && TS.sel.size) { event.preventDefault(); clearSelection(L.page); }

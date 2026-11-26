@@ -539,6 +539,19 @@ test('practice retry: one second try on a wrong deterministic answer, scored hal
   assert.throws(() => t.call('assessment:retry', { assessmentId: assessment.id, itemId: item.id }), /not found/i);
 });
 
+test('topic scope: a test uses only the chosen topics, inside the cycle\'s topics', () => {
+  const t = setup(); seed(t);
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const made = t.call('assessment:create', { subjectId: 's1', journeyId: journey.id, kind: 'practice', title: 'Practice', config: { count: 10, topicIds: ['t2'] } });
+  const items = t.call('assessment:get', { assessmentId: made.assessment.id }).items;
+  assert.ok(items.length >= 3, 'the t2 questions are used');
+  assert.ok(items.every(i => String(i.topicId) === 't2'), 'only questions of the chosen topic');
+  const preview = t.call('exam:preview', { subjectId: 's1', config: { count: 50, test: true, topicIds: ['t1'] } });
+  assert.ok(preview.count >= 1 && preview.count < 10, 'the preview counts only the chosen topic');
+  const narrow = t.call('journey:create', { subjectId: 's1', topicIds: ['t1'] });
+  assert.throws(() => t.call('assessment:create', { subjectId: 's1', journeyId: narrow.id, kind: 'practice', title: 'P', config: { topicIds: ['t2'] } }), /None of the chosen topics belong to this cycle/);
+});
+
 test('scheduling: the calendar event and its link are created together, rolled back together, and cancelling removes both', () => {
   const t = setup(); seed(t);
   const journey = t.call('journey:create', { subjectId: 's1' });
