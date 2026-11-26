@@ -167,23 +167,30 @@
     report: svg(`${DOC}<path d="M6.5 11V9.5M8.5 11V7.5M10.5 11V9"/>`),
     retention: svg('<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3M6 10l1.5 1.5L10.5 8.5"/>'),
   };
-  const TRACK_WORD = { done: 'Completed', now: 'On going', todo: 'Not completed' };
+  const TRACK_WORD = { done: 'Completed', now: 'In progress', todo: 'Not complete' };
   function stageStates(S) {
     const j = S.journey;
     const at = j ? Math.max(0, STAGES.findIndex(x => x[0] === j.stage)) : 0;
     const finished = j && ['completed', 'done'].includes(j.status);
     return STAGES.map((x, i) => (finished || i < at ? 'done' : i === at ? 'now' : 'todo'));
   }
+  /* Cycle track (owner mock-ups 2026-11-26): one stop per stage; gray = not complete, blue = in progress, green = completed.
+     Each stop is focusable and shows a small tooltip (name and status) on hover or keyboard focus. */
   function trackView(S) {
-    const states = stageStates(S);
+    const states = stageStates(S); const last = STAGES.length - 1;
     const stops = STAGES.map(([key, label], i) => {
       const st = states[i]; const word = TRACK_WORD[st];
-      return `${i ? `<span class="qz-link${st === 'todo' ? '' : ' done'}" aria-hidden="true"></span>` : ''}<span class="qz-stop ${st}" role="listitem" data-stage="${key}" title="${esc(label)} · ${word}" aria-label="${esc(label)}: ${word}"${st === 'now' ? ' aria-current="step"' : ''}>${STAGE_ICON[key] || ''}</span>`;
+      const link = i ? `<span class="qz-link ${states[i - 1] === 'done' && st !== 'todo' ? (st === 'now' ? 'into' : 'done') : ''}" aria-hidden="true"></span>` : '';
+      const edge = i === 0 ? ' first' : i === last ? ' last' : '';
+      return `${link}<span class="qz-stop ${st}${edge}" role="listitem" tabindex="0" data-stage="${key}" aria-label="${esc(label)}: ${word}"${st === 'now' ? ' aria-current="step"' : ''}>${STAGE_ICON[key] || ''}<span class="qz-tip" aria-hidden="true"><strong>${esc(label)}</strong><span class="qz-tip-st ${st}"><i></i>${word}</span></span></span>`;
     }).join('');
-    const now = STAGES[states.indexOf('now')];
-    return `<div class="qz-track-head"><h3 class="qz-panel-h">Cycle</h3><span class="qz-track-key" aria-hidden="true"><i class="todo"></i>Not completed<i class="now"></i>On going<i class="done"></i>Completed</span></div>
+    const done = states.filter(x => x === 'done').length; const at = states.indexOf('now');
+    const now = STAGES[at];
+    return `<div class="qz-track-card">
+      <div class="qz-track-head"><h3 class="qz-panel-h">Cycle</h3><span class="qz-track-count">${at >= 0 ? `Stage ${at + 1} of ${STAGES.length}` : 'Complete'} · ${done} completed</span></div>
       <div class="qz-track" role="list" aria-label="Cycle stages">${stops}</div>
-      <p class="qz-track-now">${now ? `<strong>${esc(now[1])}</strong> · ${esc(now[3])}` : 'This cycle is complete.'}</p>`;
+      <div class="qz-track-foot"><p class="qz-track-now">${now ? `<span class="qz-now-dot" aria-hidden="true"></span><strong>${esc(now[1])}</strong><span>${esc(now[3])}</span>` : 'This cycle is complete.'}</p>
+        <span class="qz-track-key" aria-hidden="true"><i class="todo"></i>Not complete<i class="now"></i>In progress<i class="done"></i>Completed</span></div></div>`;
   }
   function paintBar(S) {
     const host = hostOf(S); if (!host) return;
