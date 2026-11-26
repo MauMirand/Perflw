@@ -117,7 +117,24 @@
     const r = panel.getBoundingClientRect();
     Object.assign(host.style, { position: 'fixed', top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` });
   }
-  window.addEventListener('resize', () => { for (const S of states.values()) if (S.expanded) placeOverlay(hostOf(S)); });
+  /* The overlay follows the main panel: window resizes, and the sidebar collapsing or expanding (which moves and resizes the panel
+     with an animation). After each change it re-measures for a few frames, so it tracks the animation and settles on the end. */
+  const followPanel = () => { for (const S of states.values()) if (S.expanded) placeOverlay(hostOf(S)); };
+  let settling = 0;
+  function settle() {
+    if (![...states.values()].some(S => S.expanded)) return;
+    const start = !settling; settling = 30; // about half a second at 60 fps
+    if (start) { const tick = () => { followPanel(); if (--settling > 0) requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+  }
+  let watchedPanel = null;
+  function watchPanel() {
+    const panel = document.getElementById('main-panel'); if (!panel || panel === watchedPanel) return;
+    watchedPanel = panel;
+    if (typeof ResizeObserver === 'function') new ResizeObserver(settle).observe(panel);
+  }
+  window.addEventListener('resize', settle);
+  document.addEventListener('transitionrun', settle, true); // a move without a size change (the panel sliding) is caught here
+  document.addEventListener('transitionend', settle, true);
   /* Right-hand sections (owner, 2026-11-26): Cycle status, Question bank, Schedule. Studying is parked for a later place. */
   const SECTIONS = [['home', 'Cycle status'], ['bank', 'Question bank'], ['schedule', 'Schedule']];
   const sectionOf = mode => (['bank', 'add', 'templates'].includes(mode) ? 'bank' : mode === 'schedule' ? 'schedule' : 'home');
@@ -1067,7 +1084,7 @@
       <div class="qz-ev-cols"><div><p class="qz-ev-h">Strengths</p>${d ? list(d.strengths) : '<p class="qz-ev-none">—</p>'}</div><div><p class="qz-ev-h">Focus Area</p>${d ? list(d.focus) : '<p class="qz-ev-none">—</p>'}</div></div>`;
   }
   function expand(S, then) {
-    S.expanded = true; const host = hostOf(S); if (host) { host.hidden = false; placeOverlay(host); }
+    S.expanded = true; watchPanel(); const host = hostOf(S); if (host) { host.hidden = false; placeOverlay(host); }
     setTimeout(() => { const t = hostOf(S) && hostOf(S).querySelector('#qz-cycle-title'); if (t) t.focus({ preventScroll: true }); }, 0);
     Promise.resolve(then ? then() : null).catch(error => fail(S, error));
   }

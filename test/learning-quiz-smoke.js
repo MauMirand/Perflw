@@ -139,6 +139,17 @@ async function main() {
   await waitFor("!document.querySelector('[data-qz-host]').hidden && !!document.querySelector('.qz-cycle .qz')", 'Learning Cycle open');
   assert.ok(await evaluate("(() => { const a = document.querySelector('[data-qz-host]').getBoundingClientRect(), b = document.getElementById('main-panel').getBoundingClientRect(); return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; })()"), 'the Learning Cycle covers the main panel');
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-cytab]')].map(b => b.textContent)"), ['Pre-Test', 'Practice', 'Final Exam']);
+  // The sidebar collapsing and expanding moves the main panel; the Learning Cycle follows it (owner bug report 2026-11-26).
+  const covers = "(() => { const a = document.querySelector('[data-qz-host]').getBoundingClientRect(), b = document.getElementById('main-panel').getBoundingClientRect(); return Math.abs(a.top - b.top) < 2 && Math.abs(a.left - b.left) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2; })()";
+  const panelLeft = await evaluate("document.getElementById('main-panel').getBoundingClientRect().left");
+  await click('#sidebar-toggle');
+  await waitFor(`Math.abs(document.getElementById('main-panel').getBoundingClientRect().left - ${panelLeft}) > 20`, 'the panel moved with the sidebar');
+  await sleep(900);
+  assert.ok(await evaluate(covers), 'after collapsing the sidebar the Learning Cycle still covers the main panel exactly');
+  await click('#sidebar-toggle');
+  await sleep(900);
+  assert.ok(await evaluate(covers), 'after expanding the sidebar again it still covers the main panel exactly');
+  step('Learning Cycle follows the main panel when the sidebar collapses and expands');
   assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-qz-sections] .qz-tab')].map(b => b.textContent)"), ['Cycle status', 'Question bank', 'Schedule']);
   await waitFor("!!document.querySelector('[data-qz-side] [aria-label=Status]') && /Your Performance/.test(document.querySelector('[data-qz-side]').textContent) && /Not taken/.test(document.querySelector('[data-qz-side]').textContent)", 'Status and Your Performance cards');
   assert.ok(await evaluate("!document.querySelector('[data-qz-study-topic]') && !document.querySelector('[data-qz=\"study-start\"]')"), 'no Start studying in the Learning Cycle (parked)');
