@@ -97,6 +97,8 @@
     else if (a.images && a.images.reading) overview = `<p class="ls-overview-wait"><span class="spinner" aria-hidden="true"></span>Reading pictures ${Math.min(a.images.reading.done + 1, a.images.reading.total)} of ${a.images.reading.total}…</p>`;
     else if (a.structuring) overview = '<p class="ls-overview-wait"><span class="spinner" aria-hidden="true"></span>Finding the headings in this file…</p>';
     else if (a.enrichStatus === 'running' || a.enrichStatus === 'pending') overview = '<p class="ls-overview-wait"><span class="spinner" aria-hidden="true"></span>Writing the AI overview…</p>';
+    // A failed or unavailable overview says why and offers another try, instead of the spinner just vanishing.
+    else if (a.enrichStatus === 'failed' || a.enrichStatus === 'unavailable') overview = `<p class="ls-overview-wait ls-overview-failed" role="status">${esc(a.enrichStatus === 'failed' ? `No AI overview: ${a.enrichError || 'the AI did not answer.'}` : (a.enrichError || 'The AI overview needs an AI model.'))} <button class="link-btn" type="button" data-ls="reanalyze">Try again</button></p>`;
     // Little or no text: the headings (bookmarks, slide titles) still navigate the file; only a file with none says so.
     if (a.empty && !a.sections.some(s => s.number)) return `${head}${overview}<p class="ls-empty">${a.images && (a.images.reading || a.images.total > a.images.read) ? 'The text of this file is in its pictures.' : 'No readable text was found in this file.'}</p>`;
     const shown = displayNumbers(a);

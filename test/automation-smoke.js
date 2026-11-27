@@ -138,7 +138,7 @@ async function run() {
   const model = await pickModel();
   console.log(`Using local model: ${model}`);
   await launch();
-  await waitFor("!document.getElementById('login-page').hidden", 'login page');
+  await waitFor("(!document.getElementById('login-page').hidden || !document.getElementById('register-page').hidden)", 'sign-in or first-run sign-up page');
   await click('[data-auth="register"]');
   await fill('#register-email', 'flow@example.com');
   await fill('#register-password', 'Fl0w-test-pass');

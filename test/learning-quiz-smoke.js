@@ -112,7 +112,7 @@ async function main() {
     const p = d.id && pending.get(d.id); if (!p) return; pending.delete(d.id); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result);
   };
   await cdp('Runtime.enable'); await cdp('Network.enable');
-  await waitFor("document.readyState === 'complete' && !document.getElementById('login-page').hidden", 'login page');
+  await waitFor("document.readyState === 'complete' && (!document.getElementById('login-page').hidden || !document.getElementById('register-page').hidden)", 'sign-in or first-run sign-up page');
   await click('[data-auth="register"]');
   await fill('#register-email', 'quiz@example.com'); await fill('#register-password', 'Quiz-pass-123'); await fill('#register-confirmation', 'Quiz-pass-123');
   await submit('#register-form');

@@ -1926,6 +1926,25 @@ Not pushed, not merged.
 - **Out of context (owner screenshot: "Explain Slide 19 in your own words."):** template questions with a generic section title ("Slide 19", "Page 3", "Section 2") ask the idea itself; true/false asks "True or false?"; matching skips such titles. The AI writer sees generic titles as "Key points", is told never to name slides/pages/"the text", and drafts that do are rejected. Older questions of that kind are repaired when listed (idea from their explanation); past tests keep their snapshot.
 - **Checks:** `npm test` 312/312 (new tests for each); `npm run test:ml1` PASS, also live (`QZ_LIVE_AI=1`: 5 questions in 95 s); `npm run test:electron` PASS.
 
+
+### HO-050 — Claude A: fixes from a simulated student walkthrough (branch `claude/student-ux-testing-2bd58f`)
+
+**Date:** 2026-11-27 · **Status:** SUBMITTED (not reviewed) · committed on the branch, not merged, not pushed
+
+Owner asked for a first-time-student run of the app and then "fix everything". Findings were reproduced in an isolated test profile.
+
+- **Key points** (`learning-intel.js`): a sentence that opens with a pronoun ("They are called the powerhouse…") joins the sentence it refers to; plain statements fill a section up to its limit (Organelles went from 1 point, missing mitochondria/ribosomes/ER/Golgi, to 4). Section limit 3 → 4 (6 for long sections).
+- **AI overview** (`learning-study.js`): a failed or unavailable overview shows its reason and Try again (it used to vanish silently; the stored error was a 180 s timeout while Ollama was busy).
+- **Scores** (`learning-quiz.js`, `learning-ipc.js`): the weak-topic list shows "N of M missed" instead of the raw miss rate ("score 0.25" read like a grade next to 75%); heading "Topics to keep working on"; By-topic bars show %; a line explains score (this test) vs level (whole cycle); Strengths/Focus labelled "latest test".
+- **Question writer** (`learning-coach.js`): rejects clipped true/false statements ("Prok: cells …", < 4 words) and "What happens when …" stems on excerpts with no cause; the non-causal understanding hint no longer suggests "What happens when".
+- **Question bank**: shows the true/false statement and answer key, and multiple-choice options with the key; rejected questions are hidden (shown with "Show retired and rejected questions", with "Approve instead"); Generate questions is blue again (`--go` was only defined inside test screens).
+- **Pre-test** keeps 2 questions per topic (a larger default left the final exam with no unseen questions; `test:ml1` caught it); key hint matches the question type (T or F on true/false).
+- **Calendar/search** (`renderer.js`, `schedule-blocks.js`): New button in the calendar toolbar; month cells show schedule titles; next/previous month opens on the 1st (or today); sidebar date card says "Today · Fri" or "Friday · selected"; global search finds schedules by title, location or details; search placeholder without "whims"; "Default view" setting renamed "Calendar view" (it follows the last view picked).
+- **Sign-up** (`auth.js`, `main.js`, `index.html`): a fresh install opens on Create account (`hasAccounts`); a confirmation that stops matching shows "Passwords do not match yet"; form errors sit under the submit button so fields no longer jump.
+- **Learning**: Learn on a subject with no topics opens the subject page with a hint instead of an error toast; "No study time yet" → "No timed study yet".
+- **Checks:** `npm test` 315/315 (new `test/student-ux.test.js`: key points, question checks, hasAccounts). `npm run test:electron` updated for first-run register and Learn-without-topics; it now stops at "header height steady in edit mode (298 -> 361.6)" on the Home profile, **the same failure on clean `main` 4c343fe** (pre-existing, not caused here). `test:ml1` PASS, `test:learning` PASS (both updated for the first-run sign-up page). `test:automation` fails at "the writer followed the skill (… no SEASON line)", same on clean `main`; `test:pdf` could not start its fake Ollama (port 11434 in use by the real one): environment, not run. Live check in the app (CDP-driven): month titles, New, search "midterm", Try again, new key points, bank preview, results wording.
+- **Not done / owner calls:** global search does not look inside file text or notes; one uploaded file is still one topic (no split by heading); labels Study vs Start your session, Major/Minor, Milestone, Workflows/Agents/Skills in a student sidebar, 13 unlabeled cycle icons (tooltips exist on hover), only Dark theme; the 75%-but-Emerging rule itself (mastery model, ADR) is unchanged, only explained.
+
 ---
 
 ## 5. Review Decision Definitions
