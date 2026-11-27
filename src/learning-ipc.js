@@ -89,7 +89,23 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
   on('journey:update', ['journeyId', 'stage', 'title', 'topicIds', 'targetDate', 'status'], (u, a) => store().updateJourney(u, a));
 
   // ───────── questions
-  on('questions:list', ['subjectId', 'topicId', 'status', 'review'], (u, a) => store().listQuestions(u, a));
+  /* Repair of older template questions named after a place in the file ("Explain Slide 19 in your own words.", "True or false: Slide 19"):
+     the idea comes from the question's own explanation (the section's description). Idempotent; past tests keep their snapshots. */
+  const PLACE = String.raw`(slide|page|section|part|chapter|sheet|figure|item)\s*#?\s*[\d.]+[a-z]?`;
+  const OLD_EXPLAIN = new RegExp(`^Explain ${PLACE} in your own words\.?$`, 'i'); const OLD_TF = new RegExp(`^True or false: ${PLACE}$`, 'i');
+  function repairPlaceNames(u, list) {
+    return list.map(q => {
+      let prompt = null;
+      if (q.type === 'truefalse' && OLD_TF.test(q.prompt)) prompt = 'True or false?';
+      else if (q.type === 'explain' && OLD_EXPLAIN.test(q.prompt)) {
+        const idea = String(q.explanation || '').split(/(?<=[.!?])\s/)[0].replace(/[.!?]+$/, '').trim();
+        if (idea.length >= 8) prompt = `Explain in your own words: ${idea.length > 90 ? `${idea.slice(0, 89).trimEnd()}…` : idea}.`;
+      }
+      if (!prompt) return q;
+      try { return store().saveQuestion(u, { question: { ...q, prompt } }); } catch { return q; }
+    });
+  }
+  on('questions:list', ['subjectId', 'topicId', 'status', 'review'], (u, a) => repairPlaceNames(u, store().listQuestions(u, a)));
   on('questions:save', ['question'], (u, a) => store().saveQuestion(u, a));
   on('questions:retire', ['questionId'], (u, a) => store().retireQuestion(u, a));
   on('questions:delete', ['questionId'], (u, a) => store().deleteQuestion(u, a));
@@ -406,10 +422,12 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const sections = [...(fileSections || []), ...noteSections(u, a.subjectId, row.id)];
     const types = (Array.isArray(a.types) && a.types.length ? a.types : ['choice', 'truefalse']).filter(x => ['choice', 'truefalse', 'explain'].includes(x));
     const dimensions = (Array.isArray(a.dimensions) && a.dimensions.length ? a.dimensions : ['recognition', 'recall']).filter(x => model.DIMENSIONS.includes(x));
-    const count = Math.min(10, Math.max(1, Number.isInteger(a.count) ? a.count : 5));
-    const out = await coach.generateQuestions(u, { subjectId: a.subjectId, topic: { id: row.id, title: row.title }, fileId: row.fileId, sections, types, dimensions, count });
+    const count = Math.min(25, Math.max(1, Number.isInteger(a.count) ? a.count : 5));
+    // Facts already behind a question on this topic are skipped, so pressing Generate again finds new ones (owner, 2026-11-27).
+    const exclude = store().listQuestions(u, { subjectId: a.subjectId }).filter(q => String(q.topicId) === String(row.id) && q.status !== 'retired').flatMap(q => (q.source || []).map(x => x && x.quote).filter(Boolean));
+    const out = await coach.generateQuestions(u, { subjectId: a.subjectId, topic: { id: row.id, title: row.title }, fileId: row.fileId, sections, types, dimensions, count, exclude });
     const saved = out.questions.map(q => store().saveQuestion(u, { question: q })); // saved as 'unreviewed': practice only until a person approves (D3)
-    return { saved, rejected: out.rejected, requested: count, provenance: out.provenance };
+    return { saved, rejected: out.rejected, requested: count, exhausted: Boolean(out.exhausted), provenance: out.provenance };
   });
   /* Notes as excerpts: targeted notes (minus the "You answered" lines, which may hold a wrong answer) and side notes, as Markdown text. */
   function noteSections(u, subjectId, topicId) {

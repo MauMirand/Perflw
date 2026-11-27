@@ -132,3 +132,32 @@ test('explainMistakes: grounded explanation, or null when the file does not cove
   assert.equal(await make('x').explainMistakes('u', { topicTitle: 'Ionic', missed: [], sections }), null);
   assert.equal(await make('x').explainMistakes('u', { topicTitle: 'Ionic', missed: ['Why?'], sections: [] }), null);
 });
+
+test('writeQuestions: every uncovered fact once (up to the cap), facts already in the bank skipped, nothing left = exhausted', async () => {
+  const excerpts = coach.excerptsOf([{ number: '1', title: 'Bonds', description: 'Ionic bonds form by electron transfer between atoms.', keyPoints: ['Covalent bonds share a pair of electrons.', 'Metallic bonds hold ions in a sea of electrons.'] }]);
+  const ctx = { subjectId: 's1', topicId: 't1', provenance: { provider: 'test', model: 'm', agentId: 'a', promptVersion: 'p', generatedAt: '2026-11-27T00:00:00.000Z' } };
+  const run = async prompt => {
+    if (/^Answer this question/.test(prompt)) return '{"answer":true}';
+    const fact = (/Ask about THIS fact of the excerpt: "([^"]+)"/.exec(prompt) || [])[1];
+    return JSON.stringify({ statement: fact, correct: true, dimension: 'recall', difficulty: 1 });
+  };
+  const all = await coach.writeQuestions(run, { topicTitle: 'Bonds', excerpts, types: ['truefalse'], dimensions: ['recall'], count: 25, ctx });
+  assert.equal(all.questions.length, 3, 'one question per fact, no more, even with a cap of 25');
+  assert.equal(new Set(all.questions.map(q => q.payload.statement)).size, 3);
+  const rest = await coach.writeQuestions(run, { topicTitle: 'Bonds', excerpts, types: ['truefalse'], dimensions: ['recall'], count: 25, ctx, exclude: ['Covalent bonds share a pair of electrons.'] });
+  assert.equal(rest.questions.length, 2, 'a fact the bank already covers is skipped');
+  const none = await coach.writeQuestions(run, { topicTitle: 'Bonds', excerpts, types: ['truefalse'], dimensions: ['recall'], count: 25, ctx, exclude: all.questions.map(q => q.source[0].quote) });
+  assert.equal(none.questions.length, 0); assert.equal(none.exhausted, true);
+});
+
+test('writeQuestions: a question that points at "Slide 19" or "the text" is rejected; generic excerpt titles are hidden from the model', async () => {
+  const excerpts = coach.excerptsOf([{ number: '19', title: 'Slide 19', description: 'Managers satisfice when information is incomplete.', keyPoints: [] }]);
+  assert.equal(excerpts[0].title, 'Key points');
+  const ctx = { subjectId: 's1', topicId: 't1', provenance: { provider: 'test', model: 'm', agentId: 'a', promptVersion: 'p', generatedAt: '2026-11-27T00:00:00.000Z' } };
+  const prompts = [];
+  const run = async prompt => { prompts.push(prompt); return /^Answer this question/.test(prompt) ? '{"answer":true}' : JSON.stringify({ statement: 'According to the text, managers satisfice when information is incomplete.', correct: true }); };
+  const out = await coach.writeQuestions(run, { topicTitle: 'Decisions', excerpts, types: ['truefalse'], dimensions: ['recall'], count: 5, ctx });
+  assert.equal(out.questions.length, 0);
+  assert.ok(out.rejected.every(r => /instead of standing on its own/.test(r.reason)));
+  assert.ok(!/Slide 19/.test(prompts[0]) && /never mention a slide, page/.test(prompts[0]));
+});

@@ -1918,6 +1918,14 @@ Not pushed, not merged.
 - **Machine settings (owner OK):** user env `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`; `qwen3:4b` pulled (2.5 GB).
 - **Checks:** `npm test` 308/308; `npm run test:ml1` PASS, also with `QZ_LIVE_AI=1` (live: Skewing cycles, 4 questions in 99 s); `npm run test:electron` PASS.
 
+### HO-049 — Claude A: all possible questions (max 25) and no out-of-context questions (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-27 · **Status:** SUBMITTED (not reviewed) · merged and pushed (standing "always push live" rule)
+
+- **Generate questions** now writes every question a topic's material supports, one per fact, up to 25 per topic; facts already cited by the topic's questions are skipped, so pressing it again finds new ones; a failed fact gets one retry with another type; "every fact already has a question" when nothing is left. `questions:generate` allows up to 25.
+- **Out of context (owner screenshot: "Explain Slide 19 in your own words."):** template questions with a generic section title ("Slide 19", "Page 3", "Section 2") ask the idea itself; true/false asks "True or false?"; matching skips such titles. The AI writer sees generic titles as "Key points", is told never to name slides/pages/"the text", and drafts that do are rejected. Older questions of that kind are repaired when listed (idea from their explanation); past tests keep their snapshot.
+- **Checks:** `npm test` 312/312 (new tests for each); `npm run test:ml1` PASS, also live (`QZ_LIVE_AI=1`: 5 questions in 95 s); `npm run test:electron` PASS.
+
 ---
 
 ## 5. Review Decision Definitions

@@ -482,13 +482,13 @@
   function genButton(S) {
     const g = S.gen || {}; const running = !!g.running;
     const label = running ? `Skewing${'.'.repeat(g.dots || 1)}` : 'Generate questions';
-    const why = S.ai.available ? `Writes 5 questions for each topic in ${scopeLabel(S)}, from your files and notes. Drafts wait for your review.` : S.ai.reason;
+    const why = S.ai.available ? `Writes every question your files and notes support for each topic in ${scopeLabel(S)}, up to 25 per topic, one per fact, skipping facts that already have a question. Drafts wait for your review.` : S.ai.reason;
     return `<button class="btn qz-go qz-gen${running ? ' running' : ''}" type="button" data-qz="ai-quick" aria-busy="${running}" ${S.ai.available && !running ? '' : 'disabled'} title="${esc(why)}"><span class="qz-gen-spark" aria-hidden="true"></span><span data-qz-gen-label>${label}</span></button>`;
   }
   function genBanner(S) {
     const g = S.gen; if (!g) return '';
     if (g.running) return `<p class="qz-gen-status" role="status" data-qz-gen-status>Writing questions · topic ${g.i} of ${g.total}${g.topic ? ` · ${esc(g.topic)}` : ''}. You can keep working.</p>`;
-    if (!g.saved.length) return `<p class="qz-gen-status" role="status">No usable questions this time${g.error ? `: ${esc(g.error)}` : ''}. Try again, or add a file or notes to the topic.</p>`;
+    if (!g.saved.length) return `<p class="qz-gen-status" role="status">${g.exhausted === g.total && !g.error ? 'Every fact in these topics already has a question. Add a file or notes for more.' : `No usable questions this time${g.error ? `: ${esc(g.error)}` : ''}. Try again, or add a file or notes to the topic.`}</p>`;
     const left = S.allQuestions.filter(q => g.saved.includes(q.id) && q.review === 'unreviewed').length;
     return `<div class="qz-gen-done" role="status"><span><strong>${g.saved.length} new question${g.saved.length === 1 ? '' : 's'}</strong>${left ? ` · ${left} waiting for your review (practice can use them now; tests need approval)` : ' · all reviewed'}</span>${left ? `<span class="qz-row">${btn('ai-approve-all', `Approve all ${left}`)}${S.mode === 'bank' ? '' : ghost('bank', 'Review')}</span>` : ''}</div>`;
   }
@@ -508,7 +508,7 @@
     for (const id of ids) {
       S.gen.i++; S.gen.topic = (S.topics.find(t => String(t.id) === id) || {}).title || '';
       const st = hostOf(S) && hostOf(S).querySelector('[data-qz-gen-status]'); if (st) st.textContent = `Writing questions · topic ${S.gen.i} of ${S.gen.total} · ${S.gen.topic}. You can keep working.`;
-      try { const out = await D().questionsGenerate({ subjectId: S.subjectId, topicId: id, types: GEN_TYPES, dimensions: GEN_DIMS, count: 5 }); S.gen.saved.push(...out.saved.map(q => q.id)); S.gen.rejected += out.rejected.length; }
+      try { const out = await D().questionsGenerate({ subjectId: S.subjectId, topicId: id, types: GEN_TYPES, dimensions: GEN_DIMS, count: 25 }); S.gen.saved.push(...out.saved.map(q => q.id)); S.gen.rejected += out.rejected.length; if (out.exhausted) S.gen.exhausted = (S.gen.exhausted || 0) + 1; }
       catch (error) { S.gen.error = error.message; }
     }
     S.gen.running = false; clearInterval(S.genTick);
@@ -524,7 +524,7 @@
     const topics = S.topics.map(t => `<option value="${esc(t.id)}"${String(f.topicId) === String(t.id) ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
     const types = Object.keys(TYPES).map(k => `<option value="${k}"${f.type === k ? ' selected' : ''}>${TYPES[k]}</option>`).join('');
     const topicOpts = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
-    const ai = `<details class="qz-ai-more"><summary>More options</summary><div class="qz-ai" role="group" aria-label="Write questions with AI"><span class="qz-opt-row"><label class="ln-field"><span>AI question writer</span><select class="field" data-qz-ai-topic>${topicOpts}</select></label><label class="ln-field"><span>How many</span><input class="field" data-qz-ai-count type="number" min="1" max="10" value="5"></label>${btn('ai-generate', 'Generate with AI', S.ai.available ? 'title="Drafts from your file, each quoting it; they wait for your review"' : `disabled title="${esc(S.ai.reason)}"`)}</span>${S.ai.available ? '' : `<p class="ln-soon">${esc(S.ai.reason)} You can still write your own questions and use the template drafts.</p>`}</div></details>`;
+    const ai = `<details class="qz-ai-more"><summary>More options</summary><div class="qz-ai" role="group" aria-label="Write questions with AI"><span class="qz-opt-row"><label class="ln-field"><span>AI question writer</span><select class="field" data-qz-ai-topic>${topicOpts}</select></label><label class="ln-field"><span>How many</span><input class="field" data-qz-ai-count type="number" min="1" max="25" value="25"></label>${btn('ai-generate', 'Generate with AI', S.ai.available ? 'title="Drafts from your file, each quoting it; they wait for your review"' : `disabled title="${esc(S.ai.reason)}"`)}</span>${S.ai.available ? '' : `<p class="ln-soon">${esc(S.ai.reason)} You can still write your own questions and use the template drafts.</p>`}</div></details>`;
     return `<div class="qz-row qz-bank-top">${genButton(S)}${ghost('add', 'Add question', 'data-qz-focus')}${ghost('templates', 'Template drafts', 'title="Draft questions built from your analysed files, no AI"')}</div>${genBanner(S)}${ai}<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
       <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired questions</label></form>
       <p class="ln-soon" role="status">${list.length} question${list.length === 1 ? '' : 's'}.</p>

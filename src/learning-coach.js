@@ -10,7 +10,7 @@
    `runAgent` is injected, so this module is tested with a fake one and needs no network. */
 const model = require('./assessment-model');
 
-const PROMPT_VERSION = 'coach-12';
+const PROMPT_VERSION = 'coach-13';
 const fail = message => { throw new Error(message); };
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const norm = text => String(text == null ? '' : text).toLowerCase().replace(/[\s ]+/g, ' ').replace(/[^\p{L}\p{N} ]/gu, '').trim();
@@ -37,7 +37,7 @@ function extractJson(text) {
 /* The text the writer sees, as numbered excerpts: the quotes in its answer must come from here. */
 function excerptsOf(sections) {
   return (sections || []).filter(s => s && s.title).map(s => ({
-    ref: String(s.number || s.title), title: s.title,
+    ref: String(s.number || s.title), title: /^\s*((slide|page|section|part|chapter|sheet|figure|item)\s*#?\s*[\d.]+[a-z]?|untitled( \w+)?|[\d.]+)\s*$/i.test(String(s.title || '')) ? 'Key points' : s.title,
     text: [s.description, ...(Array.isArray(s.keyPoints) ? s.keyPoints : [])].filter(Boolean).map(t => clip(t, 600)).join(' '),
   })).filter(e => e.text);
 }
@@ -100,7 +100,7 @@ function stemHint(dimension, excerpt) {
   if (dimension === 'application') return '"A ..." describing a short new situation, then ask what happens or which idea applies';
   if (dimension === 'understanding') return CAUSAL.test(excerpt.text) ? '"Why", "How" or "What happens when"' : '"What happens when", "How does" or "Which statement best describes"';
   if (dimension === 'recall') return '"What", "Which" or "Name"';
-  return '"Which", "What" or "According to the text"';
+  return '"Which" or "What"';
 }
 function buildOneQuestionPrompt({ topicTitle, excerpt, type, dimension, difficulty, avoid, fact }) {
   return `Write ONE ${type} question about "${topicTitle}" for a student, using ONLY this excerpt:
@@ -111,6 +111,7 @@ ${fact ? `Ask about THIS fact of the excerpt: "${fact}"\n` : ''}Skill (dimension
 Rules: ${TYPE_RULES[type]}
 Ask only what the excerpt states. Start the question with ${stemHint(dimension, excerpt)}. Ask "why" only if the excerpt itself gives the reason.
 Test the meaning, not a copied phrase: reword it in your own words. Never add a fact that the excerpt does not state.
+The question must make sense on its own: never mention a slide, page, section or chapter number, and never say "the excerpt", "the text" or "the passage".
 ${avoid.length ? `Do not repeat these questions: ${avoid.map(x => `"${clip(x, 90)}"`).join('; ')}\n` : ''}
 Reply with ONE short JSON object in exactly this shape and nothing else, no explanation (this example is about another text):
 ${EXAMPLE[type]}`;
@@ -190,6 +191,13 @@ function sanityProblem(q) {
   }
   return null;
 }
+/* A question must stand on its own: no "Slide 19", "page 3", "the excerpt" or "according to the text" (owner, 2026-11-27). */
+const OUT_OF_CONTEXT = /\b(slides?|pages?|sections?|chapters?|figures?|excerpts?)\s*#?\s*\d+|\b(the|this) (excerpt|passage|slide|text)\b|\baccording to the (text|excerpt|passage|slides?)\b/i;
+function contextProblem(q) {
+  const p = q.payload || {};
+  const texts = [q.prompt === 'True or false?' ? '' : q.prompt, p.statement, ...(p.options || []).map(o => o.text)].filter(Boolean);
+  return texts.some(t => OUT_OF_CONTEXT.test(t)) ? 'It points at a slide, page or "the text" instead of standing on its own.' : null;
+}
 /* A "why" question needs a reason stated in the excerpt; otherwise the key is a guess or a restatement. */
 function whyProblem(q, excerpt) {
   const stem = q.type === 'truefalse' ? '' : String(q.prompt || '');
@@ -200,22 +208,25 @@ function factsOf(excerpts) {
   const out = []; for (let i = 0; out.length < 200 && lists.some(l => l[i]); i++) for (const l of lists) if (l[i]) out.push(l[i]);
   return out;
 }
-function planSlots({ excerpts, types, dimensions, count }) {
-  const facts = factsOf(excerpts);
+/* One slot per fact the bank does not cover yet (interleaved across excerpts), plus one retry of that fact with the next type; with no
+   sentence-level facts, excerpt-level slots as before. "All possible questions" = every uncovered fact, capped at `count`. */
+function planSlots({ excerpts, types, dimensions, count, exclude = [] }) {
+  const skip = new Set(exclude.map(norm));
+  const facts = factsOf(excerpts).filter(f => !skip.has(norm(f.fact)));
   const order = ['choice', 'truefalse', 'choice', 'explain', 'truefalse', 'choice', 'explain'].filter(t => types.includes(t));
   const typeList = order.length ? order : types;
   const dimFor = (t, i) => (t === 'explain' ? ['understanding', 'recall'] : t === 'choice' ? (i % 2 ? ['application', 'recognition'] : ['recognition', 'understanding']) : ['recall', 'recognition']).find(d => dimensions.includes(d)) || dimensions[0];
-  return Array.from({ length: count * 2 + 4 }, (_, i) => {
-    const type = typeList[i % typeList.length];
-    const f = facts.length ? facts[i % facts.length] : { excerpt: excerpts[i % excerpts.length], fact: '' };
-    return { type, dimension: dimFor(type, i), difficulty: [2, 1, 2, 3, 2][i % 5], excerpt: f.excerpt, fact: f.fact };
-  });
+  const slot = (type, i, excerpt, fact) => ({ type, dimension: dimFor(type, i), difficulty: [2, 1, 2, 3, 2][i % 5], excerpt, fact });
+  if (!facts.length) return factsOf(excerpts).length ? [] : Array.from({ length: count * 2 + 4 }, (_, i) => slot(typeList[i % typeList.length], i, excerpts[i % excerpts.length], ''));
+  return facts.flatMap((f, i) => [slot(typeList[i % typeList.length], i, f.excerpt, f.fact), slot(typeList[(i + 1) % typeList.length], i + 1, f.excerpt, f.fact)]);
 }
-async function writeQuestions(run, { topicTitle, excerpts, types, dimensions, count, ctx, check }) {
+async function writeQuestions(run, { topicTitle, excerpts, types, dimensions, count, ctx, check, exclude = [] }) {
   const verify = check || run; // the blind answer check can use a faster model (owner: faster generation, 2026-11-27)
-  const questions = []; const rejected = []; let calls = 0; const usedFacts = new Set();
-  for (const slot of planSlots({ excerpts, types, dimensions, count })) {
+  const questions = []; const rejected = []; let calls = 0; const usedFacts = new Set(exclude.map(norm)); const doneFacts = new Set();
+  const slots = planSlots({ excerpts, types, dimensions, count, exclude });
+  for (const slot of slots) {
     if (questions.length >= count) break;
+    if (slot.fact && doneFacts.has(slot.fact)) continue; // this fact already has its question
     const index = calls;
     calls++;
     let text;
@@ -225,7 +236,7 @@ async function writeQuestions(run, { topicTitle, excerpts, types, dimensions, co
     if (!raw) { calls++; raw = extractJson(await run(`Your last reply was not valid JSON. Reply again with ONLY the JSON object for this request:\n\n${clip(text, 3000)}`, { temperature: 0, maxTokens: 320, format: SCHEMA[slot.type], think: false })); }
     if (!raw) { rejected.push({ index, reason: 'The model did not return usable JSON.' }); continue; }
     const q = tidy(raw.questions && Array.isArray(raw.questions) ? raw.questions[0] : raw, slot);
-    const problem = sanityProblem(q) || whyProblem(q, slot.excerpt);
+    const problem = sanityProblem(q) || whyProblem(q, slot.excerpt) || contextProblem(q);
     if (problem) { rejected.push({ index, reason: problem }); continue; }
     const parsed = parseQuestions(JSON.stringify({ questions: [q] }), { ...ctx, excerpts });
     if (!parsed.questions.length) { rejected.push({ index, reason: (parsed.rejected[0] || {}).reason || 'Rejected.' }); continue; }
@@ -263,9 +274,9 @@ async function writeQuestions(run, { topicTitle, excerpts, types, dimensions, co
     if (sentence && usedFacts.has(norm(sentence))) { rejected.push({ index, reason: 'It tests the same fact as an earlier question.' }); continue; }
     if (sentence) usedFacts.add(norm(sentence));
     if (sentence) draft.explanation = clip(`The text says: "${sentence}"`, 600);
-    questions.push(draft);
+    questions.push(draft); if (slot.fact) doneFacts.add(slot.fact);
   }
-  return { questions, rejected, calls };
+  return { questions, rejected, calls, exhausted: !slots.length };
 }
 
 // ───────── answer grading (spec §4.4)
@@ -346,14 +357,14 @@ function createLearningCoach({ ecosystem, agents, now = () => Date.now() }) {
     return { provider, model: agent.model || 'unknown', agentId: agent.id, promptVersion: PROMPT_VERSION, generatedAt: new Date(now()).toISOString() };
   }
 
-  async function generateQuestions(userId, { subjectId, topic, fileId, sections, types, dimensions, count, signal }) {
+  async function generateQuestions(userId, { subjectId, topic, fileId, sections, types, dimensions, count, signal, exclude = [] }) {
     const excerpts = excerptsOf(sections);
     if (!excerpts.length) fail('This topic has no analysed text to write questions from. Write your own, or wait until its file is analysed.');
     const agent = await ready(userId, 'writer');
     const provenance = await provenanceFor(userId, 'writer', agent);
     const run = (prompt, { temperature = 0.4, maxTokens, format, think } = {}) => ecosystem.runAgent(userId, { agent: { id: agent.id, name: agent.name }, prompt, signal, workflow: null, temperature, maxTokens, format, think });
-    const { questions, rejected } = await writeQuestions(run, { topicTitle: topic.title, excerpts, types, dimensions, count, ctx: { subjectId, topicId: topic.id, fileId, provenance } });
-    return { questions, rejected, provenance };
+    const { questions, rejected, exhausted } = await writeQuestions(run, { topicTitle: topic.title, excerpts, types, dimensions, count, exclude, ctx: { subjectId, topicId: topic.id, fileId, provenance } });
+    return { questions, rejected, exhausted, provenance };
   }
 
   async function gradeOpenAnswer(userId, { question, answerText, sections, signal }) {

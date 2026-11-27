@@ -699,3 +699,15 @@ test('the Home card rows: stage, reviews due and the next scheduled session, onl
   assert.equal(rows[0].stage, 'material'); assert.equal(rows[0].cycle, 1); assert.equal(rows[0].due, 0); assert.equal(rows[0].next.kind, 'practice');
   assert.throws(() => t.call('learning:home', { subjectIds: 's1' }), /must be a list/);
 });
+
+test('older template questions named after a slide are repaired when listed; the snapshot of a past test is untouched', () => {
+  const t = setup();
+  const q = t.call('questions:save', { question: { subjectId: 's1', topicId: 't1', type: 'explain', prompt: 'Explain Slide 19 in your own words.', dimension: 'understanding', difficulty: 2,
+    explanation: 'Bounded rationality limits how managers choose. More text.', origin: 'template', review: 'approved', payload: { maxWords: 120, rubric: [{ id: 'c1', criterion: 'Managers satisfice.', points: 1 }] } } });
+  const tf = t.call('questions:save', { question: { subjectId: 's1', topicId: 't1', type: 'truefalse', prompt: 'True or false: Slide 19', dimension: 'recognition', difficulty: 1, origin: 'template', review: 'approved',
+    payload: { statement: 'Managers satisfice.', correct: true, requireJustification: false } } });
+  const list = t.call('questions:list', { subjectId: 's1' });
+  assert.equal(list.find(x => x.id === q.id).prompt, 'Explain in your own words: Bounded rationality limits how managers choose.');
+  assert.equal(list.find(x => x.id === tf.id).prompt, 'True or false?');
+  assert.equal(t.call('questions:list', { subjectId: 's1' }).find(x => x.id === q.id).prompt, 'Explain in your own words: Bounded rationality limits how managers choose.', 'idempotent');
+});

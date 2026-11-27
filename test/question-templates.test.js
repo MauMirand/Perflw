@@ -52,3 +52,14 @@ test('deterministic, and safe with missing files, empty analysis and odd input',
   assert.deepEqual(templateQuestions({}), []);
   assert.deepEqual(templateQuestions({ subjectId: 's1', topics: [null, { id: 1 }], files }), []);
 });
+
+test('a generic section title ("Slide 19") never becomes the question: the idea itself is asked, and matching skips such titles', () => {
+  const t = require('../src/question-templates');
+  const sections = [19, 20, 21].map(n => ({ number: String(n), title: `Slide ${n}`, description: `Idea number ${n} explains how managers decide.`, keyPoints: [`Point A of ${n}.`, `Point B of ${n}.`] }));
+  const out = t.templateQuestions({ subjectId: 's', topics: [{ id: 't', title: 'Decisions', fileId: 'f' }], files: { f: { sections } } });
+  assert.ok(out.length > 0);
+  assert.ok(out.every(q => !/Slide \d+/.test(q.prompt)), out.map(q => q.prompt).join(' | '));
+  assert.match(out.find(q => q.type === 'explain').prompt, /^Explain in your own words: Idea number 19 explains how managers decide\.$/);
+  assert.ok(!out.some(q => q.type === 'matching'), 'no "Slide 19 ↔ description" matching');
+  assert.equal(t.isGeneric('Decision making'), false);
+});
