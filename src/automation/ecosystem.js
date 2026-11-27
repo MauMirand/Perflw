@@ -392,7 +392,12 @@ function createEcosystem({ root, workspace, secrets, fetchImpl = fetch, provider
       adapter, messages, tools, toolbox, signal, onDelta, log, name: agent.name, state: diagnostics, systemTokens, available: contextWindow - responseReserve,
       request: {
         connection, apiKey, model, system: assembled.system, cache, agentName: agent.name,
-        maxTokens: connection.type === 'anthropic' || config.context.responseReserveTokens ? responseReserve : null,
+        maxTokens: Number.isInteger(args.maxTokens) && args.maxTokens > 0 && connection.type !== 'ollama' ? args.maxTokens : connection.type === 'anthropic' || config.context.responseReserveTokens ? responseReserve : null,
+        // A caller may cap one reply (the Learning question writer asks for short JSON): Ollama's num_predict.
+        numPredict: Number.isInteger(args.maxTokens) && args.maxTokens > 0 ? args.maxTokens : null,
+        // Ollama only: a JSON schema for the reply, and thinking off for short structured jobs (the Learning question writer).
+        format: connection.type === 'ollama' && args.format && typeof args.format === 'object' ? args.format : null,
+        think: connection.type === 'ollama' && typeof args.think === 'boolean' ? args.think : null,
         numCtx: connection.type === 'ollama' && config.context.maxContextTokens ? contextWindow : null,
         // Optional sampling temperature for this request (the Learning workflow asks for low values: facts, not flair).
         temperature: typeof args.temperature === 'number' && args.temperature >= 0 && args.temperature <= 2 ? args.temperature : null

@@ -317,12 +317,12 @@ function ollamaAdapter(fetchImpl, base) {
     }
     return out;
   }
-  async function chat({ model, system, messages, tools, numCtx, temperature = null, signal, onDelta, agentName }) {
+  async function chat({ model, system, messages, tools, numCtx, numPredict = null, format = null, think = null, temperature = null, signal, onDelta, agentName }) {
     try {
       const result = await runtime.chat({
-        model, name: agentName, messages: wireMessages(system, messages), signal, onDelta,
+        model, name: agentName, messages: wireMessages(system, messages), signal, onDelta, format, think,
         tools: tools && tools.length ? tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) : null,
-        options: numCtx || temperature != null ? { ...(numCtx ? { num_ctx: numCtx } : {}), ...(temperature != null ? { temperature } : {}) } : null
+        options: numCtx || temperature != null || numPredict ? { ...(numCtx ? { num_ctx: numCtx } : {}), ...(temperature != null ? { temperature } : {}), ...(numPredict ? { num_predict: numPredict } : {}) } : null
       });
       return { ...result, usage: result.usage ? { ...result.usage, cachedTokens: null } : null };
     } catch (error) {

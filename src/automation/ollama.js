@@ -41,7 +41,7 @@ function createOllamaRuntime({ fetchImpl = fetch, base = BASE } = {}) {
   /* One chat turn with a full message list. Streams text through onDelta when no tools are offered;
      with tools it makes a single non-streamed request so tool calls arrive complete.
      Resolves to { text, toolCalls, usage } (usage counts are Ollama-reported, not estimates). */
-  async function chat({ model, name = 'The agent', messages, tools = null, options = null, keepAlive = KEEP_ALIVE, signal, onDelta = () => {} }) {
+  async function chat({ model, name = 'The agent', messages, tools = null, options = null, format = null, think = null, keepAlive = KEEP_ALIVE, signal, onDelta = () => {} }) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
@@ -53,6 +53,8 @@ function createOllamaRuntime({ fetchImpl = fetch, base = BASE } = {}) {
       const body = { model, messages, stream, keep_alive: keepAlive };
       if (!stream) body.tools = tools;
       if (options) body.options = options;
+      if (format) body.format = format; // a JSON schema: Ollama constrains the reply to it
+      if (typeof think === 'boolean') body.think = think; // false: no hidden reasoning tokens (Qwen3 and other thinking models)
       const response = await fetchImpl(`${base}/api/chat`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
         body: JSON.stringify(body)

@@ -224,6 +224,7 @@ async function main() {
   await waitFor("document.querySelectorAll('.qz-q').length === 1", 'type filter');
   await fill('[data-qz-form="bank-filter"] [name="type"]', '');
   await waitFor("document.querySelectorAll('.qz-q').length === 13", 'filter cleared');
+  assert.ok(await evaluate("(() => { const b = document.querySelector('[data-qz=ai-quick]'); return !!b && /Generate questions/.test(b.textContent) && b.classList.contains('qz-go') && (!b.disabled || b.title.length > 5); })()"), 'one-click Generate questions is the main bank action');
   assert.ok(await evaluate("(() => { const b = document.querySelector('[data-qz=ai-generate]'); return !!b && (!b.disabled || b.title.length > 5); })()"), 'Generate with AI is always visible; when disabled its tooltip says why');
   step(`AI controls: Generate with AI is ${await evaluate("document.querySelector('[data-qz=ai-generate]').disabled ? 'disabled (no model here), with the reason as its tooltip' : 'enabled (a local model was found)'")}`);
   await click('[data-qz="templates"]');
@@ -507,6 +508,22 @@ async function main() {
   await evaluate("document.querySelector('[data-qz=\"scope-all\"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   await waitFor("!document.querySelector('.qz-scope-pop') && !document.querySelector('[data-qz-host]').hidden", 'Escape closes only the picker');
   step('topic scope: Prelim period picked, practice drawn only from it and named after it, Entire subject restored, Escape closes the picker');
+  // Live AI (only with QZ_LIVE_AI=1: it needs a local model and takes minutes): one-click generation reads "Skewing." while it runs.
+  if (process.env.QZ_LIVE_AI === '1' && await evaluate("!!document.querySelector('[data-qz=ai-quick]:not([disabled])') || true")) {
+    await click('[data-qz="bank"]'); await waitFor("!!document.querySelector('[data-qz=\"ai-quick\"]') && !document.querySelector('[data-qz=\"ai-quick\"]').disabled", 'Generate questions enabled');
+    const before = await evaluate(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.length)`);
+    const t0 = Date.now();
+    await click('[data-qz="ai-quick"]');
+    await waitFor("/^Skewing\.{1,3}$/.test(document.querySelector('[data-qz-gen-label]').textContent)", 'the button reads Skewing.');
+    const a1 = await evaluate("document.querySelector('[data-qz-gen-label]').textContent"); await sleep(500);
+    const a2 = await evaluate("document.querySelector('[data-qz-gen-label]').textContent");
+    assert.notEqual(a1, a2, `the dots cycle (${a1} then ${a2})`);
+    await shoot('quiz-11-skewing');
+    await waitFor("!document.querySelector('[data-qz-gen-label]') || !/Skewing/.test(document.querySelector('[data-qz-gen-label]').textContent)", 'generation finished', 900000);
+    const after = await evaluate(`window.learningData.questionsList({ subjectId: ${q(subjectId)} }).then(l => l.length)`);
+    await shoot('quiz-11-generated');
+    step(`live AI: Skewing. → .. → ... while writing; ${after - before} new questions in ${Math.round((Date.now() - t0) / 1000)} s; ${await evaluate("(document.querySelector('.qz-gen-done') || document.querySelector('.qz-gen-status') || {}).textContent || ''")}`.slice(0, 220));
+  }
   assert.ok(!/Unhandled|TypeError|ReferenceError/.test(stderr), `no errors on stderr: ${stderr.slice(0, 300)}`);
   step('stderr clean');
   assert.deepEqual(webRequests, [], 'no http(s) request was made: no AI provider or network was needed');
