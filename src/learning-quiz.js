@@ -108,7 +108,7 @@
       <div class="qz-tabs qz-cycle-tabs" role="tablist" aria-label="Kind"></div>
       <div class="qz-cycle-body"><aside class="qz-cycle-side" data-qz-side aria-label="Status and performance"></aside>
         <div class="qz-cycle-main"><div class="qz-track-wrap" data-qz-track></div>
-          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-actions-end"><div class="qz-scope" data-qz-scope></div><button class="btn btn-sm btn-ghost qz-take-new" type="button" data-qz-take-new hidden>Start new</button><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div></div>
+          <div class="qz-actions" data-qz-bar><div class="qz-tabs qz-sections" role="tablist" aria-label="Sections" data-qz-sections></div><div class="qz-actions-end"><div class="qz-scope" data-qz-scope></div><button class="btn btn-sm btn-ghost qz-take-new" type="button" data-qz-take-new hidden>New</button><button class="btn btn-sm qz-take" type="button" data-qz-take>Take Test</button></div></div>
           <div class="qz-cycle-content" data-qz-content></div></div></div>
     </div>`;
   }

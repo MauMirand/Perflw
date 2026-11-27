@@ -1072,3 +1072,8 @@ body.motion-off .ln-pdfv-hl { animation: none; }
   @keyframes qz-gen-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
   .qz-gen-done { animation: qz-in-next .3s var(--ease) both; }
 }
+/* The running generator keeps its colour (it is disabled only to block a second click). */
+.btn.qz-go.qz-gen.running:disabled { opacity: 1; background: var(--go, #2f7cf6); color: #fff; }
+/* The action row wraps instead of cutting off Resume / Start new on narrow panels. */
+.qz-actions { flex-wrap: wrap; row-gap: 8px; }
+.qz-actions-end { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
