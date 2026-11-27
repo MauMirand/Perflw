@@ -57,12 +57,13 @@ test('a question that fails validateQuestion is rejected with the validator reas
 
 test('generateQuestions: success, nothing to write from, AI unavailable, and an aborted run', async () => {
   const calls = [];
-  const ecosystem = { getAgent: () => ({ config: { provider: { connectionId: 'ollama-local' } } }), runAgent: async (userId, args) => { calls.push(args); return JSON.stringify({ questions: [good] }); } };
+  const ecosystem = { getAgent: () => ({ config: { provider: { connectionId: 'ollama-local' } } }), runAgent: async (userId, args) => { calls.push(args); return /^Answer this question/.test(args.prompt) ? JSON.stringify({ answer: good.payload.correct }) : JSON.stringify({ questions: [good] }); } };
   const agents = { ready: async () => ({ id: 'agent-1', name: 'Writer', model: 'qwen2.5:7b' }) };
   const c = coach.createLearningCoach({ ecosystem, agents, now: () => Date.parse('2026-11-24T10:00:00Z') });
   const out = await c.generateQuestions('u', { subjectId: 's1', topic: { id: 't1', title: 'Ionic bonds' }, sections, types: ['truefalse'], dimensions: ['recognition'], count: 3 });
   assert.equal(out.questions.length, 1); assert.equal(out.provenance.provider, 'ollama-local');
-  assert.match(calls[0].prompt, /EXCERPTS\n\[1\] Ionic bonds/); assert.equal(calls[0].temperature, 0.4);
+  assert.match(calls[0].prompt, /Write ONE truefalse question[\s\S]*\[1\] Ionic bonds/); assert.equal(calls[0].temperature, 0.5);
+  assert.ok(calls.some(c => /^Answer this question/.test(c.prompt) && c.temperature === 0), 'each draft is answered blind and kept only when the key holds');
   await assert.rejects(() => c.generateQuestions('u', { subjectId: 's1', topic: { id: 't1', title: 'X' }, sections: [], types: ['choice'], dimensions: ['recall'], count: 1 }), /no analysed text/);
   const off = coach.createLearningCoach({ ecosystem, agents: { ready: async () => ({ missing: 'No AI model is available.' }) } });
   await assert.rejects(() => off.generateQuestions('u', { subjectId: 's1', topic: { id: 't', title: 'T' }, sections, types: ['choice'], dimensions: ['recall'], count: 1 }), /No AI model is available\. You can still write your own questions/);

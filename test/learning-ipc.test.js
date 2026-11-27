@@ -596,6 +596,21 @@ test('scheduling: the calendar event and its link are created together, rolled b
 // ───────── AI helpers (optional): drafts wait for review; grades are provisional and computed by code
 const provenance = { provider: 'ollama-local', model: 'qwen2.5:7b', agentId: 'a1', promptVersion: 'coach-1', generatedAt: '2026-11-24T10:00:00.000Z' };
 
+test('question writing also reads the student\'s notes on the topic, without the "You answered" lines', async () => {
+  const t = setup();
+  const journey = t.call('journey:create', { subjectId: 's1' });
+  const folder = path.join(t.dir, 'learning-files', 'u', 'journeys', journey.id); fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'n1.md'), '# Targeted note: Topic t1\n- You answered: covalent\n- Correct: ionic, because the metal gives its electron to the non-metal and the ions attract.\n');
+  t.store.addMaterial('u', { subjectId: 's1', journeyId: journey.id, topicId: 't1', kind: 'targeted_note', title: 'Targeted note: Topic t1', bodyFile: 'n1.md' });
+  let seen = null;
+  t.coachImpl.generate = async (u, args) => { seen = args.sections; return { questions: [], rejected: [], provenance }; };
+  await t.call('questions:generate', { subjectId: 's1', topicId: 't1', count: 1 });
+  const note = seen.find(x => x.title === 'Your targeted note');
+  assert.ok(seen.some(x => x.number === '1'), 'the file sections stay first');
+  assert.ok(note && /metal gives its electron/.test(note.description), 'the note is an excerpt');
+  assert.ok(!/You answered/.test(note.description), 'a possibly wrong answer is not shown to the writer');
+});
+
 test('AI status says why it is unavailable; generated questions are saved unreviewed and need approval for pre-tests and finals', async () => {
   const t = setup();
   assert.deepEqual(await t.call('ai:status', {}), { available: false, reason: 'No AI model is available.' });

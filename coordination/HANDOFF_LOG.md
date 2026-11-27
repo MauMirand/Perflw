@@ -1906,6 +1906,18 @@ Not pushed, not merged.
 - **Take Test → Resume** when a test of the selected kind is unfinished (newest in-progress or not-started); "Start new" beside it starts a fresh one.
 - **Checks:** `npm test` 307/307; `npm run test:ml1` PASS (wrong-answer motion classes, counters, Resume, toast asserted; segments ≥ 24 px tall); `npm run test:electron` PASS.
 
+### HO-048 — Claude A: AI question writer benchmark loop, speed work, one-click generation (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-27 · **Status:** SUBMITTED (not reviewed) · merged and pushed (standing "always push live" rule)
+
+- **Benchmark** `test/qgen-bench.js` (owner decisions: Sonnet via the `claude` CLI as reference and blind judge; sample texts in `test/fixtures/qgen-corpus.js`, none of the owner's files; stop at 90% of Sonnet or 6 rounds without gain). Sonnet scores 76.8.
+- **Results** (score, % of Sonnet, time per topic for 5 questions): start 13.9 (18%); best 3B 42.7 (56%, ~45 s); qwen2.5:7b 59–64 (77–84%, 2.5–6 min, spills to CPU on the 4 GB RTX 2050); **qwen3:4b 54–56 (71–73%, ~40 s)**, chosen as the practical default (the app picks the largest model that fits). 90% was not reached; the remaining gap is mostly one weak question per topic.
+- **Pipeline** (`src/learning-coach.js`, coach-12): one question per request from one assigned fact; Ollama structured outputs (JSON schema) and thinking off; loose JSON tidied/repaired; blind answer check; explanations, quotes and explain rubrics taken from real source sentences; no circular or reason-less "why" questions; no two questions on one fact. Notes and targeted notes are sources (`noteSections`, minus "You answered" lines). Skill `learning-question-writing` v2 (installed copies upgrade).
+- **Ollama plumbing:** `format`, `think`, `numPredict` pass through `ecosystem.runAgent` → `providers` → `ollama.js` (Ollama only).
+- **UI:** one-click Generate questions ("Skewing." → ".." → "..."), Approve all; setup/grading/results sheets; Take Test → Resume / New.
+- **Machine settings (owner OK):** user env `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`; `qwen3:4b` pulled (2.5 GB).
+- **Checks:** `npm test` 308/308; `npm run test:ml1` PASS, also with `QZ_LIVE_AI=1` (live: Skewing cycles, 4 questions in 99 s); `npm run test:electron` PASS.
+
 ---
 
 ## 5. Review Decision Definitions

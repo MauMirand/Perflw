@@ -680,6 +680,14 @@ function createLearningStore(db) {
   function getMaterial(userId, input) {
     return materialOut(owned('learning_materials', 'Material', userId, args(input).materialId));
   }
+  /* The student's own notes about a topic, for question writing: targeted notes and side notes on that topic, newest first, plus
+     side notes of the whole subject (no topic). AI-written help (side_note_ai) is left out so the writer learns from the student. */
+  function topicNotes(userId, input) {
+    const { subjectId, topicId, limit = 6 } = args(input);
+    const subject = subjectOf(userId, subjectId); const topic = topicIn(userId, subject.id, topicId);
+    return all(`SELECT * FROM learning_materials WHERE user_id=? AND subject_id=? AND kind IN ('targeted_note','side_note') AND (topic_id=? OR (topic_id IS NULL AND kind='side_note'))
+      ORDER BY (topic_id IS NULL), created_at DESC, id LIMIT ?`, userId, subject.id, topic.id, Math.max(1, Math.min(20, Number(limit) || 6))).map(materialOut);
+  }
   function listMaterials(userId, input) {
     const { journeyId, topicId, kind } = args(input);
     const journey = owned('learning_journeys', 'Journey', userId, journeyId);
@@ -716,7 +724,7 @@ function createLearningStore(db) {
     saveAnswer, setAnswerAttempt, submitAssessment, gradeOpenAnswer, setAiGrade, acceptAiGrade,
     startSession, endSession, markVisited, addMaterial, getMaterial, listMaterials,
     getSession, listSessions, activeSession, touchSession, discardSession, sessionMaterials, listOpenSessions,
-    recordReview, getReview, dueReviews, studySeconds, createSchedule, listSchedule, getSchedule, updateSchedule,
+    recordReview, getReview, dueReviews, studySeconds, topicNotes, createSchedule, listSchedule, getSchedule, updateSchedule,
     journeyEvidence,
   };
 }

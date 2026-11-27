@@ -13,27 +13,32 @@ const { writeFileAtomic, readJsonFile } = require('./safe-file');
 
 const QUESTION_WRITING = `---
 name: Learning question writing
-description: Write study questions from the excerpts of a student's own file, each with a real quote as its source, as strict JSON.
-version: 1
+description: Write study questions from the excerpts of a student's own file and notes, each with a real quote as its source, as strict JSON.
+version: 2
 enabled: true
 activation: always
 triggers: question, quiz, test, exam, write questions
-outcome: One JSON object {"questions":[...]} whose questions use only facts and quotes from the given excerpts.
+outcome: One JSON object per request whose question uses only facts and a quote from the given excerpt.
 ---
 
 # Learning question writing
 
-Use this when you are given a topic and numbered excerpts [1], [2] … of the student's file and asked for questions.
+Perflw asks for ONE question at a time, from ONE excerpt: a section of the student's file, a key point, or one of the student's own notes.
+Afterwards Perflw answers your question blind from the same excerpt; a question whose key does not hold is thrown away, so the key must be right.
 
 ## Steps
-1. Read every excerpt. A question may only test something the excerpts state.
-2. Pick the requested types and skills (dimension). recognition = pick the right answer; recall = state it; understanding = explain why or how; application = use it in a new case.
-3. For every question copy a short quote (at least 12 characters) EXACTLY from one excerpt into "source.quote", and put that excerpt's number in "source.section".
-4. choice: 3-5 options, one clearly right, the others plausible but wrong. truefalse: the statement must be true or false by the excerpt. explain: a rubric of 2-4 criteria, 1 point each, each a fact from the excerpt.
-5. Never invent a fact, number, name or example. If the excerpts are too thin, return fewer questions.
+1. Read the excerpt. The question may only test something the excerpt states.
+2. Use the requested type, skill (dimension) and difficulty. recognition = pick the right answer; recall = state it; understanding = explain why or how, or tell two ideas apart; application = use it in a new, concrete case.
+3. Test the meaning, not a copied phrase: reword the idea in your own words.
+4. choice: exactly 4 options (a-d), ONE correct by the excerpt, three plausible but clearly wrong by the excerpt, the right one in a random position, no "all of the above".
+   truefalse: one sentence; about half the time make it false by changing one clear fact; "correct" must match.
+   explain: 2-3 rubric criteria, 1 point each, each a fact the excerpt states.
+5. Copy a phrase of 3 to 12 words EXACTLY from the excerpt into "source.quote" and the excerpt's number into "source.section".
+6. Never invent a fact, number, name or example.
 
 ## Output format (exactly)
-One JSON object and nothing else: {"questions":[{"type","prompt","dimension","difficulty","explanation","payload","source":{"section","quote"}}]}
+One JSON object and nothing else, in the shape of the example in the request:
+{"type","prompt","dimension","difficulty","explanation","payload","source":{"section","quote"}}
 `;
 const ANSWER_GRADING = `---
 name: Learning answer grading
@@ -250,8 +255,9 @@ const AGENTS = {
     instructions: `# How you work
 
 - Follow the "Learning question writing" skill and its JSON output format exactly.
-- Every question quotes the excerpt it came from, word for word.
-- Prefer clear, unambiguous questions over tricky ones.
+- One question per request, from the one excerpt you are given; it quotes that excerpt word for word.
+- The answer key must be right: Perflw re-answers every question from the excerpt and drops any whose key does not hold.
+- Prefer clear, unambiguous questions that test meaning over ones that copy a phrase.
 `,
     capabilities: `- Writes choice, true/false and explain questions as JSON.
 - Has no tools: the excerpts come with the request.

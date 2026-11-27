@@ -400,8 +400,10 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
   on('ai:status', [], async u => (coach ? coach.status(u) : { available: false, reason: 'AI is not available in this build.' }));
   on('questions:generate', ['subjectId', 'topicId', 'types', 'dimensions', 'count'], async (u, a) => {
     needCoach(); store().listQuestions(u, { subjectId: a.subjectId }); // ownership
-    const { row, sections } = sectionsFor(u, a.subjectId, a.topicId);
+    const { row, sections: fileSections } = sectionsFor(u, a.subjectId, a.topicId);
     if (!row) fail('Topic not found.');
+    // Besides the file's sections and key points, the writer reads the student's own notes on the topic (owner, 2026-11-27).
+    const sections = [...(fileSections || []), ...noteSections(u, a.subjectId, row.id)];
     const types = (Array.isArray(a.types) && a.types.length ? a.types : ['choice', 'truefalse']).filter(x => ['choice', 'truefalse', 'explain'].includes(x));
     const dimensions = (Array.isArray(a.dimensions) && a.dimensions.length ? a.dimensions : ['recognition', 'recall']).filter(x => model.DIMENSIONS.includes(x));
     const count = Math.min(10, Math.max(1, Number.isInteger(a.count) ? a.count : 5));
@@ -409,6 +411,17 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const saved = out.questions.map(q => store().saveQuestion(u, { question: q })); // saved as 'unreviewed': practice only until a person approves (D3)
     return { saved, rejected: out.rejected, requested: count, provenance: out.provenance };
   });
+  /* Notes as excerpts: targeted notes (minus the "You answered" lines, which may hold a wrong answer) and side notes, as Markdown text. */
+  function noteSections(u, subjectId, topicId) {
+    if (!dataDir) return [];
+    let notes = []; try { notes = store().topicNotes(u, { subjectId, topicId }); } catch { return []; }
+    return notes.map((m, i) => {
+      const folder = m.journeyId ? path.join(dataDir, 'learning-files', String(u), 'journeys', String(m.journeyId)) : path.join(dataDir, 'learning-files', String(u), 'side-notes', String(m.subjectId));
+      let text = ''; try { text = fs.readFileSync(path.join(folder, m.bodyFile), 'utf8'); } catch { text = ''; }
+      text = text.split(/\r?\n/).filter(line => !/^\s*[-*>]?\s*(\*\*)?you answered/i.test(line)).join(' ').replace(/[#*_`>]+/g, ' ').replace(/\s+/g, ' ').trim();
+      return text.length >= 40 ? { number: `N${i + 1}`, title: m.kind === 'targeted_note' ? 'Your targeted note' : 'Your study note', description: text.slice(0, 600), keyPoints: [] } : null;
+    }).filter(Boolean);
+  }
   on('questions:review', ['questionId', 'review'], (u, a) => store().setReview(u, a));
   const answerText = r => String((r && r.text) || '').trim();
   on('assessment:aiGrade', ['itemId'], async (u, a) => {
