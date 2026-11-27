@@ -33,6 +33,16 @@ function source(fileId, section, quote) {
   return ref;
 }
 
+/* "Slide 19", "Page 3", "Section 2.1", "Untitled": a title that names a place in the file, not an idea (owner, 2026-11-27). */
+const GENERIC = /^\s*((slide|page|section|part|chapter|sheet|figure|item)\s*#?\s*[\d.]+[a-z]?|untitled( \w+)?|[\d.]+)\s*$/i;
+const isGeneric = title => GENERIC.test(String(title || ''));
+/* The idea a section is about: its title, or for a generic title the opening of its description (or first key point). */
+function ideaOf(section) {
+  if (!isGeneric(section.title)) return section.title;
+  const text = String(section.description || list(section.keyPoints)[0] || '').replace(/^(this|the) (slide|page|section) (shows|explains|describes|covers|is about|discusses)\s*/i, '');
+  const first = text.split(/(?<=[.!?])\s/)[0].replace(/[.!?]+$/, '');
+  return clip(first, 90);
+}
 function templateQuestions({ subjectId, topics, files }) {
   const out = [];
   for (const topic of list(topics)) {
@@ -43,14 +53,14 @@ function templateQuestions({ subjectId, topics, files }) {
     for (const s of sections) {
       const points = list(s.keyPoints).map(p => clip(p, 500)).filter(Boolean);
       if (points.length >= 2) {
-        out.push({ ...base, id: `tpl-explain-${topic.id}-${s.number || s.title}`, type: 'explain', prompt: clip(`Explain ${s.title} in your own words.`, 2000), dimension: 'understanding', difficulty: 2,
+        out.push({ ...base, id: `tpl-explain-${topic.id}-${s.number || s.title}`, type: 'explain', prompt: clip(isGeneric(s.title) ? `Explain in your own words: ${ideaOf(s)}.` : `Explain ${s.title} in your own words.`, 2000), dimension: 'understanding', difficulty: 2,
           explanation: clip(s.description, 2000), source: [source(topic.fileId, s, points[0])],
           payload: { maxWords: 120, rubric: points.slice(0, 5).map((p, i) => ({ id: `c${i}`, criterion: p, points: 1 })) } });
       }
-      points.slice(0, 2).forEach((p, i) => out.push({ ...base, id: `tpl-tf-${topic.id}-${s.number || s.title}-${i}`, type: 'truefalse', prompt: clip(`True or false: ${s.title}`, 2000), dimension: 'recognition', difficulty: 1,
+      points.slice(0, 2).forEach((p, i) => out.push({ ...base, id: `tpl-tf-${topic.id}-${s.number || s.title}-${i}`, type: 'truefalse', prompt: 'True or false?', dimension: 'recognition', difficulty: 1,
         explanation: clip(s.description, 2000), source: [source(topic.fileId, s, p)], payload: { statement: p, correct: true, requireJustification: false } }));
     }
-    const described = sections.filter(s => clip(s.description, 200)).slice(0, 6);
+    const described = sections.filter(s => clip(s.description, 200) && !isGeneric(s.title)).slice(0, 6); // "Slide 3 ↔ …" teaches nothing
     if (described.length >= 3) {
       out.push({ ...base, id: `tpl-match-${topic.id}`, type: 'matching', prompt: clip(`Match each part of ${topic.title} to its description.`, 2000), dimension: 'recognition', difficulty: 2,
         explanation: '', source: described.slice(0, 5).map(s => source(topic.fileId, s, s.description)),
@@ -60,5 +70,5 @@ function templateQuestions({ subjectId, topics, files }) {
   return out;
 }
 
-return { templateQuestions, sectionsOf };
+return { templateQuestions, sectionsOf, isGeneric, ideaOf };
 });
