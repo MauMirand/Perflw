@@ -98,7 +98,7 @@ const TYPE_RULES = {
 const CAUSAL = /\b(because|so that|so|since|therefore|creates?|causes?|leads? to|lets?|pushes|raises|makes)\b/i;
 function stemHint(dimension, excerpt) {
   if (dimension === 'application') return '"A ..." describing a short new situation, then ask what happens or which idea applies';
-  if (dimension === 'understanding') return CAUSAL.test(excerpt.text) ? '"Why", "How" or "What happens when"' : '"What happens when", "How does" or "Which statement best describes"';
+  if (dimension === 'understanding') return CAUSAL.test(excerpt.text) ? '"Why", "How" or "What happens when"' : '"How does", "What is the role of" or "Which statement best describes"';
   if (dimension === 'recall') return '"What", "Which" or "Name"';
   return '"Which" or "What"';
 }
@@ -184,6 +184,8 @@ function sanityProblem(q) {
     if (texts.length < 3 || texts.some(t => !t) || new Set(texts).size !== texts.length) return 'Its options are missing, blank or repeated.';
   }
   if (q.type === 'truefalse' && typeof p.correct !== 'boolean') return 'It does not say whether the statement is true or false.';
+  // A statement must read as one whole sentence: not a few words, not opening with a clipped label ("Prok: cells have …").
+  if (q.type === 'truefalse' && (String(p.statement || '').trim().split(/\s+/).length < 4 || /^\s*[A-Za-z]{1,5}:\s/.test(String(p.statement || '')))) return 'Its statement is not a whole sentence.';
   if (q.type === 'explain' && (p.rubric || []).filter(r => norm(r.criterion)).length < 2) return 'Its rubric has fewer than 2 criteria.';
   if (q.type === 'choice') {
     const key = ((p.options || []).find(o => (p.correct || []).includes(o.id)) || {}).text || '';
@@ -201,7 +203,10 @@ function contextProblem(q) {
 /* A "why" question needs a reason stated in the excerpt; otherwise the key is a guess or a restatement. */
 function whyProblem(q, excerpt) {
   const stem = q.type === 'truefalse' ? '' : String(q.prompt || '');
-  return /^\s*(why|explain why|what causes|what is the reason|for what reason)\b/i.test(stem) && !CAUSAL.test(excerpt.text) ? 'It asks why, but the excerpt gives no reason.' : null;
+  if (/^\s*(why|explain why|what causes|what is the reason|for what reason)\b/i.test(stem) && !CAUSAL.test(excerpt.text)) return 'It asks why, but the excerpt gives no reason.';
+  // "What happens when all living things are made of cells?": a cause-and-effect stem wrapped around a plain fact.
+  if (/^\s*what happens (when|if)\b/i.test(stem) && !CAUSAL.test(excerpt.text)) return 'It asks what happens, but the excerpt states no cause or effect.';
+  return null;
 }
 function factsOf(excerpts) {
   const lists = excerpts.map(e => sentences(e.text).map(fact => ({ excerpt: e, fact })));
@@ -404,4 +409,4 @@ function createLearningCoach({ ecosystem, agents, now = () => Date.now() }) {
   return { status, generateQuestions, gradeOpenAnswer, checkNote, explainMistakes };
 }
 
-module.exports = { writeQuestions, createLearningCoach, cleanProse, buildNoteHelpPrompt, buildExplainPrompt, extractJson, excerptsOf, parseQuestions, buildGradingPrompt, parseVerdicts, PROMPT_VERSION };
+module.exports = { writeQuestions, createLearningCoach, cleanProse, buildNoteHelpPrompt, buildExplainPrompt, extractJson, excerptsOf, parseQuestions, buildGradingPrompt, parseVerdicts, PROMPT_VERSION, sanityProblem, whyProblem };

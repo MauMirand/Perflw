@@ -143,12 +143,18 @@ async function stop() {
 
 async function run() {
   await launch();
-  await waitFor("!document.getElementById('login-page').hidden", 'login page');
+  // A fresh install (no account) opens on Create account; Sign in is one click away.
+  await waitFor("!document.getElementById('register-page').hidden", 'register page on first run');
   assert.ok(await evaluate("document.body.classList.contains('is-auth')"), 'Rail is hidden on auth screens');
+  await click('[data-auth="login"]');
+  await waitFor("!document.getElementById('login-page').hidden", 'login page');
   await screenshot('01-login');
 
   // Register → profile
   await click('[data-auth="register"]');
+  await fill('#register-password', 'Sm0ke-test-pass');
+  await fill('#register-confirmation', 'Sm0ke-test-pasX');
+  assert.ok(await evaluate("document.querySelector('#register-form [data-match]').classList.contains('mismatch') && !document.querySelector('[data-mismatch]').hidden"), 'a wrong confirmation shows it does not match');
   await fill('#register-email', 'smoke@example.com');
   await fill('#register-password', 'Sm0ke-test-pass');
   await fill('#register-confirmation', 'Sm0ke-test-pass');
@@ -485,10 +491,13 @@ async function run() {
   for (const part of ['Major', '42% mastery', '3h 20m spent', 'Limits, derivatives and integrals.', 'Topics', 'Mastery Statistics']) assert.ok(meta.includes(part), `Preview shows ${part}`);
   assert.ok(await evaluate("getComputedStyle(document.querySelector('.ln-panel .ln-cover-art')).backgroundImage.startsWith('url(\"data:image/png')"), 'Preview cover uses the subject image');
   await screenshot('06d-learning-preview');
-  // Learn with no topics yet: a warning, no viewer
+  // Learn with no topics yet: the subject page opens (where Upload topics is), with a hint, no viewer
   await click('.ln-panel [data-ln="learn"]');
-  await waitFor("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Please upload a topic first.'))", 'Learn warns without topics');
-  assert.equal(await count('.ln-viewer'), 0, 'Learn stays on the page without topics');
+  await waitFor("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Upload your notes here first')) && document.querySelector('.ln-page-head h1')?.textContent === 'Calculus'", 'Learn opens the subject page without topics');
+  assert.equal(await count('.ln-viewer'), 0, 'no viewer without topics');
+  await click('[data-ln="back"]');
+  await waitFor("!!document.querySelector('[data-ln-subject]')", 'back to subjects');
+  if (!(await evaluate("!!document.querySelector('.ln-panel')"))) { await evaluate("document.querySelector('[data-ln-subject]').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))"); await waitFor("!!document.querySelector('.ln-panel')", 'preview again'); }
   // Toggle the panel closed, then click once to preview again
   await click('[data-ln="close-panel"]');
   await waitFor("!document.querySelector('.ln-panel') && !document.querySelector('.ln-layout').classList.contains('with-panel')", 'preview closed');

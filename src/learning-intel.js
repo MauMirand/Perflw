@@ -754,6 +754,7 @@ function panelPoints(section) {
   const points = out.filter(x => x.text).map(x => { const t = `${x.title}: ${x.text}`; return t.length > 300 ? `${t.slice(0, 297).trimEnd()}…` : t; });
   return points.length >= 2 ? points : [];
 }
+const BACK_REF = /^(they|it|its|their|them|this|these|those|such|he|she|his|her)\b/i;
 function keyPointsOf(section, max, ctx, skip) {
   const headingTerms = terms(section.title);
   for (const block of section.body) if (block.kind === 'sub') headingTerms.push(...terms(block.text));
@@ -763,17 +764,34 @@ function keyPointsOf(section, max, ctx, skip) {
     const base = { headingTerms, keywords: ctx.keywords, strong: block.strong };
     if (block.kind === 'li') candidates.push({ text: block.text, score: scoreSentence(block.text, { ...base, listItem: true }) + 0.5, order: bi * 100 });
     // The sentence used as the section's description is shown separately.
-    else sentences(block.text).forEach((s, si) => { if (!(bi === 0 && si === skip)) candidates.push({ text: s, score: scoreSentence(s, base), order: bi * 100 + si }); });
+    else {
+      // A sentence that starts with a pronoun ("They are called the powerhouse …") means nothing alone: it joins the
+      // sentence it points back to, so the point keeps its subject. The description sentence is shown just above the
+      // points, so a pronoun right after it stays on its own.
+      const units = [];
+      sentences(block.text).forEach((s, si) => {
+        const prev = units[units.length - 1];
+        if (prev && BACK_REF.test(s) && !(bi === 0 && prev.si === skip) && prev.text.length + s.length < 300) prev.text += ` ${s}`;
+        else units.push({ text: s, si });
+      });
+      for (const u of units) if (!(bi === 0 && u.si === skip)) candidates.push({ text: u.text, score: scoreSentence(u.text, base), order: bi * 100 + u.si });
+    }
   });
   // Short sections keep every real statement; longer ones only the strong ones.
   const bar = candidates.filter(c => c.score > -1).length <= 3 ? 0 : 1.6;
   const seen = new Set(); const picked = [];
-  for (const c of candidates.filter(c => c.score >= bar).sort((a, b) => b.score - a.score || a.order - b.order)) {
-    const key = terms(c.text).slice(0, 8).join(' ');
-    if (!key || seen.has(key)) continue;
-    seen.add(key); picked.push(c);
-    if (picked.length >= max) break;
-  }
+  const take = list => {
+    for (const c of list.sort((a, b) => b.score - a.score || a.order - b.order)) {
+      if (picked.length >= max) break;
+      const key = terms(c.text).slice(0, 8).join(' ');
+      if (!key || seen.has(key)) continue;
+      seen.add(key); picked.push(c);
+    }
+  };
+  take(candidates.filter(c => c.score >= bar));
+  // Plain statements ("Ribosomes build proteins.") score low but are still facts a student needs: when the strong
+  // ones leave room, the best remaining real statements fill it, so a section never shows one point out of seven.
+  if (picked.length < max) take(candidates.filter(c => c.score > -1 && c.score < bar));
   return picked.sort((a, b) => a.order - b.order).map(c => (c.text.length > 300 ? `${c.text.slice(0, 297).trimEnd()}…` : c.text));
 }
 
@@ -795,7 +813,7 @@ function analyze({ blocks, pages }, { fileName, fileType }) {
   const sections = raw.map(section => {
     const text = section.body.map(b => b.text).join(' ');
     const items = section.body.filter(b => b.kind === 'li').length;
-    const max = Math.max(text.length > 1500 ? LIMITS.sectionPoints : text.length > 300 ? 3 : 2, Math.min(items, LIMITS.listPoints));
+    const max = Math.max(text.length > 1500 ? LIMITS.sectionPoints + 2 : text.length > 300 ? LIMITS.sectionPoints : 2, Math.min(items, LIMITS.listPoints));
     const description = describe(section);
     return {
       number: section.number, level: section.level, title: section.title, page: section.page,

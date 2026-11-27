@@ -134,7 +134,9 @@ function createAuth(root, { migrations = ACCOUNT_MIGRATIONS } = {}) {
   function logout(token) {
     if (typeof token === 'string') db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
   }
-  return { register, login, session, saveProfile, logout, close: () => db.close() };
+  // A fresh install (no account yet) opens on Create account instead of "Welcome back".
+  const hasAccounts = () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get());
+  return { register, login, session, saveProfile, logout, hasAccounts, close: () => db.close() };
 }
 
 module.exports = { createAuth, ACCOUNT_MIGRATIONS };

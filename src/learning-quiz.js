@@ -180,13 +180,18 @@
         ${d && d.attempts > 1 ? `<p class="qz-ev-meta">Attempt ${d.attempts}</p>` : ''}</section>
       <section class="qz-card-panel" aria-labelledby="qz-perf-h"><h3 class="qz-panel-h" id="qz-perf-h">${ICON_CHART}<span>Your Performance</span></h3>
         <div class="qz-perf">${stat(pct, 'Accuracy')}${stat(d ? d.correct : '—', 'Correct')}${stat(d ? d.total - d.correct : '—', 'Incorrect')}</div>
-        <p class="qz-ev-h">Strengths</p>${list(d && d.strengths)}
-        <p class="qz-ev-h">Focus Areas</p>${list(d && d.focus)}</section>`;
+        <p class="qz-ev-h">Strengths <span class="qz-ev-hint">· latest test</span></p>${list(d && d.strengths)}
+        <p class="qz-ev-h">Focus Areas <span class="qz-ev-hint">· latest test</span></p>${list(d && d.focus)}</section>`;
   }
   /* Take Test: the right panel's button starts the kind of the selected tab (pre-test sheet, practice set, or the exam setup). */
+  /* Pre-test length: 2 per topic in scope. Kept small on purpose: the final exam avoids questions seen in the pre-test. */
+  function pretestCount(S) {
+    const ids = scopeIds(S); const nTopics = ids ? ids.length : S.topics.length;
+    return Math.min(40, Math.max(1, nTopics * 2));
+  }
   async function take(S, kind) {
     const nTopics = scopeIds(S) ? scopeIds(S).length : S.topics.length;
-    if (kind === 'diagnostic') { S.setup = { ...S.setup, count: Math.min(40, Math.max(1, nTopics * 2)) }; S.mode = 'setup'; paint(S); }
+    if (kind === 'diagnostic') { S.setup = { ...S.setup, count: pretestCount(S) }; S.mode = 'setup'; paint(S); }
     else if (kind === 'practice') await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, nTopics * 3)) });
     else { S.exam = { ...S.exam, retakeOf: undefined, preview: null }; S.mode = 'examSetup'; paint(S); await refreshPreview(S); }
   }
@@ -517,16 +522,23 @@
   }
   function bankView(S) {
     const f = S.bankFilter || {};
-    const list = S.allQuestions.filter(x => (!f.topicId || String(x.topicId) === String(f.topicId)) && (!f.type || x.type === f.type) && (f.retired ? true : x.status === 'active'));
+    const list = S.allQuestions.filter(x => (!f.topicId || String(x.topicId) === String(f.topicId)) && (!f.type || x.type === f.type) && (f.retired ? true : x.status === 'active' && x.review !== 'rejected'));
     const topicTitle = id => (S.topics.find(t => String(t.id) === String(id)) || {}).title || 'No topic';
-    const rows = list.map(x => `<li class="qz-q"><p class="qz-q-prompt">${esc(x.prompt)}</p><p class="ln-soon">${esc(TYPES[x.type] || x.type)} · ${esc(topicTitle(x.topicId))} · ${esc(x.dimension)} · ${['', 'easy', 'medium', 'hard'][x.difficulty] || ''}${x.used ? ' · used in an assessment' : ''}${x.status === 'retired' ? ' · retired' : ''}${x.review !== 'approved' ? ` · ${esc(x.review)}` : ''}</p>
-      <span class="qz-row">${x.review === 'unreviewed' ? `<span class="qz-chip">AI · not reviewed</span>${btn('q-approve', 'Approve', `data-id="${esc(x.id)}"`)}${ghost('q-reject', 'Reject', `data-id="${esc(x.id)}"`)}` : ''}${ghost('edit', 'Edit', `data-id="${esc(x.id)}"`)}${x.status === 'active' ? ghost('retire', 'Retire', `data-id="${esc(x.id)}"`) : ghost('restore', 'Restore', `data-id="${esc(x.id)}"`)}${x.used ? '' : ghost('delete', 'Delete', `data-id="${esc(x.id)}"`)}</span>${S.confirmDelete === x.id ? `<span class="qz-confirm" role="alert">Delete this question for good? ${btn('delete-yes', 'Delete', `data-id="${esc(x.id)}"`)} ${ghost('delete-no', 'Keep')}</span>` : ''}</li>`).join('');
+    // What the question asks and its key, so it can be reviewed without opening Edit.
+    const preview = x => {
+      const p = x.payload || {};
+      if (x.type === 'truefalse') return `<p class="qz-q-stmt">${esc(p.statement || '')} <span class="qz-q-key">· ${p.correct ? 'True' : 'False'}</span></p>`;
+      if (x.type === 'choice') return `<ol class="qz-q-opts" type="A">${(p.options || []).map(o => `<li${(p.correct || []).includes(o.id) ? ' class="key"' : ''}>${esc(o.text)}${(p.correct || []).includes(o.id) ? ' <span class="qz-q-key">✓</span>' : ''}</li>`).join('')}</ol>`;
+      return '';
+    };
+    const rows = list.map(x => `<li class="qz-q"><p class="qz-q-prompt">${esc(x.prompt)}</p>${preview(x)}<p class="ln-soon">${esc(TYPES[x.type] || x.type)} · ${esc(topicTitle(x.topicId))} · ${esc(x.dimension)} · ${['', 'easy', 'medium', 'hard'][x.difficulty] || ''}${x.used ? ' · used in an assessment' : ''}${x.status === 'retired' ? ' · retired' : ''}${x.review !== 'approved' ? ` · ${esc(x.review)}` : ''}</p>
+      <span class="qz-row">${x.review === 'unreviewed' ? `<span class="qz-chip">AI · not reviewed</span>${btn('q-approve', 'Approve', `data-id="${esc(x.id)}"`)}${ghost('q-reject', 'Reject', `data-id="${esc(x.id)}"`)}` : x.review === 'rejected' ? `<span class="qz-chip">Rejected</span>${ghost('q-approve', 'Approve instead', `data-id="${esc(x.id)}"`)}` : ''}${ghost('edit', 'Edit', `data-id="${esc(x.id)}"`)}${x.status === 'active' ? ghost('retire', 'Retire', `data-id="${esc(x.id)}"`) : ghost('restore', 'Restore', `data-id="${esc(x.id)}"`)}${x.used ? '' : ghost('delete', 'Delete', `data-id="${esc(x.id)}"`)}</span>${S.confirmDelete === x.id ? `<span class="qz-confirm" role="alert">Delete this question for good? ${btn('delete-yes', 'Delete', `data-id="${esc(x.id)}"`)} ${ghost('delete-no', 'Keep')}</span>` : ''}</li>`).join('');
     const topics = S.topics.map(t => `<option value="${esc(t.id)}"${String(f.topicId) === String(t.id) ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
     const types = Object.keys(TYPES).map(k => `<option value="${k}"${f.type === k ? ' selected' : ''}>${TYPES[k]}</option>`).join('');
     const topicOpts = S.topics.map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('');
     const ai = `<details class="qz-ai-more"><summary>More options</summary><div class="qz-ai" role="group" aria-label="Write questions with AI"><span class="qz-opt-row"><label class="ln-field"><span>AI question writer</span><select class="field" data-qz-ai-topic>${topicOpts}</select></label><label class="ln-field"><span>How many</span><input class="field" data-qz-ai-count type="number" min="1" max="25" value="25"></label>${btn('ai-generate', 'Generate with AI', S.ai.available ? 'title="Drafts from your file, each quoting it; they wait for your review"' : `disabled title="${esc(S.ai.reason)}"`)}</span>${S.ai.available ? '' : `<p class="ln-soon">${esc(S.ai.reason)} You can still write your own questions and use the template drafts.</p>`}</div></details>`;
     return `<div class="qz-row qz-bank-top">${genButton(S)}${ghost('add', 'Add question', 'data-qz-focus')}${ghost('templates', 'Template drafts', 'title="Draft questions built from your analysed files, no AI"')}</div>${genBanner(S)}${ai}<form class="qz-form qz-filter" data-qz-form="bank-filter" novalidate><span class="qz-opt-row"><label class="ln-field"><span>Topic</span><select class="field" name="topicId"><option value="">All topics</option>${topics}</select></label><label class="ln-field"><span>Type</span><select class="field" name="type"><option value="">All types</option>${types}</select></label></span>
-      <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired questions</label></form>
+      <label class="qz-dk"><input type="checkbox" name="retired"${f.retired ? ' checked' : ''}> Show retired and rejected questions</label></form>
       <p class="ln-soon" role="status">${list.length} question${list.length === 1 ? '' : 's'}.</p>
       ${rows ? `<ul class="qz-qlist">${rows}</ul>` : '<p class="ln-soon">No questions match. Write your first one with Add question.</p>'}`;
   }
@@ -676,7 +688,7 @@
         <div class="qz-extra"><label class="qz-dk"><input type="checkbox" name="dontKnow"${answer && answer.dontKnow ? ' checked' : ''}${checked ? ' disabled' : ''}> I don't know</label></div>
       </form>
       ${checked ? feedbackView(S, item, checked) : ''}${confirm}
-      <div class="qz-play-foot"><p class="qz-keys ln-soon">1–9 or A–D choose · ← → move · F flag · Ctrl+Enter ${practice ? 'check or next' : 'next or submit'}</p>
+      <div class="qz-play-foot"><p class="qz-keys ln-soon">${item.question.type === 'truefalse' ? 'T or F choose' : item.question.type === 'choice' ? '1–9 or A–D choose · F flag' : 'F flag'} · ← → move · Ctrl+Enter ${practice ? 'check or next' : 'next or submit'}</p>
         <div class="qz-row">${ghost('prev', 'Back', Q.index === 0 ? 'disabled' : '')}${primary}</div></div>
     </div>`;
   }
@@ -752,11 +764,12 @@
   function analysisBlock(R) {
     const A = R.analysis; if (!A) return '';
     const cats = Object.entries(A.byCategory).map(([k, n]) => `<li>${esc(A.labels[k] || k)}: ${n}</li>`).join('');
-    const weak = A.weak.map(w => `<li>${esc(w.title || w.topicId)} · ${esc(LEVELS[w.level] || w.level)} · score ${w.score}</li>`).join('');
+    // The ranking score is a miss rate (higher = weaker); shown as a count so it never reads like a grade.
+    const weak = A.weak.map(w => { const missed = (w.misconceptions || 0) + (w.wrong || 0) + (w.notKnown || 0); return `<li>${esc(w.title || w.topicId)} · ${esc(LEVELS[w.level] || w.level)} · ${w.items ? `${missed} of ${w.items} missed` : 'not tested yet'}</li>`; }).join('');
     const mistakes = A.items.filter(i => i.category && i.category !== 'guess' && i.questionId).length;
     if (!cats && !weak) return '';
     return `<div class="qz-analysis"><p class="qz-journey-title"><strong>Your mistakes</strong></p>${cats ? `<ul class="qz-cats" aria-label="Mistake categories">${cats}</ul>` : '<p class="ln-soon">No mistakes to analyse.</p>'}
-      ${weak ? `<p class="qz-journey-title"><strong>Weak topics, worst first</strong></p><ol class="qz-cats">${weak}</ol>` : ''}
+      ${weak ? `<p class="qz-journey-title"><strong>Topics to keep working on</strong></p><ol class="qz-cats">${weak}</ol>` : ''}
       <div class="qz-row">${A.weak.length && R.assessment.journeyId ? btn('notes-make', 'Generate targeted notes', 'title="One note per weak topic, written from your own mistakes (no AI)"') : ''}${mistakes ? ghost('practice-these', `Practice these ${mistakes}`, 'title="A practice set of exactly the questions you missed"') : ''}</div></div>`;
   }
   function retakeBlock(R) {
@@ -781,7 +794,7 @@
     const ring = `<svg class="qz-ring ${tone}" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" class="track"/><circle cx="60" cy="60" r="52" class="fill" style="--len:${C.toFixed(1)};--to:${(C * (1 - pct / 100)).toFixed(1)}" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct / 100)).toFixed(1)}"/></svg>`;
     const topicRows = (R.mastery.topics || []).map(x => {
       const its = items.filter(i => String(i.topicId) === String(x.topicId)); const sc = its.reduce((a, i) => a + ((i.answer && i.answer.score) || 0), 0); const mx = its.reduce((a, i) => a + i.maxScore, 0);
-      return `<tr><th scope="row">${esc(x.title || x.topicId)}</th><td class="qz-bar-cell">${mx ? `<span class="qz-ov-bar"><i style="width:${Math.round((sc / mx) * 100)}%"></i></span>` : ''}</td><td><span class="qz-chip lv-${esc(x.level)}">${esc(LEVELS[x.level] || x.level)}</span></td><td>${x.items} item${x.items === 1 ? '' : 's'}</td></tr>`;
+      return `<tr><th scope="row">${esc(x.title || x.topicId)}</th><td class="qz-bar-cell">${mx ? `<span class="qz-ov-bar"><i style="width:${Math.round((sc / mx) * 100)}%"></i></span> <span class="qz-bar-pct">${Math.round((sc / mx) * 100)}%</span>` : ''}</td><td><span class="qz-chip lv-${esc(x.level)}">${esc(LEVELS[x.level] || x.level)}</span></td><td>${x.items} item${x.items === 1 ? '' : 's'}</td></tr>`;
     }).join('');
     const review = items.map((i, n) => {
       const a = i.answer || {}; const ok = a.score >= i.maxScore;
@@ -798,7 +811,7 @@
           <div class="qz-hero-pills"><span class="qz-pill ok">✓ ${right}</span><span class="qz-pill no">✕ ${wrong}</span>${passed === null ? '' : `<span class="qz-pill ${passed ? 'ok' : 'no'} strong">${passed ? 'Passed' : 'Not passed'}</span>`}</div>
           ${examBanner(R)}</div></div>
       ${topicRows ? `<section class="qz-ov-card"><div class="qz-ov-head"><h4>By topic</h4></div><table class="qz-table qz-ov-table" tabindex="0"><thead><tr><th scope="col">Topic</th><th scope="col">Score</th><th scope="col">Level</th><th scope="col">Evidence</th></tr></thead><tbody>${topicRows}</tbody></table>
-        <p class="ln-soon">A level needs at least 3 graded items on a topic; below that it reads Not assessed.</p></section>` : ''}
+        <p class="ln-soon">Score is this test only. Level is your standing across every test this cycle: it needs at least 3 graded items, and enough recall and understanding questions, so a good score can still read Emerging.</p></section>` : ''}
       ${analysisBlock(R)}
       ${attemptsTable(R)}
       <section class="qz-ov-card"><div class="qz-ov-head"><h4>Questions</h4></div><ol class="qz-reviews">${review}</ol></section>
@@ -1082,7 +1095,7 @@
       }
       else if (action === 'home') { stopTimer(S); S.mode = 'home'; paint(S); await load(S); if (S.mode === 'home') paint(S); } // switch first: a slow reload must not undo a later click
       else if (action === 'start') {
-        S.setup = { ...S.setup, count: Math.min(40, Math.max(1, S.topics.length * 2)) }; S.mode = 'setup'; paint(S);
+        S.setup = { ...S.setup, count: pretestCount(S) }; S.mode = 'setup'; paint(S);
         if (S.journey && S.journey.stage === 'material') { try { await D().journeyUpdate({ journeyId: S.journey.id, stage: 'pretest_setup' }); S.journey.stage = 'pretest_setup'; } catch { /* informational */ } }
       }
       else if (action === 'practice') { target.disabled = true; await begin(S, 'practice', 'Practice', { count: Math.min(10, Math.max(5, S.topics.length * 3)) }); }
@@ -1290,7 +1303,7 @@
       <div class="qz-ev-body"><div class="qz-ev-text"><p class="qz-ev-title">${esc(label)}</p><p class="qz-ev-sub">${d ? esc(d.level) : 'Not taken yet'}</p>
         <p class="qz-ev-meta">${d ? `${d.total} item${d.total === 1 ? '' : 's'}${d.attempts > 1 ? ` · attempt ${d.attempts}` : ''}` : `${S.questions.length} question${S.questions.length === 1 ? '' : 's'} in your bank`}</p><p class="qz-ev-meta">${d ? esc(time || 'Untimed') : ''}</p>${verdict}</div>
         <div class="qz-ev-gauge">${gauge(d ? d.correct : 0, d ? d.total : 0)}</div></div>
-      <div class="qz-ev-cols"><div><p class="qz-ev-h">Strengths</p>${d ? list(d.strengths) : '<p class="qz-ev-none">—</p>'}</div><div><p class="qz-ev-h">Focus Area</p>${d ? list(d.focus) : '<p class="qz-ev-none">—</p>'}</div></div>`;
+      <div class="qz-ev-cols"><div><p class="qz-ev-h">Strengths <span class="qz-ev-hint">· latest test</span></p>${d ? list(d.strengths) : '<p class="qz-ev-none">—</p>'}</div><div><p class="qz-ev-h">Focus Area <span class="qz-ev-hint">· latest test</span></p>${d ? list(d.focus) : '<p class="qz-ev-none">—</p>'}</div></div>`;
   }
   function expand(S, then) {
     S.expanded = true; watchPanel(); const host = hostOf(S); if (host) { host.hidden = false; placeOverlay(host); }

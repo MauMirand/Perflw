@@ -724,6 +724,9 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-gauge-lbl { font-size: 10px; fill: var(--text-2); }
 .qz-ev-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .qz-ev-h { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.qz-ev-hint { font-weight: 400; color: var(--text-3, var(--text-2)); }
+.qz-bar-pct { font-size: 12px; color: var(--text-2); margin-left: 6px; }
+.ls-overview-failed { color: var(--text-2); }
 .qz-ev-list { margin: 0; padding-left: 16px; font-size: 13px; }
 .qz-ev-none { margin: 0; font-size: 13px; color: var(--text-2); }
 .qz-titlebar .ln-block-title { margin: 0; }
@@ -933,7 +936,7 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 .qz-play-foot .qz-keys { margin: 0; font-size: 11.5px; }
 .qz-play-foot .qz-row { margin: 0; gap: 8px; }
 .qz-play-foot .btn { min-width: 92px; min-height: 38px; border-radius: 10px; font-size: 14px; }
-.btn.qz-go { background: var(--go); color: #fff; border-color: transparent; }
+.btn.qz-go { background: var(--go, #2f7cf6); color: #fff; border-color: transparent; }
 .btn.qz-go:hover { background: #4a8ef8; }
 .qz-burst { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; z-index: 3; }
 .qz-burst i { position: absolute; left: 0; top: 0; width: var(--s); height: var(--s); border-radius: 50%; background: var(--c); opacity: 0; }
@@ -1050,7 +1053,8 @@ body.motion-off .ln-pdfv-hl { animation: none; }
   .qz-sheet { animation: qz-in-next .26s var(--ease) both; }
 }
 @media (max-width: 760px) { .qz-sheet-row { grid-template-columns: 1fr; gap: 8px; } .qz-sheet-stats { grid-template-columns: repeat(2, 1fr); } .qz-hero { flex-direction: column; align-items: flex-start; } }
-.qz-bar-cell .qz-ov-bar { display: block; width: 100%; min-width: 80px; }
+.qz-bar-cell { white-space: nowrap; }
+.qz-bar-cell .qz-ov-bar { display: inline-block; vertical-align: middle; width: calc(100% - 48px); min-width: 80px; }
 .qz-num { flex: 0 0 76px; max-width: 76px; }
 .qz-results .qz-ov-card, .qz-results .qz-analysis { background: #1c1c1c; border-radius: 16px; padding: 16px 18px; margin: 0; }
 .qz-results > .qz-table { display: block; overflow-x: auto; background: #1c1c1c; border-radius: 16px; padding: 12px 18px; margin: 0; }
@@ -1077,3 +1081,7 @@ body.motion-off .ln-pdfv-hl { animation: none; }
 /* The action row wraps instead of cutting off Resume / Start new on narrow panels. */
 .qz-actions { flex-wrap: wrap; row-gap: 8px; }
 .qz-actions-end { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.qz-q-stmt { margin: 2px 0 4px; font-size: 13px; }
+.qz-q-opts { margin: 2px 0 4px; padding-left: 22px; font-size: 13px; color: var(--text-2); }
+.qz-q-opts li.key { color: var(--text); }
+.qz-q-key { color: var(--text-2); font-size: 12px; }

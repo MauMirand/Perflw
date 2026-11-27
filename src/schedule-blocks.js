@@ -510,5 +510,5 @@
     window.addEventListener('resize', () => { if (P.open) closePanel(); if (TP.open) closeTimer(); });
   }
 
-  window.PerflwSchedules = { init, load, reset, layerHtml, mount, unlinkedCount, eventsFor, create, toggleTimer, timerRunning: () => !!T.timer, close: closePanel, isOpen: () => !!P.open, events: () => D.events };
+  window.PerflwSchedules = { init, load, reset, layerHtml, mount, unlinkedCount, eventsFor, create, toggleTimer, timerRunning: () => !!T.timer, close: closePanel, isOpen: () => !!P.open, events: () => D.events, dayOf };
 })();

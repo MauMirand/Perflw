@@ -202,11 +202,18 @@
     const value = form.password.value;
     $$('[data-rule]', form).forEach(li => { const met = PW_RULES[li.dataset.rule](value); li.classList.toggle('met', met); const state = $('.sr-only', li); if (state) state.textContent = met ? ', met' : ', not met'; });
     const match = $('[data-match]', form);
-    if (match) match.classList.toggle('matches', !!form.confirmation.value && form.confirmation.value === value);
+    const typed = form.confirmation.value;
+    if (match) {
+      match.classList.toggle('matches', !!typed && typed === value);
+      // Mismatch shows once the typed confirmation stops being the start of the password (not while still typing it).
+      const off = !!typed && !value.startsWith(typed);
+      match.classList.toggle('mismatch', off);
+      const hint = $('[data-mismatch]', form); if (hint) hint.hidden = !off;
+    }
   }
   async function route(state) {
     S.user = state && state.user ? state.user : null;
-    if (!S.user) { closeLayers(); showScene('login-page'); return; }
+    if (!S.user) { closeLayers(); showScene(state && state.hasAccounts === false ? 'register-page' : 'login-page'); return; }
     if (!S.user.profileCompleted) { prepareProfileForm(); showScene('profile-page'); return; }
     showScene('main-page');
     await loadWorkspace();
@@ -460,7 +467,7 @@
         ${navItem('calendar', 'Calendar', 'calendar')}
         <button class="date-card" type="button" data-action="date-card" aria-label="Selected date ${esc(longDate(S.selected))}. Open calendar">
           <span class="dc-day">${sel.getDate()}</span>
-          <span class="dc-meta"><span class="dc-weekday">${DAYS[sel.getDay()]}</span><span class="dc-month">${MON3[sel.getMonth()]} ${sel.getFullYear()}</span></span>
+          <span class="dc-meta"><span class="dc-weekday">${S.selected === todayISO() ? `Today · ${DAYS[sel.getDay()].slice(0, 3)}` : `${DAYS[sel.getDay()]} · selected`}</span><span class="dc-month">${MON3[sel.getMonth()]} ${sel.getFullYear()}</span></span>
         </button>
         ${navItem('routine', 'Routine', 'routine')}`)}
         ${navGroup('learn', 'Learn', navItem('learning', 'Learning', 'learning', LN ? LN.profile() : ''))}
@@ -604,8 +611,9 @@
       S.month = m; S.year = y;
       const sel = parse(S.selected);
       if (sel.getMonth() !== m || sel.getFullYear() !== y) {
-        const last = new Date(y, m + 1, 0).getDate();
-        S.selected = iso(new Date(y, m, Math.min(sel.getDate(), last)));
+        // A new month opens on today when today is in it, otherwise on its 1st (not on the same day number).
+        const now = parse(todayISO());
+        S.selected = now.getMonth() === m && now.getFullYear() === y ? todayISO() : iso(new Date(y, m, 1));
       }
     } else selectDate(addDays(S.selected, direction * (cv === 'week' ? 7 : 1)));
     rerenderCalendar();
@@ -639,6 +647,7 @@
               <span class="cal-label" aria-live="polite">${esc(calLabel())}</span>
               <button class="icon-btn" type="button" data-action="cal-next" aria-label="Next ${cv}">${icon('right')}</button>
               <button class="today-btn" type="button" data-action="cal-today">Today</button>
+              <button class="today-btn cal-new-btn" type="button" data-action="cal-new" title="New schedule on the selected day (or drag across hours in Days view)">${icon('plus')}New</button>
             </div>
             <div class="cal-toolbar-right">
               <button class="icon-btn sm solid timer-btn${SB && SB.timerRunning() ? ' running' : ''}" type="button" data-action="timer" aria-label="Timer" aria-haspopup="dialog" title="Timer">${icon('clock')}</button>
@@ -665,15 +674,17 @@
       const cls = ['cell', d.getMonth() !== S.month ? 'outside' : '', key === today ? 'today' : '', key === S.selected ? 'selected' : ''].filter(Boolean).join(' ');
       const dots = plans.slice(0, 5).map((p, idx) => `<span class="cell-dot" data-dot="${PLAN_COLORS[idx % PLAN_COLORS.length]}"></span>`).join('')
         + linked.slice(0, 3).map(() => '<span class="cell-dot linked"></span>').join('')
-        + Array.from({ length: Math.min(3, SB ? SB.unlinkedCount(key) : 0) }, () => '<span class="cell-dot sched"></span>').join('');
+        // Schedules show by title (below); only those beyond the two titles get a dot each.
+        + Array.from({ length: Math.min(3, Math.max(0, (SB ? SB.unlinkedCount(key) : 0) - 2)) }, () => '<span class="cell-dot sched"></span>').join('');
       cells.push(`<button class="${cls}" type="button" data-action="pick-day" data-day="${key}" aria-label="${esc(`${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}${n ? `, ${n} ${n === 1 ? 'plan' : 'plans'}` : ''}${linked.length ? `, ${linked.length} from projects` : ''}`)}" aria-pressed="${key === S.selected}">
         <span>${d.getDate()}</span>
+        ${SB ? SB.eventsFor(key).filter(e => !e.live).slice(0, 2).map(e => `<span class="cell-ev" title="${esc(e.title)}">${esc(e.title)}</span>`).join('') : ''}
         <span class="cell-foot"><span class="cell-count">${n ? `${n} ${n === 1 ? 'plan' : 'plans'}` : ''}</span><span class="cell-dots">${dots}</span></span>
       </button>`);
     }
     return `<div class="dow-row" aria-hidden="true">${dowOrder().map(i => `<div class="dow">${DAYS[i].slice(0, 3)}</div>`).join('')}</div>
       <div class="month-grid">${cells.join('')}</div>
-      <p class="hint month-hint">Tip: double-click a day to open it in Days view.</p>`;
+      <p class="hint month-hint">Tip: double-click a day to open it in Days view, or use New to add a schedule.</p>`;
   }
   function chip(plan, idx) {
     return `<span class="event-chip${plan.doneOn ? ' done' : ''}" role="button" tabindex="0" data-action="chip" data-id="${plan.id}" data-day="${plan.day}" data-accent="${PLAN_COLORS[idx % PLAN_COLORS.length]}" title="${esc(`${plan.time ? fmtTime(plan.time) + ' · ' : ''}${plan.text}`)}">${plan.time ? `${esc(fmtTime(plan.time))} ` : ''}${esc(plan.text)}</span>`;
@@ -1269,7 +1280,7 @@
         <section class="settings-section" aria-label="Calendar"><h2>Calendar</h2>
           ${row('Week starts on', 'First day shown on the calendar', pills('week-start', prefs.weekStart, [[0, 'Sunday'], [1, 'Monday']]))}
           ${row('Time format', 'How plan times are displayed', pills('time-format', prefs.timeFormat, [['12', '12-hour'], ['24', '24-hour']]))}
-          ${row('Default view', 'Calendar layout when you open it', pills('cal-view', prefs.calView, [['day', 'Days'], ['week', 'Weeks'], ['month', 'Months']]))}
+          ${row('Calendar view', 'Layout the calendar opens in; it also follows the last view you picked', pills('cal-view', prefs.calView, [['day', 'Days'], ['week', 'Weeks'], ['month', 'Months']]))}
         </section>
         <section class="settings-section" aria-label="Account"><h2>Account</h2>
           ${row('Email', 'Used to sign in on this computer', `<span class="setting-value">${esc(u.email)}</span>`)}
@@ -1458,6 +1469,11 @@
     for (const [view, label, ic] of pages) if (!q || label.toLowerCase().includes(q)) results.push({ icon: ic, text: label, kind: 'Page', run: () => { if (view === 'learning' && LN) LN.home(); go(view); } });
     if (q) {
       for (const p of S.items.plan) if (p.text.toLowerCase().includes(q)) results.push({ icon: 'calendar', text: p.text, kind: `Plan · ${longDate(p.day)}${p.time ? ` · ${fmtTime(p.time)}` : ''}`, run: () => { selectDate(p.day); if (S.view === 'calendar') rerenderCalendar(); else go('calendar'); } });
+      // Calendar schedules (exams, classes): by title, location or details.
+      if (SB) for (const e of SB.events()) if (!e.live && [e.title, e.location, e.notes].some(t => String(t || '').toLowerCase().includes(q))) {
+        const day = SB.dayOf(e);
+        results.push({ icon: 'calendar', text: e.title, kind: `Schedule · ${longDate(day)} · ${clockOf(e.starts_at)}${e.location ? ` · ${e.location}` : ''}`, run: () => { selectDate(day); if (S.view === 'calendar') rerenderCalendar(); else go('calendar'); } });
+      }
       if (PJ) for (const p of PJ.list()) if (p.name.toLowerCase().includes(q)) results.push({ icon: 'folder', text: p.name, kind: 'Project', run: () => PJ.open(p.id) });
       if (LN) for (const s of LN.list()) if (s.name.toLowerCase().includes(q)) results.push({ icon: 'learning', text: s.name, kind: `Subject · ${LN.profile()}`, run: () => { LN.open(s.id); if (S.view === 'learning') rerender(); else go('learning'); } });
       for (const [kind, ic, label] of [['routine', 'routine', 'Routine'], ['activity', 'activities', 'Activity']])
@@ -1508,6 +1524,7 @@
         if (S.view === 'settings') { prefs.calView = button.dataset.value; savePrefs(); rerender(); }
         else switchCalView(button.dataset.value);
         break;
+      case 'cal-new': if (SB) SB.create(S.selected || todayISO()); break;
       case 'timer': if (SB) SB.toggleTimer(button); break;
       case 'pick-day':
         if (event.detail >= 2 && prefs.calView !== 'day') { selectDate(button.dataset.day); switchCalView('day'); renderSidebar(false); break; }
