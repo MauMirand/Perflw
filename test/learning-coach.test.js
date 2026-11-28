@@ -161,3 +161,14 @@ test('writeQuestions: a question that points at "Slide 19" or "the text" is reje
   assert.ok(out.rejected.every(r => /instead of standing on its own/.test(r.reason)));
   assert.ok(!/Slide 19/.test(prompts[0]) && /never mention a slide, page/.test(prompts[0]));
 });
+
+test('agent UI: Thinking block with checklist and count, Worked for Ns, task bar, stage log', () => {
+  const A = require('../src/agent-ui');
+  const steps = [{ title: 'Find', status: 'done' }, { name: 'Read <b>', status: 'running' }, { title: 'Answer' }];
+  const live = A.thinking({ running: true, label: 'Reading', steps, hooks: true });
+  assert.match(live, /Thinking…/); assert.match(live, /1\/3 done/); assert.match(live, /data-ag-steps/); assert.ok(!live.includes('<b>'), 'escaped');
+  assert.match(A.thinking({ running: false, steps, elapsedMs: 12400 }), /Worked for 12s/);
+  assert.match(A.taskBar(steps), /1\/3 tasks done/);
+  const log = A.pushStage(A.pushStage([], 'Searching'), 'Reading'); assert.deepEqual(log.map(s => s.status), ['done', 'running']);
+  assert.deepEqual(A.finishStages(log, false).map(s => s.status), ['done', 'failed']);
+});

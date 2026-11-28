@@ -1275,3 +1275,4 @@ textarea.eco-editor { width: 100%; min-height: 360px; resize: vertical; padding:
   @keyframes ag-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 }
 @media (prefers-reduced-motion: reduce) { .ag-spin { animation-duration: 2.4s; } }
+.ag-taskbar > span:first-of-type { white-space: nowrap; }

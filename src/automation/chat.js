@@ -438,7 +438,8 @@ function createChatEngine({ workspace, ecosystem }) {
       connection, apiKey: resolved.apiKey, model, system, agentName: agentRow ? agentRow.name : 'the model',
       cache: resolved.type.caching === 'explicit' && systemTokens >= 1024,
       maxTokens: connection.type === 'anthropic' ? responseReserve : null,
-      numCtx: connection.type === 'ollama' ? window.tokens : null
+      numCtx: connection.type === 'ollama' ? window.tokens : null,
+      think: connection.type === 'ollama' ? false : null // no hidden reasoning on local models: faster replies, no lag (2026-11-28)
     };
     return { session, settings, resolved, request, system, systemTokens, available, tools, toolbox, history: picked.messages, meta, intent, roster, apiKey: resolved.apiKey };
   }

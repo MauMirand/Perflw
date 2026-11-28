@@ -1945,6 +1945,17 @@ Owner asked for a first-time-student run of the app and then "fix everything". F
 - **Checks:** `npm test` 315/315 (new `test/student-ux.test.js`: key points, question checks, hasAccounts). `npm run test:electron` updated for first-run register and Learn-without-topics; it now stops at "header height steady in edit mode (298 -> 361.6)" on the Home profile, **the same failure on clean `main` 4c343fe** (pre-existing, not caused here). `test:ml1` PASS, `test:learning` PASS (both updated for the first-run sign-up page). `test:automation` fails at "the writer followed the skill (… no SEASON line)", same on clean `main`; `test:pdf` could not start its fake Ollama (port 11434 in use by the real one): environment, not run. Live check in the app (CDP-driven): month titles, New, search "midterm", Try again, new key points, bank preview, results wording.
 - **Not done / owner calls:** global search does not look inside file text or notes; one uploaded file is still one topic (no split by heading); labels Study vs Start your session, Major/Minor, Milestone, Workflows/Agents/Skills in a student sidebar, 13 unlabeled cycle icons (tooltips exist on hover), only Dark theme; the 75%-but-Emerging rule itself (mastery model, ADR) is unchanged, only explained.
 
+### HO-050 — Claude A: agent activity UI in both chats, Calendar title, Learn → subject page, thinking off, merge of main (branch `feature/ml1-slice`)
+
+**Date:** 2026-11-28 · **Status:** SUBMITTED (not reviewed) · merged and pushed (standing "always push live" rule)
+
+- **Agent activity UI** (`src/agent-ui.js`, owner reference screenshot): collapsible "Thinking…" with a task checklist (done struck through with a check, current spinner, pending circle, "N/M done"); finished replies keep a folded "Worked for Ns"; personal chat shows "N/M tasks done" above the composer while a plan or workflow runs. Study chat turns its stage events into the same step log.
+- **Calendar** page has a title. **Learning preview "Learn"** opens the subject page; Study there opens the viewer.
+- **Ollama thinking off by default** for every request (`ecosystem.runAgent`, chat engine): with `qwen3:4b` now picked for all agents, hidden reasoning made background jobs and app quit slow (the Electron smoke had to kill the app after 25 s).
+- **Merged `main`** (another session's `fix/student-walkthrough-ux`, 0c1ec7a): one test conflict resolved (Learn/Study flow); its month-view check updated to the new schedule titles (it failed on `main`).
+- **Test-only switch** `PERFLW_TEST_OLLAMA_URL` (honoured only with `PERFLW_TEST_USER_DATA`): the Electron smoke runs without local AI, so its timing checks are deterministic. One fixed sleep became a wait.
+- **Checks:** `npm test` 316/316; `npm run test:electron` PASS; `npm run test:ml1` PASS.
+
 ---
 
 ## 5. Review Decision Definitions

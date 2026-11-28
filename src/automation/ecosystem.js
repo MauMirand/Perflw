@@ -397,7 +397,8 @@ function createEcosystem({ root, workspace, secrets, fetchImpl = fetch, provider
         numPredict: Number.isInteger(args.maxTokens) && args.maxTokens > 0 ? args.maxTokens : null,
         // Ollama only: a JSON schema for the reply, and thinking off for short structured jobs (the Learning question writer).
         format: connection.type === 'ollama' && args.format && typeof args.format === 'object' ? args.format : null,
-        think: connection.type === 'ollama' && typeof args.think === 'boolean' ? args.think : null,
+        // Thinking off unless a caller asks for it: Qwen3-style models otherwise spend minutes on hidden reasoning (slow jobs, lag, slow quit).
+        think: connection.type === 'ollama' ? (typeof args.think === 'boolean' ? args.think : false) : null,
         numCtx: connection.type === 'ollama' && config.context.maxContextTokens ? contextWindow : null,
         // Optional sampling temperature for this request (the Learning workflow asks for low values: facts, not flair).
         temperature: typeof args.temperature === 'number' && args.temperature >= 0 && args.temperature <= 2 ? args.temperature : null
