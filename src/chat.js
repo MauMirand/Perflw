@@ -5,6 +5,7 @@
    (automation/chat.js); this file shows its state and sends the person's choices back. */
 (function () {
   const R = window.PerflwRender;
+  const AG = window.PerflwAgentUI; // Thinking block, task checklist, task bar (shared with the study chat)
   const api = window.chatData || null;
   const auto = window.automationData || null;
   let H = null; // helpers from renderer.js: esc, icon, toast, confirmDialog, go, stamp, state(), repaintLists()
@@ -100,7 +101,10 @@
     } else {
       el.className = 'msg assistant';
       const rendered = bodyOf(message, chatId);
-      el.innerHTML = `<div class="md">${rendered.html}</div>${footHtml(message)}`;
+      // A planned or workflow reply keeps its steps behind a folded "Worked for 12s" line.
+      const steps = meta.workflow ? meta.workflow.steps : meta.plan ? meta.plan.steps : [];
+      const worked = steps && steps.length ? AG.thinking({ running: false, steps, elapsedMs: meta.durationMs || (meta.workflow && meta.workflow.durationMs) || null, failed: Boolean(meta.partial && meta.cancelled) }) : '';
+      el.innerHTML = `${worked}<div class="md">${rendered.html}</div>${footHtml(message)}`;
       el.querySelector('.md').__blocks = rendered.blocks;
     }
     return el;
@@ -109,9 +113,9 @@
     const body = el.querySelector('.md');
     if (body && body.__blocks) R.hydrate(body, body.__blocks, { interactive: latest, onOption: text => send(text) });
   }
+  const liveSteps = live => (live.workflow ? live.workflow.steps : live.plan || []);
   function liveHtml(live) {
-    const steps = live.workflow ? stepsHtml(live.workflow.steps, 'workflow') : live.plan ? stepsHtml(live.plan, 'plan') : '';
-    return `<div class="cs-status" role="status"><span class="af-spin" aria-hidden="true"></span><span data-live-status>${esc(live.status)}</span></div><div data-live-steps>${steps}</div><div class="md" data-live-text></div>`;
+    return `<div role="status">${AG.thinking({ running: true, label: live.status, steps: liveSteps(live), hooks: true })}</div><div class="md" data-live-text></div>`;
   }
   /* Brings the message list in line with state, touching only what changed so running visuals keep their state. */
   function syncMessages({ scroll = 'keep' } = {}) {
@@ -137,6 +141,7 @@
       if (!liveEl) { liveEl = document.createElement('div'); liveEl.className = 'msg assistant is-live'; liveEl.dataset.live = '1'; liveEl.innerHTML = liveHtml(live); box.append(liveEl); }
       paintLive(chatId, true);
     } else if (liveEl) liveEl.remove();
+    if (!live) { const bar = q('[data-chat-taskbar]'); if (bar && bar.innerHTML) bar.innerHTML = ''; }
     if (empty && (list.length || live)) empty.remove();
     if (!list.length && !live && !box.querySelector('.chat-empty')) box.innerHTML = '<div class="chat-empty"><p>No messages yet. Write the first one below.</p></div>';
     if (scroll === 'bottom' || (scroll === 'keep' && nearBottom)) box.scrollTop = box.scrollHeight;
@@ -148,10 +153,16 @@
     const el = box && box.querySelector(':scope > [data-live]');
     if (!live || !el || chatId !== activeId()) return;
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
-    el.querySelector('[data-live-status]').textContent = live.status;
+    const now = el.querySelector('[data-ag-now]'); if (now && now.textContent !== live.status) now.textContent = live.status;
     if (full || live.stepsDirty || live.outStatus !== live.status) { live.outStatus = live.status; paintOutput(chatId); }
-    el.querySelector('.cs-status').hidden = Boolean(live.text) && !live.plan && !live.workflow && live.status === 'Writing…';
-    if (full || live.stepsDirty) { el.querySelector('[data-live-steps]').innerHTML = live.workflow ? stepsHtml(live.workflow.steps, 'workflow') : live.plan ? stepsHtml(live.plan, 'plan') : ''; live.stepsDirty = false; }
+    const steps = liveSteps(live); const think = el.querySelector('.ag-think');
+    // A plain reply folds the block away once text arrives (once, so the student may open it again); a plan stays open.
+    if (think && live.text && !steps.length && !live.folded) { think.open = false; live.folded = true; }
+    if (full || live.stepsDirty) {
+      el.querySelector('[data-ag-steps]').innerHTML = AG.checklist(steps); el.querySelector('[data-ag-count]').textContent = AG.progress(steps);
+      const bar = q('[data-chat-taskbar]'); if (bar) bar.innerHTML = AG.taskBar(steps);
+      live.stepsDirty = false;
+    }
     if (full || live.textDirty) { el.querySelector('[data-live-text]').innerHTML = live.text ? R.markdown(live.text, { streaming: true, visuals: visualsOn(chatId) }).html : ''; live.textDirty = false; }
     if (nearBottom) box.scrollTop = box.scrollHeight;
   }
@@ -214,6 +225,7 @@
     return `<div class="chat-foot" data-chat-foot>
       <div class="chat-pop" data-chat-pop role="dialog" hidden></div>
       <div class="chat-suggest" data-chat-suggest role="listbox" aria-label="Commands" hidden></div>
+      <div class="ag-taskbar-host" data-chat-taskbar></div>
       <form class="chat-composer chat-card" data-form="chat"><textarea class="field field-area chat-card-input" id="chat-input" name="content" rows="2" maxlength="8000" placeholder="Make impactful sessions with our chat" aria-label="Message" aria-describedby="chat-hint"></textarea>
         <div data-chat-bar-host>${barHtml(chatId)}</div></form>
       <span class="sr-only" id="chat-hint">Enter sends, Shift+Enter adds a line, / opens commands.</span>

@@ -4,7 +4,8 @@
    app's only network traffic is to the Ollama service on this computer. To add another runtime later,
    implement the same two functions ({ listModels, runAgent }) and pass it to the IPC layer in main.js. */
 
-const BASE = 'http://127.0.0.1:11434';
+// Tests can point the app at another (or no) Ollama: only in a test run (PERFLW_TEST_USER_DATA), never in normal use.
+const BASE = process.env.PERFLW_TEST_USER_DATA && process.env.PERFLW_TEST_OLLAMA_URL ? process.env.PERFLW_TEST_OLLAMA_URL : 'http://127.0.0.1:11434';
 const IDLE_TIMEOUT_MS = 180000;
 /* How long Ollama keeps a model loaded after a request. Its own default (5 minutes) holds gigabytes of RAM / VRAM
    while the app sits idle; 2 minutes still keeps a conversation or a batch of pictures warm. */

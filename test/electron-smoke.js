@@ -56,7 +56,9 @@ async function launch() {
   const number = await port();
   child = spawn(exe, [...(packagedExe ? [] : ['.']), `--remote-debugging-port=${number}`, '--disable-features=CalculateNativeWinOcclusion', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', ...(process.platform === 'linux' ? ['--no-sandbox', '--password-store=basic'] : [])], {
     cwd: process.env.PERFLW_ELECTRON_APP_DIR || path.join(__dirname, '..'),
-    env: { ...process.env, ...(packagedExe ? { APPDATA: root, LOCALAPPDATA: root } : {}), PERFLW_TEST_USER_DATA: root, PERFLW_TEST_IMAGE_PATH: imagePath, PERFLW_TEST_TOPIC_PATH: topicPath },
+    env: { ...process.env, ...(packagedExe ? { APPDATA: root, LOCALAPPDATA: root } : {}), PERFLW_TEST_USER_DATA: root, PERFLW_TEST_IMAGE_PATH: imagePath, PERFLW_TEST_TOPIC_PATH: topicPath,
+      // No local AI in this smoke: its checks are timing-based, and a real model on a small GPU makes them flaky.
+      PERFLW_TEST_OLLAMA_URL: process.env.PERFLW_TEST_OLLAMA_URL || 'http://127.0.0.1:9' },
     stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true
   });
   child.stderr.on('data', chunk => { diagnostics += chunk.toString().slice(0, 2000); });
@@ -491,9 +493,11 @@ async function run() {
   for (const part of ['Major', '42% mastery', '3h 20m spent', 'Limits, derivatives and integrals.', 'Topics', 'Mastery Statistics']) assert.ok(meta.includes(part), `Preview shows ${part}`);
   assert.ok(await evaluate("getComputedStyle(document.querySelector('.ln-panel .ln-cover-art')).backgroundImage.startsWith('url(\"data:image/png')"), 'Preview cover uses the subject image');
   await screenshot('06d-learning-preview');
-  // Learn with no topics yet: the subject page opens (where Upload topics is), with a hint, no viewer
-  await click('.ln-panel [data-ln="learn"]');
-  await waitFor("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Upload your notes here first')) && document.querySelector('.ln-page-head h1')?.textContent === 'Calculus'", 'Learn opens the subject page without topics');
+  // Learn in the preview opens the subject page; Study there with no topics yet: a hint to upload, no viewer
+  await click('.ln-panel [data-ln="open-subject"]');
+  await waitFor("document.querySelector('.ln-page-head h1')?.textContent === 'Calculus'", 'Learn opens the subject page');
+  await click('.ln-page-head [data-ln="learn"]');
+  await waitFor("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Upload your notes here first'))", 'Study without topics points to Upload topics');
   assert.equal(await count('.ln-viewer'), 0, 'no viewer without topics');
   await click('[data-ln="back"]');
   await waitFor("!!document.querySelector('[data-ln-subject]')", 'back to subjects');
@@ -627,8 +631,7 @@ async function run() {
   const toggleAt = await evaluate("JSON.stringify(document.querySelector('.ln-side-open').getBoundingClientRect())");
   await click('.ln-side-open');
   await waitFor("document.querySelector('.ln-viewer-body').classList.contains('side-off') && document.querySelector('.ln-side').inert", 'side panel collapsed');
-  await sleep(450);
-  assert.ok(await evaluate("document.querySelector('.ln-side').getBoundingClientRect().width < 2"), 'collapsed column takes no width');
+  await waitFor("document.querySelector('.ln-side').getBoundingClientRect().width < 2", 'collapsed column takes no width', 4000);
   assert.equal(await evaluate("JSON.stringify(document.querySelector('.ln-side-open').getBoundingClientRect())"), toggleAt, 'toggle stays in place');
   await screenshot('06j3-learning-side-collapsed');
   await click('.ln-side-open');
@@ -737,8 +740,10 @@ async function run() {
   await waitFor("document.querySelectorAll('.ln-panel .ln-mini-topics li').length === 4", 'preview lists the topics');
   assert.ok((await text('.ln-panel .ln-mini-topics')).includes('1.1Unit notes PDF'), 'preview shows numbers');
   await screenshot('06i-learning-preview-topics');
-  // Learn opens the first topic in the viewer
-  await click('.ln-panel [data-ln="learn"]');
+  // Learn opens the subject page; Study there opens the first topic in the viewer
+  await click('.ln-panel [data-ln="open-subject"]');
+  await waitFor("!!document.querySelector('.ln-page-head [data-ln=\"learn\"]')", 'Learn opens the subject page');
+  await click('.ln-page-head [data-ln="learn"]');
   await waitFor("document.querySelector('.ln-nav-topic.active')?.textContent === '1Week 2 notes'", 'Learn opens the first topic');
   await click('[data-ln="viewer-learning"]');
   await waitFor("!!document.querySelector('.ln-grid')", 'back to subjects after Learn');
@@ -1065,7 +1070,7 @@ async function run() {
   await click('[data-action="cal-view"][data-value="week"]');
   await waitFor("document.querySelectorAll('.tblock[data-sb-block]').length === 1 && document.querySelector('.tblock[data-sb-block]').title.startsWith('Design review') && document.querySelector('.tblock[data-sb-block]').style.height === '73px'", 'schedule block persisted');
   await click('[data-action="cal-view"][data-value="month"]');
-  await waitFor("!!document.querySelector('.month-grid') && !!document.querySelector('.cell.today .cell-dot.sched')", 'month view marks the schedule');
+  await waitFor("!!document.querySelector('.month-grid') && [...document.querySelectorAll('.cell.today .cell-ev')].some(e => e.textContent.startsWith('Design review'))", 'month view shows the schedule by title');
   await view('whim');
   await waitFor("document.querySelectorAll('.pj-tab').length === 2", 'open project tabs restored (New menu project included)');
   await click('.pj-tab-main[title="Learn watercolor"]');
