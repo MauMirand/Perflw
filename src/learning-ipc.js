@@ -523,7 +523,7 @@ function registerLearningIpc({ handle, requireUser, workspace, dataDir = null, a
     const titles = topicTitles(u, assessment.subjectId);
     const topicIds = [...new Set(items.map(i => String(i.topicId)))];
     const weak = insight.rankWeakTopics({ topics: topicIds.map((id, position) => ({ id, position, level: (levels.get(id) || {}).level })), answers: items.map(i => ({ topicId: String(i.topicId), category: i.category, pending: i.pending })) })
-      .map(w => ({ topicId: w.topicId, title: titles.get(String(w.topicId)) || '', score: w.score, items: w.items, level: w.level, reasons: w.reasons }));
+      .map(w => ({ topicId: w.topicId, title: titles.get(String(w.topicId)) || '', score: w.score, items: w.items, misconceptions: w.misconceptions, wrong: w.wrong, notKnown: w.notKnown, level: w.level, reasons: w.reasons }));
     const byCategory = {};
     for (const i of items) if (i.category && i.category !== 'guess') byCategory[i.category] = (byCategory[i.category] || 0) + 1;
     return {

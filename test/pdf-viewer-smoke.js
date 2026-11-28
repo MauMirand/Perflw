@@ -61,7 +61,7 @@ async function launch() {
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   socket.onmessage = event => { const d = JSON.parse(event.data); if (d.method === 'Runtime.consoleAPICalled' || d.method === 'Runtime.exceptionThrown') { consoleLog.push(JSON.stringify(d.params).slice(0, 300)); return; } if (!d.id || !pending.has(d.id)) return; const p = pending.get(d.id); pending.delete(d.id); d.error ? p.reject(new Error(`${d.error.message} during ${p.method}`)) : p.resolve(d.result); };
   await cdp('Runtime.enable');
-  await waitFor("document.readyState === 'complete' && !!window.account && !document.getElementById('login-page').hidden", 'login page');
+  await waitFor("document.readyState === 'complete' && !!window.account && (!document.getElementById('login-page').hidden || !document.getElementById('register-page').hidden)", 'sign-in or first-run sign-up page');
 }
 const consoleLog = [];
 function cdp(method, params) { return new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject, method }); socket.send(JSON.stringify({ id, method, params })); }); }

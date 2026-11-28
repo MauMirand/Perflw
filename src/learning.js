@@ -32,10 +32,10 @@
      manual value stays visible, read-only and labelled, and is never used in a calculation. */
   const summaries = new Map(); // subjectId → { text } filled from learningData.learningSummary
   function studyTime(seconds) {
-    const m = Math.round((seconds || 0) / 60); if (!m) return 'No study time yet';
+    const m = Math.round((seconds || 0) / 60); if (!m) return 'No timed study yet';
     const h = Math.floor(m / 60), r = m % 60; return `${h ? `${h}h` : ''}${h && r ? ' ' : ''}${r ? `${r}m` : ''} studied`;
   }
-  function earlierEstimate(s) { return s.mastery || s.minutes ? `Earlier self-estimate (entered manually): ${s.mastery}% mastery · ${spent(s.minutes)}` : 'Not assessed yet · No study time yet'; }
+  function earlierEstimate(s) { return s.mastery || s.minutes ? `Earlier self-estimate (entered manually): ${s.mastery}% mastery · ${spent(s.minutes)}` : 'Not assessed yet · No timed study yet'; }
   function summaryText(s) {
     const c = summaries.get(s.id);
     if (!c) return earlierEstimate(s);
@@ -516,7 +516,8 @@
       const d = topicsOf(subjectId);
       if (!d || d.error) { H.toast((d && d.error) || 'Topics could not be loaded.', { error: true }); return; }
       const first = d.rows.find(r => r.kind === 'topic');
-      if (!first) { H.toast('Please upload a topic first.', { error: true }); return; }
+      // No topics yet: open the subject page, where Upload topics is, instead of a dead-end error.
+      if (!first) { openPage(subjectId); H.toast('Upload your notes here first: each file becomes a topic.'); return; }
       openViewer(subjectId, first.id);
     } finally { if (button && button.isConnected) button.disabled = false; }
   }

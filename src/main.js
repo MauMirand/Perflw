@@ -129,7 +129,7 @@ function profileImage(user, imageName = user.imageName) {
 }
 function state() {
   const user = currentUser();
-  return user ? { user: { ...user, image: profileImage(user), coverImage: profileImage(user, user.coverImageName) } } : { user: null };
+  return user ? { user: { ...user, image: profileImage(user), coverImage: profileImage(user, user.coverImageName) } } : { user: null, hasAccounts: auth.hasAccounts() };
 }
 function imageExtension(bytes) {
   if (bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return 'png';
