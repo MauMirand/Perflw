@@ -202,7 +202,7 @@
           <h2 class="ln-name"><button class="ln-name-link" type="button" data-ln="open-page" data-id="${esc(s.id)}" title="Open subject page">${esc(s.name)}</button></h2>
           <span class="ln-type ln-type-sm" title="Subject type">${typeLabel(s.type)}</span>
         </div>
-        <button class="ln-learn" type="button" data-ln="learn" data-id="${esc(s.id)}">Learn</button>
+        <button class="ln-learn" type="button" data-ln="open-subject" data-id="${esc(s.id)}" title="Open the subject page">Learn</button>
       </div>
       <p class="ln-spent" data-ln-summary="${esc(s.id)}">${esc(summaryText(s))}</p>
       <p class="ln-desc ln-panel-desc${s.description ? '' : ' empty-desc'}">${s.description ? esc(s.description) : 'No description yet.'}</p>`;
@@ -995,6 +995,7 @@
         case 'topic-rename': if (!TS.editing) startRename(id); return;
         case 'topic-open': openViewer(control.dataset.subject || L.page, id); return;
         case 'learn': learn(id, control); return;
+        case 'open-subject': openPage(id); return; // the side panel's Learn opens the subject page (owner, 2026-11-28); Study there opens the viewer
         case 'start-session': if (window.PerflwQuiz) window.PerflwQuiz.startSession(id); return;
         case 'viewer-topic': L.viewer.jump = null; openViewer(L.viewer.subjectId, id); return;
         case 'viewer-learning': closeViewer('list'); return;

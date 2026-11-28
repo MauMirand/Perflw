@@ -632,7 +632,7 @@
     return `
       <div class="cal-layout">
         <section class="cal-area" aria-label="Calendar">
-          <p class="subtitle">See commitments in time and manage schedule details.</p>
+          <header class="page-head cal-head"><div><h1 tabindex="-1">Calendar</h1><p class="subtitle">See commitments in time and manage schedule details.</p></div></header>
           <div class="cal-toolbar">
             <div class="cal-nav">
               <button class="icon-btn" type="button" data-action="cal-prev" aria-label="Previous ${cv}">${icon('left')}</button>

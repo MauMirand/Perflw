@@ -485,10 +485,18 @@ async function run() {
   for (const part of ['Major', '42% mastery', '3h 20m spent', 'Limits, derivatives and integrals.', 'Topics', 'Mastery Statistics']) assert.ok(meta.includes(part), `Preview shows ${part}`);
   assert.ok(await evaluate("getComputedStyle(document.querySelector('.ln-panel .ln-cover-art')).backgroundImage.startsWith('url(\"data:image/png')"), 'Preview cover uses the subject image');
   await screenshot('06d-learning-preview');
-  // Learn with no topics yet: a warning, no viewer
-  await click('.ln-panel [data-ln="learn"]');
-  await waitFor("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Please upload a topic first.'))", 'Learn warns without topics');
-  assert.equal(await count('.ln-viewer'), 0, 'Learn stays on the page without topics');
+  // Learn in the preview opens the subject page; Study there with no topics yet: a warning, no viewer
+  await click('.ln-panel [data-ln="open-subject"]');
+  await waitFor("!!document.querySelector('.ln-page-head [data-ln=\"learn\"]')", 'Learn opens the subject page');
+  await click('.ln-page-head [data-ln="learn"]');
+  await waitFor("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Please upload a topic first.'))", 'Study warns without topics');
+  assert.equal(await count('.ln-viewer'), 0, 'Study stays on the page without topics');
+  await click('[data-ln="back"]');
+  await waitFor("!document.querySelector('.ln-page-head')", 'back to the subject list');
+  if (!(await evaluate("!!document.querySelector('.ln-panel')"))) {
+    await evaluate("document.querySelector('[data-ln-subject]').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))");
+    await waitFor("!!document.querySelector('.ln-panel')", 'preview again');
+  }
   // Toggle the panel closed, then click once to preview again
   await click('[data-ln="close-panel"]');
   await waitFor("!document.querySelector('.ln-panel') && !document.querySelector('.ln-layout').classList.contains('with-panel')", 'preview closed');
@@ -728,8 +736,10 @@ async function run() {
   await waitFor("document.querySelectorAll('.ln-panel .ln-mini-topics li').length === 4", 'preview lists the topics');
   assert.ok((await text('.ln-panel .ln-mini-topics')).includes('1.1Unit notes PDF'), 'preview shows numbers');
   await screenshot('06i-learning-preview-topics');
-  // Learn opens the first topic in the viewer
-  await click('.ln-panel [data-ln="learn"]');
+  // Learn opens the subject page; Study there opens the first topic in the viewer
+  await click('.ln-panel [data-ln="open-subject"]');
+  await waitFor("!!document.querySelector('.ln-page-head [data-ln=\"learn\"]')", 'Learn opens the subject page');
+  await click('.ln-page-head [data-ln="learn"]');
   await waitFor("document.querySelector('.ln-nav-topic.active')?.textContent === '1Week 2 notes'", 'Learn opens the first topic');
   await click('[data-ln="viewer-learning"]');
   await waitFor("!!document.querySelector('.ln-grid')", 'back to subjects after Learn');

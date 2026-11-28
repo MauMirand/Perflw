@@ -34,6 +34,8 @@
     book: '<path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H16v12H5.5A1.5 1.5 0 0 0 4 16.5z"/><path d="M4 16.5A1.5 1.5 0 0 0 5.5 18H16"/>',
     panel: '<rect x="3" y="4" width="14" height="12" rx="2.5"/><path d="M12.5 4v12"/>'
   };
+  const AG = window.PerflwAgentUI;
+  const worked = turn => (turn.steps && turn.steps.length ? AG.thinking({ running: false, steps: turn.steps, elapsedMs: turn.elapsedMs, failed: turn.status === 'error' || turn.status === 'cancelled' }) : '');
   const icon = name => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SVG[name]}</svg>`;
 
   const A = new Map();   // fileId → analysis | { status: 'pending' | 'failed' } | { error }
@@ -188,7 +190,7 @@
     if (turn.fresh) { delete turn.fresh; return turnHtml(turn).replace('class="ls-turn"', 'class="ls-turn is-new"'); }
     if (turn.status === 'working') {
       const live = liveAnswer(turn.live);
-      return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a working">${live ? `<p class="ls-live">${esc(live)}</p>` : ''}<p class="ls-stage"><span class="spinner" aria-hidden="true"></span><span class="ls-stage-label">${esc(turn.stage || 'Starting')}…</span></p></div></li>`;
+      return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a working">${AG.thinking({ running: true, label: `${turn.stage || 'Starting'}…`, steps: turn.steps, hooks: true })}${live ? `<p class="ls-live">${esc(live)}</p>` : ''}</div></li>`;
     }
     if (turn.status === 'not-found' || turn.status === 'error' || turn.status === 'cancelled') {
       return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a ${turn.status === 'cancelled' ? 'muted' : 'warn'}" role="${turn.status === 'cancelled' ? 'status' : 'alert'}">${turn.status === 'cancelled' ? '' : icon('warn')}<p>${esc(turn.warning || turn.error || 'Stopped.')}</p></div>${turn.status === 'not-found' && turn.runs === 2 ? '<p class="ls-meta">Checked twice: the open file, then every file of this subject.</p>' : ''}</li>`;
@@ -204,7 +206,7 @@
     // Only the latest answer offers "Explain more" and "Simpler": they ask a follow-up about it.
     const latest = turn.kind !== 'chat' && turn.id === lastAnswered();
     const more = latest && !S.busy ? `<div class="ls-actions"><button class="ls-chip" type="button" data-ls="suggest" data-q="Explain that in more detail">Explain more</button><button class="ls-chip" type="button" data-ls="suggest" data-q="Explain that more simply">Simpler</button></div>` : '';
-    return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a">${turn.notice ? `<p class="ls-notice">${esc(turn.notice)}${/from your file/i.test(turn.notice) ? '' : ' Showing the matching text from your files.'}</p>` : ''}<p>${cite(turn.answer, turn.sources)}</p>${sources ? `<ol class="ls-srcs" aria-label="Sources">${sources}</ol>` : ''}</div>${meta ? `<p class="ls-meta">${meta}</p>` : ''}${more}</li>`;
+    return `<li class="ls-turn" data-turn="${esc(turn.id)}">${q}<div class="ls-a">${worked(turn)}${turn.notice ? `<p class="ls-notice">${esc(turn.notice)}${/from your file/i.test(turn.notice) ? '' : ' Showing the matching text from your files.'}</p>` : ''}<p>${cite(turn.answer, turn.sources)}</p>${sources ? `<ol class="ls-srcs" aria-label="Sources">${sources}</ol>` : ''}</div>${meta ? `<p class="ls-meta">${meta}</p>` : ''}${more}</li>`;
   }
   function lastAnswered() { const list = convo().filter(t => t.status === 'answered' && t.kind !== 'chat' && t.kind !== 'learn'); return list.length ? list[list.length - 1].id : null; }
   function threadHtml() {
@@ -243,12 +245,13 @@
     const ctx = S.ctx; const q = String(question || '').trim();
     if (!ctx || !q || S.busy) return false;
     const quote = about && about.quote ? String(about.quote).replace(/\s+/g, ' ').trim().slice(0, 1500) : '';
-    const turn = { id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, question: q, quote, where: about && about.where ? String(about.where) : '', status: 'working', stage: quote ? 'Reading the marked area' : 'Searching the information center', live: '', fresh: true };
+    const turn = { id: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, question: q, quote, where: about && about.where ? String(about.where) : '', status: 'working', startedAt: Date.now(), steps: [], stage: quote ? 'Reading the marked area' : 'Searching the information center', live: '', fresh: true };
     // The marked text goes separately from the question: it is the first excerpt of the answer, not search words.
     const mark = quote ? { quote, page: about && Number.isInteger(about.page) ? about.page : null } : null;
     // The answered turns on screen are what the assistant may remember for a follow-up question.
     const history = (C.get(ctx.subjectId) || []).filter(t => t.status === 'answered' && t.kind !== 'chat').map(t => t.id);
     if (!C.has(ctx.subjectId)) C.set(ctx.subjectId, []);
+    turn.steps = AG.pushStage([], turn.stage);
     C.get(ctx.subjectId).push(turn);
     S.busy = { requestId: turn.id, subjectId: ctx.subjectId };
     S.draft.set(ctx.subjectId, '');
@@ -260,6 +263,7 @@
     try {
       const result = await api.ask(ctx.subjectId, ctx.fileId || null, q, turn.id, history, mark);
       Object.assign(turn, result, { live: '', question: q }); // the bubble keeps what the student typed
+      AG.finishStages(turn.steps || [], result.status === 'answered'); turn.elapsedMs = Date.now() - turn.startedAt;
       if (result.status === 'answered' && result.notes && result.notes.length) {
         const list = N.get(ctx.subjectId) || [];
         N.set(ctx.subjectId, [...result.notes, ...list]);
@@ -267,6 +271,7 @@
       }
     } catch (error) {
       Object.assign(turn, { status: 'error', error: error.message || 'The question could not be answered.' });
+      AG.finishStages(turn.steps || [], false); turn.elapsedMs = Date.now() - turn.startedAt;
     } finally {
       S.busy = null;
       if (typeof S.onAnswered === 'function') S.onAnswered(turn);
@@ -363,17 +368,19 @@
     const live = liveAnswer(turn.live);
     let text = $('.ls-live', answer);
     if (live) {
-      if (!text) { text = document.createElement('p'); text.className = 'ls-live'; answer.prepend(text); }
+      if (!text) { text = document.createElement('p'); text.className = 'ls-live'; answer.append(text); }
       if (text.textContent !== live) text.textContent = live;
     } else if (text) text.remove();
-    const stage = $('.ls-stage-label', answer); const label = `${turn.stage || 'Starting'}…`;
-    if (stage && stage.textContent !== label) stage.textContent = label;
+    const now = $('[data-ag-now]', answer); const label = `${turn.stage || 'Starting'}…`;
+    if (now && now.textContent !== label) now.textContent = label;
+    const list = $('[data-ag-steps]', answer); const html = AG.checklist(turn.steps);
+    if (list && list.__html !== html) { list.innerHTML = html; list.__html = html; const c = $('[data-ag-count]', answer); if (c) c.textContent = AG.progress(turn.steps); }
     if (box && atBottom) box.scrollTop = box.scrollHeight;
   }
   function onAsk(event) {
     if (!S.busy || event.requestId !== S.busy.requestId) return;
     const turn = (C.get(S.busy.subjectId) || []).find(t => t.id === event.requestId); if (!turn || turn.status !== 'working') return;
-    if (event.type === 'stage') turn.stage = event.label;
+    if (event.type === 'stage') { turn.stage = event.label; turn.steps = AG.pushStage(turn.steps || [], event.label); }
     if (event.type === 'delta') turn.live = event.text;
     if (event.type === 'stage' && event.stage === 'retry') turn.live = '';
     if (!S.ctx || S.ctx.subjectId !== S.busy.subjectId || frame) return;
